@@ -28,8 +28,9 @@ export default function SettingsPage() {
     stageSeedFromRecoveryKey,
     stageSeedFromShamirShares,
     discardStagedSeed,
-    commitRecoveryKey,
-    commitShamirRecovery,
+    prepareRecoveryKey,
+    prepareShamirRecovery,
+    confirmPendingRecovery,
     commitRemoveRecovery,
   } = useSeed();
   const router = useRouter();
@@ -57,8 +58,9 @@ export default function SettingsPage() {
         stageSeedFromRecoveryKey={stageSeedFromRecoveryKey}
         stageSeedFromShamirShares={stageSeedFromShamirShares}
         discardStagedSeed={discardStagedSeed}
-        commitRecoveryKey={commitRecoveryKey}
-        commitShamirRecovery={commitShamirRecovery}
+        prepareRecoveryKey={prepareRecoveryKey}
+        prepareShamirRecovery={prepareShamirRecovery}
+        confirmPendingRecovery={confirmPendingRecovery}
         commitRemoveRecovery={commitRemoveRecovery}
       />
       <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
@@ -175,8 +177,9 @@ function RecoverySection({
   stageSeedFromRecoveryKey,
   stageSeedFromShamirShares,
   discardStagedSeed,
-  commitRecoveryKey,
-  commitShamirRecovery,
+  prepareRecoveryKey,
+  prepareShamirRecovery,
+  confirmPendingRecovery,
   commitRemoveRecovery,
 }: {
   recoveryConfig: RecoveryConfig | null;
@@ -184,8 +187,9 @@ function RecoverySection({
   stageSeedFromRecoveryKey: (key: Uint8Array) => Promise<void>;
   stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
   discardStagedSeed: () => void;
-  commitRecoveryKey: () => Promise<Uint8Array>;
-  commitShamirRecovery: (n: number, k: number) => Promise<Uint8Array[]>;
+  prepareRecoveryKey: () => Promise<Uint8Array>;
+  prepareShamirRecovery: (n: number, k: number) => Promise<Uint8Array[]>;
+  confirmPendingRecovery: () => Promise<void>;
   commitRemoveRecovery: () => Promise<void>;
 }) {
   const [phase, setPhase] = useState<RecoveryPhase>("status");
@@ -287,21 +291,21 @@ function RecoverySection({
     }
   }
 
-  async function handleCommitRecoveryKey() {
+  async function handlePrepareRecoveryKey() {
     setError(null);
     setSubmitting(true);
     try {
-      const key = await commitRecoveryKey();
+      const key = await prepareRecoveryKey();
       setRevealedKey(key);
       setPhase("reveal-key");
     } catch {
-      setError("복구 키를 설정하지 못했습니다.");
+      setError("복구 키를 준비하지 못했습니다.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleCommitShamir() {
+  async function handlePrepareShamir() {
     setError(null);
     if (newK < 2 || newN < newK || newN > 10) {
       setError("조각 수(N)는 2~10, 필요 조각 수(K)는 2 이상이면서 N 이하여야 합니다.");
@@ -309,11 +313,39 @@ function RecoverySection({
     }
     setSubmitting(true);
     try {
-      const shares = await commitShamirRecovery(newN, newK);
+      const shares = await prepareShamirRecovery(newN, newK);
       setRevealedShares(shares);
       setPhase("reveal-shamir");
     } catch {
-      setError("Shamir 분산을 설정하지 못했습니다.");
+      setError("Shamir 분산을 준비하지 못했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function cancelReveal() {
+    discardStagedSeed();
+    setRevealedKey(null);
+    setRevealedShares([]);
+    setError(null);
+    setPhase("status");
+  }
+
+  async function handleConfirmReveal(successMessage: string) {
+    setSubmitting(true);
+    try {
+      // The write to Firestore only happens here — after the user has
+      // acknowledged (via SecretReveal's checkbox) that they saved the
+      // material. Leaving the page before this point discards everything
+      // that was prepared, so there's never a recovery method configured
+      // in Firestore that nobody actually holds the key/shares for.
+      await confirmPendingRecovery();
+      setRevealedKey(null);
+      setRevealedShares([]);
+      setPhase("status");
+      setStatusMessage(successMessage);
+    } catch {
+      setError("복구 수단을 저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);
     }
@@ -335,16 +367,13 @@ function RecoverySection({
 
   if (phase === "reveal-key" && revealedKey) {
     return (
-      <section className="w-full max-w-lg">
+      <section className="w-full max-w-lg space-y-3">
         <SecretReveal
           title="복구 키"
           description="이 키가 있으면 패스프레이즈 없이도 일기를 복호화할 수 있습니다. 안전한 곳(금고, 비밀번호 관리자 등)에 보관하세요. 이 화면은 다시 표시되지 않습니다."
-          confirmLabel="완료"
-          onConfirm={() => {
-            setRevealedKey(null);
-            setPhase("status");
-            setStatusMessage("복구 키가 설정되었습니다.");
-          }}
+          confirmLabel={submitting ? "저장 중..." : "완료 — 이 키를 설정합니다"}
+          confirming={submitting}
+          onConfirm={() => void handleConfirmReveal("복구 키가 설정되었습니다.")}
         >
           <SecretCard
             label="복구 키"
@@ -352,22 +381,23 @@ function RecoverySection({
             filename="privatediary-recovery-key.txt"
           />
         </SecretReveal>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button type="button" onClick={cancelReveal} className="w-full text-center text-xs underline">
+          취소 (설정하지 않음)
+        </button>
       </section>
     );
   }
 
   if (phase === "reveal-shamir" && revealedShares.length > 0) {
     return (
-      <section className="w-full max-w-lg">
+      <section className="w-full max-w-lg space-y-3">
         <SecretReveal
           title="Shamir 복구 조각"
           description={`총 ${revealedShares.length}개의 조각 중 ${newK}개를 모으면 시드를 복구할 수 있습니다. 조각 하나만으로는 아무 의미가 없으니, 각 조각을 서로 다른 안전한 곳에 나눠 보관하세요. 이 화면은 다시 표시되지 않습니다.`}
-          confirmLabel="완료"
-          onConfirm={() => {
-            setRevealedShares([]);
-            setPhase("status");
-            setStatusMessage("Shamir 복구 조각이 설정되었습니다.");
-          }}
+          confirmLabel={submitting ? "저장 중..." : "완료 — 이 조각들을 설정합니다"}
+          confirming={submitting}
+          onConfirm={() => void handleConfirmReveal("Shamir 복구 조각이 설정되었습니다.")}
         >
           <div className="space-y-4">
             {revealedShares.map((share, i) => (
@@ -380,6 +410,10 @@ function RecoverySection({
             ))}
           </div>
         </SecretReveal>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button type="button" onClick={cancelReveal} className="w-full text-center text-xs underline">
+          취소 (설정하지 않음)
+        </button>
       </section>
     );
   }
@@ -395,7 +429,7 @@ function RecoverySection({
           <p className="text-xs text-zinc-500">랜덤 키 하나로 복구. 간단하지만, 그 키 하나가 유출되면 그대로 노출됩니다.</p>
           <button
             type="button"
-            onClick={() => void handleCommitRecoveryKey()}
+            onClick={() => void handlePrepareRecoveryKey()}
             disabled={submitting}
             className="w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
           >
@@ -432,7 +466,7 @@ function RecoverySection({
           </div>
           <button
             type="button"
-            onClick={() => void handleCommitShamir()}
+            onClick={() => void handlePrepareShamir()}
             disabled={submitting}
             className="w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
           >

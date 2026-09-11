@@ -18,6 +18,7 @@ export function SecretReveal({
   onConfirm,
   confirmLabel = "저장했습니다",
   acknowledgeText = "안전한 곳에 보관했습니다. 이 화면은 다시 표시되지 않는다는 것을 이해했습니다.",
+  confirming = false,
 }: {
   title: string;
   description: string;
@@ -25,6 +26,8 @@ export function SecretReveal({
   onConfirm: () => void;
   confirmLabel?: string;
   acknowledgeText?: string;
+  /** True while onConfirm's action is in flight — disables the button to prevent double-submits. */
+  confirming?: boolean;
 }) {
   const [acknowledged, setAcknowledged] = useState(false);
 
@@ -57,7 +60,7 @@ export function SecretReveal({
 
       <button
         type="button"
-        disabled={!acknowledged}
+        disabled={!acknowledged || confirming}
         onClick={onConfirm}
         className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
       >

@@ -6,17 +6,36 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { listEntries, type StoredEntry } from "@/lib/firebase/entries";
-import { decryptEntry, WrongPassphraseError } from "@/lib/crypto";
+import {
+  decryptEntry,
+  textToRecoverySecret,
+  InvalidRecoveryKeyError,
+  InvalidShamirSharesError,
+  WrongPassphraseError,
+} from "@/lib/crypto";
 
 /**
  * Phase 5 read path. Entry dates/count are always visible (they're not
  * secret — only the content is), but plaintext is only ever computed after
  * the seed is unlocked in this session (ARCHITECTURE.md §3.3, Phase 5:
  * "미입력 상태에서는 암호문 존재 여부만 노출하고 본문은 절대 노출하지 않음").
+ *
+ * Unlocking has up to three paths: the passphrase (always available), or —
+ * if the user configured one in /settings — a recovery key or Shamir
+ * shares. This is the actual point of a recovery method existing: not just
+ * being able to set one up, but being able to read your diary with it when
+ * the passphrase is forgotten.
  */
 export default function EntriesPage() {
   const { user, status: authStatus } = useAuth();
-  const { status: seedStatus, privateKeys, unlock } = useSeed();
+  const {
+    status: seedStatus,
+    privateKeys,
+    unlock,
+    unlockWithRecoveryKey,
+    unlockWithShamirShares,
+    recoveryConfig,
+  } = useSeed();
   const router = useRouter();
 
   const entriesRef = useRef<StoredEntry[]>([]);
@@ -27,7 +46,10 @@ export default function EntriesPage() {
   const [decryptErrors, setDecryptErrors] = useState<Record<string, string>>({});
   const [decrypting, setDecrypting] = useState(false);
 
+  const [unlockMode, setUnlockMode] = useState<"passphrase" | "recovery">("passphrase");
   const [passphrase, setPassphrase] = useState("");
+  const [recoveryKeyInput, setRecoveryKeyInput] = useState("");
+  const [shareInputs, setShareInputs] = useState<string[]>([]);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
 
@@ -76,7 +98,7 @@ export default function EntriesPage() {
     };
   }, [privateKeys]);
 
-  async function handleUnlock(event: FormEvent<HTMLFormElement>) {
+  async function handleUnlockWithPassphrase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setUnlockError(null);
     setUnlocking(true);
@@ -91,6 +113,39 @@ export default function EntriesPage() {
       );
     } finally {
       setUnlocking(false);
+    }
+  }
+
+  async function handleUnlockWithRecovery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setUnlockError(null);
+    setUnlocking(true);
+    try {
+      if (recoveryConfig?.type === "recovery-key") {
+        await unlockWithRecoveryKey(textToRecoverySecret(recoveryKeyInput));
+        setRecoveryKeyInput("");
+      } else if (recoveryConfig?.type === "shamir") {
+        await unlockWithShamirShares(shareInputs.map((s) => textToRecoverySecret(s)));
+        setShareInputs(Array(recoveryConfig.k).fill(""));
+      }
+    } catch (err) {
+      setUnlockError(
+        err instanceof InvalidRecoveryKeyError
+          ? "복구 키가 올바르지 않습니다."
+          : err instanceof InvalidShamirSharesError
+            ? "조각들이 올바른 시드로 복원되지 않습니다."
+            : "형식이 올바르지 않습니다."
+      );
+    } finally {
+      setUnlocking(false);
+    }
+  }
+
+  function switchToRecoveryMode() {
+    setUnlockError(null);
+    setUnlockMode("recovery");
+    if (recoveryConfig?.type === "shamir") {
+      setShareInputs(Array(recoveryConfig.k).fill(""));
     }
   }
 
@@ -118,32 +173,103 @@ export default function EntriesPage() {
           <p className="text-sm text-zinc-600 dark:text-zinc-400">아직 작성한 일기가 없습니다.</p>
         )}
 
-        {metadataLoaded && metadata.length > 0 && seedStatus !== "unlocked" && (
-          <form
-            onSubmit={handleUnlock}
-            className="space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700"
-          >
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              총 {metadata.length}개의 일기가 있습니다. 내용을 보려면 패스프레이즈를 입력하세요.
-            </p>
-            <input
-              type="password"
-              required
-              value={passphrase}
-              onChange={(e) => setPassphrase(e.target.value)}
-              placeholder="패스프레이즈"
-              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-            />
-            {unlockError && <p className="text-sm text-red-600">{unlockError}</p>}
-            <button
-              type="submit"
-              disabled={unlocking}
-              className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+        {metadataLoaded &&
+          metadata.length > 0 &&
+          seedStatus !== "unlocked" &&
+          (unlockMode === "passphrase" ? (
+            <form
+              onSubmit={handleUnlockWithPassphrase}
+              className="space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700"
             >
-              {unlocking ? "확인 중..." : "잠금 해제"}
-            </button>
-          </form>
-        )}
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                총 {metadata.length}개의 일기가 있습니다. 내용을 보려면 패스프레이즈를 입력하세요.
+              </p>
+              <input
+                type="password"
+                required
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+                placeholder="패스프레이즈"
+                className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+              {unlockError && <p className="text-sm text-red-600">{unlockError}</p>}
+              <button
+                type="submit"
+                disabled={unlocking}
+                className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+              >
+                {unlocking ? "확인 중..." : "잠금 해제"}
+              </button>
+              {recoveryConfig && recoveryConfig.type !== "none" && (
+                <button
+                  type="button"
+                  onClick={switchToRecoveryMode}
+                  className="w-full text-center text-xs underline"
+                >
+                  패스프레이즈를 잊으셨나요? 복구 수단으로 잠금 해제
+                </button>
+              )}
+            </form>
+          ) : (
+            <form
+              onSubmit={handleUnlockWithRecovery}
+              className="space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700"
+            >
+              {recoveryConfig?.type === "recovery-key" && (
+                <>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">복구 키를 입력하세요.</p>
+                  <input
+                    type="text"
+                    required
+                    value={recoveryKeyInput}
+                    onChange={(e) => setRecoveryKeyInput(e.target.value)}
+                    placeholder="복구 키"
+                    className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  />
+                </>
+              )}
+              {recoveryConfig?.type === "shamir" && (
+                <>
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    {recoveryConfig.k}개의 복구 조각을 입력하세요.
+                  </p>
+                  {shareInputs.map((value, i) => (
+                    <input
+                      key={i}
+                      type="text"
+                      required
+                      value={value}
+                      onChange={(e) =>
+                        setShareInputs((prev) =>
+                          prev.map((v, idx) => (idx === i ? e.target.value : v))
+                        )
+                      }
+                      placeholder={`조각 ${i + 1}`}
+                      className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                    />
+                  ))}
+                </>
+              )}
+              {unlockError && <p className="text-sm text-red-600">{unlockError}</p>}
+              <button
+                type="submit"
+                disabled={unlocking}
+                className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+              >
+                {unlocking ? "확인 중..." : "잠금 해제"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setUnlockError(null);
+                  setUnlockMode("passphrase");
+                }}
+                className="w-full text-center text-xs underline"
+              >
+                패스프레이즈로 잠금 해제
+              </button>
+            </form>
+          ))}
 
         {seedStatus === "unlocked" && decrypting && (
           <p className="text-sm text-zinc-600 dark:text-zinc-400">복호화하는 중...</p>
