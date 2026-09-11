@@ -89,7 +89,8 @@ export default function WritePage() {
       setText("");
       setSuccess(true);
       textareaRef.current?.focus();
-    } catch {
+    } catch (err) {
+      console.error("writeEntry failed", err);
       setError("저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);

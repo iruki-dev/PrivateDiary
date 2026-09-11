@@ -64,7 +64,8 @@ export default function SignupPage() {
       await signUpWithEmail(email, accountPassword);
       loginPasswordRef.current = accountPassword;
       setAccountPassword("");
-    } catch {
+    } catch (err) {
+      console.error("signUpWithEmail failed", err);
       setAccountError("계정을 만들지 못했습니다. 이미 가입된 이메일이거나 비밀번호가 너무 짧습니다(6자 이상).");
     } finally {
       setAccountSubmitting(false);
@@ -78,7 +79,8 @@ export default function SignupPage() {
       await signInWithGoogle();
       // no login password to compare the passphrase against for this path
       loginPasswordRef.current = "";
-    } catch {
+    } catch (err) {
+      console.error("signInWithGoogle failed", err);
       setAccountError("Google 가입에 실패했습니다. 다시 시도해주세요.");
     } finally {
       setAccountSubmitting(false);
@@ -123,7 +125,8 @@ export default function SignupPage() {
       // the (soon-to-be-unmounted) values in place is harmless — only
       // loginPasswordRef needs to stop pointing at a real password.
       loginPasswordRef.current = "";
-    } catch {
+    } catch (err) {
+      console.error("handleSetPassphrase failed", err);
       setPassphraseError("키를 저장하지 못했습니다. 다시 시도해주세요.");
       loginPasswordRef.current = "";
       setPassphrase("");

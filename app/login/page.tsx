@@ -54,7 +54,8 @@ export default function LoginPage() {
     try {
       await signInWithGoogle();
       router.replace("/");
-    } catch {
+    } catch (err) {
+      console.error("signInWithGoogle failed", err);
       setError("Google 로그인에 실패했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);
