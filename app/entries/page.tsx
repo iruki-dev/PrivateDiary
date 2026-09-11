@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -44,13 +44,16 @@ export default function EntriesPage() {
   usePageTitle("지난 일기");
   const canReadEntries = !otpLoading && (!otpEnabled || otpVerified);
 
-  const entriesRef = useRef<StoredEntry[]>([]);
   const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [metadata, setMetadata] = useState<StoredEntry[]>([]);
 
   const [decrypted, setDecrypted] = useState<Record<string, string>>({});
   const [decryptErrors, setDecryptErrors] = useState<Record<string, string>>({});
-  const [decrypting, setDecrypting] = useState(false);
+  // Which `metadata` array (by reference) decryption has finished for, so
+  // "decrypting" below can be derived during render instead of tracked as
+  // its own state set synchronously inside an effect.
+  const [decryptedForMetadata, setDecryptedForMetadata] = useState<StoredEntry[] | null>(null);
+  const decrypting = !!privateKeys && metadata.length > 0 && decryptedForMetadata !== metadata;
 
   const [unlockMode, setUnlockMode] = useState<UnlockMode>("passphrase");
   const [passphrase, setPassphrase] = useState("");
@@ -73,7 +76,6 @@ export default function EntriesPage() {
     listEntries(user.uid)
       .then((entries) => {
         if (cancelled) return;
-        entriesRef.current = entries;
         setMetadata(entries);
         setMetadataLoaded(true);
       })
@@ -86,13 +88,19 @@ export default function EntriesPage() {
   }, [user, canReadEntries]);
 
   useEffect(() => {
-    if (!privateKeys || entriesRef.current.length === 0) return;
+    // Depending on `metadata` (not just `privateKeys`) matters when this
+    // page remounts while already unlocked — e.g. navigating away and back
+    // via NavBar. `privateKeys` is unchanged (it lives in SeedContext, not
+    // local state), so it alone wouldn't re-trigger this effect; the async
+    // metadata fetch above resolving AFTER this effect's first run on mount
+    // would otherwise leave every entry permanently undecrypted (rendering
+    // as blank boxes) until a full page reload reset everything.
+    if (!privateKeys || metadata.length === 0 || decryptedForMetadata === metadata) return;
     let cancelled = false;
-    setDecrypting(true);
     (async () => {
       const plaintexts: Record<string, string> = {};
       const errors: Record<string, string> = {};
-      for (const entry of entriesRef.current) {
+      for (const entry of metadata) {
         try {
           plaintexts[entry.id] = await decryptEntry(privateKeys, entry.payload);
         } catch {
@@ -102,13 +110,13 @@ export default function EntriesPage() {
       if (!cancelled) {
         setDecrypted(plaintexts);
         setDecryptErrors(errors);
-        setDecrypting(false);
+        setDecryptedForMetadata(metadata);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [privateKeys]);
+  }, [privateKeys, metadata, decryptedForMetadata]);
 
   function switchMode(mode: UnlockMode) {
     setUnlockError(null);

@@ -114,12 +114,21 @@ export default function SignupPage() {
       await createUserKeyRecord(user.uid, publicKeys, wrapped);
       await refresh();
       router.replace("/");
+      // Deliberately NOT clearing passphrase/passphraseConfirm here: refresh()
+      // just flipped seedStatus to "locked", which re-renders this form
+      // (still mounted — router.replace()'s navigation hasn't committed yet)
+      // with whatever these inputs hold. Clearing them here used to cause a
+      // visible flash of the now-empty form for a frame before the route
+      // actually changed. Since we're navigating away regardless, leaving
+      // the (soon-to-be-unmounted) values in place is harmless — only
+      // loginPasswordRef needs to stop pointing at a real password.
+      loginPasswordRef.current = "";
     } catch {
       setPassphraseError("키를 저장하지 못했습니다. 다시 시도해주세요.");
-    } finally {
       loginPasswordRef.current = "";
       setPassphrase("");
       setPassphraseConfirm("");
+    } finally {
       setDeriving(false);
     }
   }

@@ -101,8 +101,18 @@ async function verifyStoredOtp(
   return { doc: ref, data };
 }
 
+// `invoker: "public"` is explicit rather than relying on onCall's normal
+// default (which should already grant public invocation) because that
+// default silently failed to apply here: the deployed functions were
+// returning a 403 "Forbidden" straight from Google Frontend — before ever
+// reaching this code, hence no CORS headers on the OPTIONS preflight —
+// meaning the underlying Cloud Run service's IAM invoker binding was
+// missing allUsers. Callable functions still check request.auth internally
+// (see requireAuth below) — this only controls whether the HTTP request is
+// allowed to reach that check at all.
+
 /** Step 1 of setup: generates and stores a fresh (unconfirmed) secret, returns it + a QR URI. */
-export const startOtpSetup = onCall(async (request) => {
+export const startOtpSetup = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
 
@@ -125,7 +135,7 @@ export const startOtpSetup = onCall(async (request) => {
 });
 
 /** Step 2 of setup: proves the user actually scanned the QR by requiring one valid code. */
-export const confirmOtpSetup = onCall(async (request) => {
+export const confirmOtpSetup = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -137,7 +147,7 @@ export const confirmOtpSetup = onCall(async (request) => {
 });
 
 /** Verifies a code for the current session and stamps the auth token so Firestore rules allow reads. */
-export const verifyOtp = onCall(async (request) => {
+export const verifyOtp = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -151,7 +161,7 @@ export const verifyOtp = onCall(async (request) => {
 });
 
 /** Disables OTP. Requires a currently-valid code — the same "prove the current method" rule as recovery-key/Shamir changes. */
-export const disableOtp = onCall(async (request) => {
+export const disableOtp = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
