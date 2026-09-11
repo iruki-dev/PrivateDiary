@@ -121,12 +121,6 @@ importers:
       '@scure/bip39':
         specifier: ^2.4.0
         version: 2.4.0
-      '@simplewebauthn/browser':
-        specifier: ^14.0.0
-        version: 14.0.0
-      '@simplewebauthn/server':
-        specifier: ^14.0.1
-        version: 14.0.1
       firebase:
         specifier: ^12.19.0
         version: 12.19.0
@@ -622,9 +616,6 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  '@hexagon/base64@1.1.28':
-    resolution: {integrity: sha512-lhqDEAvWixy3bZ+UOYbPwUbBkwBq5C1LAJ/xPC8Oi+lL54oyakv/npbA0aU2hgCsx/1NUd4IBvV03+aUBWxerw==}
-
   '@hono/node-server@2.1.1':
     resolution: {integrity: sha512-ELuehkj5VCBdgEw9zs+ivkKwyzzUCSQuE96YmiPvn1ECBoZCczbFXJLeEGMTYjphP6gydh4pHMqEYPVMYUVgQg==}
     engines: {node: '>=20'}
@@ -977,9 +968,6 @@ packages:
   '@jsdevtools/ono@7.1.3':
     resolution: {integrity: sha512-4JQNk+3mVzK3xh2rqd6RB4J46qUR19azEHBneZyTZM+c456qOrbbM/5xcR8huNCCcbVt7+UmizG6GuUvPvKUYg==}
 
-  '@levischuck/tiny-cbor@0.2.11':
-    resolution: {integrity: sha512-llBRm4dT4Z89aRsm6u2oEZ8tfwL/2l6BwpZ7JcyieouniDECM5AqNgr/y08zalEIvW3RSK4upYyybDcmjXqAow==}
-
   '@modelcontextprotocol/sdk@1.30.0':
     resolution: {integrity: sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==}
     engines: {node: '>=18'}
@@ -1107,65 +1095,6 @@ packages:
 
   '@oxc-project/types@0.149.0':
     resolution: {integrity: sha512-Efcc+iF0j3Bf67YjEqIqWXbX5XddXoK/Mw4K1/JuXwRCZ8N16VR7iT23nlCc9XrveFVh/E5Rqs2StT0V8v9LdA==}
-
-  '@peculiar/asn1-android@2.9.4':
-    resolution: {integrity: sha512-SYHm4SoWSI0nRCoos6jpGusIqhPH9bbGBqv7ohlZ+H6BunrDzzQPk2ePgDuEUzV82OdvbLgtW4twUDwhU9P3YQ==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-asym-key@2.9.4':
-    resolution: {integrity: sha512-s7SJfjcXlR3MYMngDTeMLCy3VjGaIxeEy905CQ0j09pDbeYhNBvBGA7r7cAvCZYkVFo9kVg9RAki0K2iUz7SGQ==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-cms@2.9.4':
-    resolution: {integrity: sha512-cben7oxmQsUGZqotus7yt0srYdncOT6RNWcTQ77T2RFOXejYVYkXadrfePdRcrVpO9K95IRLKKglG2k38jKXuw==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-csr@2.9.4':
-    resolution: {integrity: sha512-xd4YN4vpRjkDAQWVfZZkeu12IEND7DOpkqaHSIHxZl1uggUNa9Ju0QxY2jHvDAS9pP0zhRBytg8ifsnGo3V0jw==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-ecc@2.9.4':
-    resolution: {integrity: sha512-JJXefFshRAuVAjWQo/39bkg1ywc1VaiO44S8RRC+Ykvf/u2KDmYffoDb0ZBPCR5uJy4AGKQhl8mX+Q8ShcWaXQ==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-pfx@2.9.4':
-    resolution: {integrity: sha512-khuGzHTzNzk4GDlIBEILyIs6Lce0yn0ZBdoI9v93kmNncfZRhD+AQ5ODFqdhvoE8cMJF/JMTQ8yA+t1D14kqCw==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-pkcs8@2.9.4':
-    resolution: {integrity: sha512-duRdotlUx9eDZe6QrQpQKl61RbWykCHBCkKayP8V8XdEFwlKHZ8qGGDMyS6Pye7OX7nLFttTTpRkJeet78ckwQ==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-pkcs9@2.9.4':
-    resolution: {integrity: sha512-kaL4cNxBpdQE2dKlyZBqz4ygCrwffO+8wfoxTEqM1Z8RadvCeELBRzcv0dzM8aY9azHMwODO5nxU65zXmhToOQ==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-rsa@2.9.4':
-    resolution: {integrity: sha512-pZ96eD1PptovcWQ/GSmuNFXd/7EQJNlKfDaNCyE2rx3W0v6QFelkzquVqRSRyyDXXCYD69ZXJDzZ8GhIiQzKoA==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-schema@2.9.4':
-    resolution: {integrity: sha512-GjzePcT9Iw8NzeOPf73iNS9xM+TBhd/FilAfP+RQGkTMQJTVWtytN3JHJACCjf/ABNau5S7mS3g+DcuxmRgYEg==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-x509-attr@2.9.4':
-    resolution: {integrity: sha512-ehQXbpQaQYycgu8OrvigwSPTFfVRcu0ECNYCWw+yzBp02Lw5paRqzzhUpfOgO2K38+WfFZuEz/0RPtam5g0OMg==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-x509-post-quantum@2.9.4':
-    resolution: {integrity: sha512-GD0k7BY3dsEIeai7C7bVRPddj/PzZu+sTawRPRxdHKbdy1f9b58WQyk0eFJdr28GShyLVTU8poyi4+bTAZfEtQ==}
-    engines: {node: '>=14'}
-
-  '@peculiar/asn1-x509@2.9.4':
-    resolution: {integrity: sha512-CxhBo/RdEbMMob7T31ZdQjGuoyRFLVwrDzTn25bihzBasRg9kRm/0IxIPvhgQtcK/9dNcO1XQL2fuPugwELL0Q==}
-    engines: {node: '>=14'}
-
-  '@peculiar/utils@2.0.3':
-    resolution: {integrity: sha512-+oL3HPFRIZ1St2K50lWCXiioIgSoxzz7R1J3uF6neO2yl1sgmpgY6XXJH4BdpoDkMWznQTeYF6oWNDZLCdQ4eQ==}
-
-  '@peculiar/x509@2.1.0':
-    resolution: {integrity: sha512-IYbg1R03CSQGWwl24kGyqrdVtixNSbRaDvBg1r5wyYjTP+VwPQkka1BzTgU5+vxiuwqg04OxdvdJ1xYYFIdUSA==}
-    engines: {node: '>=20.0.0'}
 
   '@pkgjs/parseargs@0.11.0':
     resolution: {integrity: sha512-+1VkjdD0QBLPodGrJUeqarH8VAIvQODIbwh9XpP5Syisf7YoQgsJKPNFoqqLQlu+VQ/tVSshMR6loPMn8U+dPg==}
@@ -1314,13 +1243,6 @@ packages:
 
   '@scure/bip39@2.4.0':
     resolution: {integrity: sha512-82dxFbZUYboyOf0AXiydsQrFQ5Q4h9mX+O2UkE91ROYmsc0BKMGZLwDmy96Jpa2+vrtoxomjUhy1RPIgH/r2nA==}
-
-  '@simplewebauthn/browser@14.0.0':
-    resolution: {integrity: sha512-1odWVqeEBTl7lJ9zMKLEsmTlnyrDO5iRcTvfMKKk1WThUnp/i8JJdffdj2icP+tty159s4PgwE3BiMoEW9NFow==}
-
-  '@simplewebauthn/server@14.0.1':
-    resolution: {integrity: sha512-kjWgcm9NdSv+Tobo4Swxd1WnEawsBogpYFMjg9pKsVLPN3FdCmR6BipkL+DcPDgmQ7UKbbBZqRqn3E3YaA7NBw==}
-    engines: {node: '>=20.0.0'}
 
   '@sindresorhus/is@4.6.0':
     resolution: {integrity: sha512-t09vSN3MdfsyCHoFcTRCH/iUtG7OJ0CsjzB8cjAmKc/va/kIgeDI/TxsigdncE/4be734m0cvIYwNaV4i2XqAw==}
@@ -1790,10 +1712,6 @@ packages:
 
   as-array@2.0.0:
     resolution: {integrity: sha512-1Sd1LrodN0XYxYeZcN1J4xYZvmvTwD5tDWaPUGPIzH1mFsmzsPnVtd2exWhecMjtZk/wYWjNZJiD3b1SLCeJqg==}
-
-  asn1js@3.0.10:
-    resolution: {integrity: sha512-S2s3aOytiKdFRdulw2qPE51MzjzVOisppcVv7jVFR+Kw0kxwvFrDcYA0h7Ndqbmj0HkMIXYWaoj7fli8kgx1eg==}
-    engines: {node: '>=12.0.0'}
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -4062,13 +3980,6 @@ packages:
     resolution: {integrity: sha512-l1jNAspIBSFqbT+y+5FosojNpVpF94nlI+wDUpqP9enwOTfHx9f0gh5nB96vl+6yTpsJsypeNrwfzPrKuHB41A==}
     engines: {node: '>=8'}
 
-  pvtsutils@1.3.6:
-    resolution: {integrity: sha512-PLgQXQ6H2FWCaeRak8vvk1GW462lMxB5s3Jm673N82zI4vqtVUPuZdffdZbPDFRoU8kAhItWFtPCWiPpp4/EDg==}
-
-  pvutils@1.2.0:
-    resolution: {integrity: sha512-BbubeCEyTuQjVMakvJQ/Sxbc93F2pwmbsxONT/ZRrwU7Ua38d8unYTwXpTVLAKJ4BDuH9IGztCjQcd/N/39Dvg==}
-    engines: {node: '>=16.0.0'}
-
   qs@6.15.3:
     resolution: {integrity: sha512-O9gl3zCl5h5blw1KGUzQKhA5oUXSl8rwUIM5o0S3nCXMliSvy5Dzx7/DJcI+SwgICv+IneSZwhBh1oSyEHA71A==}
     engines: {node: '>=0.6'}
@@ -4144,9 +4055,6 @@ packages:
   readdirp@3.6.0:
     resolution: {integrity: sha512-hOS089on8RduqdbhvQ5Z37A0ESjsqz6qnRcffsMU3495FuTdqSm+7bhJ29JvIOsBDEEnan5DPu9t3To9VRlMzA==}
     engines: {node: '>=8.10.0'}
-
-  reflect-metadata@0.2.2:
-    resolution: {integrity: sha512-urBwgfrvVP/eAyXx4hluJivBKzuEbSQs9rKWCrCkbSxNv8mxPcUZKeuoF3Uy4mJl3Lwprp6yy5/39VWigZ4K6Q==}
 
   reflect.getprototypeof@1.0.10:
     resolution: {integrity: sha512-00o4I+DVrefhv+nX0ulyi3biSHCPDe+yLv5o/p6d/UVlirijB8E16FtfwSAi4g3tcqrQ4lRAqQSoFEZJehYEcw==}
@@ -4576,19 +4484,12 @@ packages:
   tsconfig-paths@3.15.0:
     resolution: {integrity: sha512-2Ac2RgzDe/cn48GvOe3M+o82pEFewD3UPbyoUHHdKasHwJKjds4fLXWf/Ux5kATBKN20oaFGu+jbElp1pos0mg==}
 
-  tslib@1.14.1:
-    resolution: {integrity: sha512-Xni35NKzjgMrwevysHTCArtLDpPvye8zV/0E4EyYn43P7/7qvQwPh9BGkHewbMulVntbigmcT7rdX3BNo9wRJg==}
-
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
   tsscmp@1.0.6:
     resolution: {integrity: sha512-LxhtAkPDTkVCMQjt2h6eBVY28KCjikZqZfMcC15YBeNjkgUpdCfBu5HoiOTDu86v6smE8yOjyEktJ8hlbANHQA==}
     engines: {node: '>=0.6.x'}
-
-  tsyringe@4.10.0:
-    resolution: {integrity: sha512-axr3IdNuVIxnaK5XGEUFTu3YmAQ6lllgrvqfEoR16g/HGnYY/6We4oWENtAnzK6/LpJ2ur9PAb80RBt7/U4ugw==}
-    engines: {node: '>= 6.0.0'}
 
   type-check@0.4.0:
     resolution: {integrity: sha512-XleUoc9uwGXqjWwXaUTZAmzMcFZ5858QA2vvx1Ur5xIcixXIP+8LnFDgRplU30us6teqdlskFfu+ae4K79Ooew==}
@@ -5581,8 +5482,6 @@ snapshots:
       protobufjs: 7.6.6
       yargs: 17.7.3
 
-  '@hexagon/base64@1.1.28': {}
-
   '@hono/node-server@2.1.1(hono@4.13.7)':
     dependencies:
       hono: 4.13.7
@@ -5871,8 +5770,6 @@ snapshots:
 
   '@jsdevtools/ono@7.1.3': {}
 
-  '@levischuck/tiny-cbor@0.2.11': {}
-
   '@modelcontextprotocol/sdk@1.30.0(supports-color@7.2.0)(zod@4.6.1)':
     dependencies:
       '@hono/node-server': 2.1.1(hono@4.13.7)
@@ -5976,122 +5873,6 @@ snapshots:
 
   '@oxc-project/types@0.149.0': {}
 
-  '@peculiar/asn1-android@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-asym-key@2.9.4':
-    dependencies:
-      '@peculiar/asn1-pkcs8': 2.9.4
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-cms@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      '@peculiar/asn1-x509-attr': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-csr@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-ecc@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-pfx@2.9.4':
-    dependencies:
-      '@peculiar/asn1-cms': 2.9.4
-      '@peculiar/asn1-pkcs8': 2.9.4
-      '@peculiar/asn1-rsa': 2.9.4
-      '@peculiar/asn1-schema': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-pkcs8@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-pkcs9@2.9.4':
-    dependencies:
-      '@peculiar/asn1-cms': 2.9.4
-      '@peculiar/asn1-pfx': 2.9.4
-      '@peculiar/asn1-pkcs8': 2.9.4
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      '@peculiar/asn1-x509-attr': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-rsa@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-schema@2.9.4':
-    dependencies:
-      '@peculiar/utils': 2.0.3
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-x509-attr@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-x509-post-quantum@2.9.4':
-    dependencies:
-      '@peculiar/asn1-asym-key': 2.9.4
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/asn1-x509@2.9.4':
-    dependencies:
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/utils': 2.0.3
-      asn1js: 3.0.10
-      tslib: 2.8.1
-
-  '@peculiar/utils@2.0.3':
-    dependencies:
-      tslib: 2.8.1
-
-  '@peculiar/x509@2.1.0':
-    dependencies:
-      '@peculiar/asn1-cms': 2.9.4
-      '@peculiar/asn1-csr': 2.9.4
-      '@peculiar/asn1-ecc': 2.9.4
-      '@peculiar/asn1-pkcs9': 2.9.4
-      '@peculiar/asn1-rsa': 2.9.4
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      '@peculiar/asn1-x509-post-quantum': 2.9.4
-      pvtsutils: 1.3.6
-      tslib: 2.8.1
-      tsyringe: 4.10.0
-
   '@pkgjs/parseargs@0.11.0':
     optional: true
 
@@ -6179,21 +5960,6 @@ snapshots:
   '@scure/bip39@2.4.0':
     dependencies:
       '@noble/hashes': 2.4.0
-
-  '@simplewebauthn/browser@14.0.0': {}
-
-  '@simplewebauthn/server@14.0.1':
-    dependencies:
-      '@hexagon/base64': 1.1.28
-      '@levischuck/tiny-cbor': 0.2.11
-      '@peculiar/asn1-android': 2.9.4
-      '@peculiar/asn1-ecc': 2.9.4
-      '@peculiar/asn1-rsa': 2.9.4
-      '@peculiar/asn1-schema': 2.9.4
-      '@peculiar/asn1-x509': 2.9.4
-      '@peculiar/asn1-x509-post-quantum': 2.9.4
-      '@peculiar/x509': 2.1.0
-      reflect-metadata: 0.2.2
 
   '@sindresorhus/is@4.6.0': {}
 
@@ -6653,12 +6419,6 @@ snapshots:
   arrify@2.0.1: {}
 
   as-array@2.0.0: {}
-
-  asn1js@3.0.10:
-    dependencies:
-      pvtsutils: 1.3.6
-      pvutils: 1.2.0
-      tslib: 2.8.1
 
   assertion-error@2.0.1: {}
 
@@ -9282,12 +9042,6 @@ snapshots:
     dependencies:
       escape-goat: 2.1.1
 
-  pvtsutils@1.3.6:
-    dependencies:
-      tslib: 2.8.1
-
-  pvutils@1.2.0: {}
-
   qs@6.15.3:
     dependencies:
       es-define-property: 1.0.1
@@ -9381,8 +9135,6 @@ snapshots:
   readdirp@3.6.0:
     dependencies:
       picomatch: 2.3.2
-
-  reflect-metadata@0.2.2: {}
 
   reflect.getprototypeof@1.0.10:
     dependencies:
@@ -9970,15 +9722,9 @@ snapshots:
       minimist: 1.2.8
       strip-bom: 3.0.0
 
-  tslib@1.14.1: {}
-
   tslib@2.8.1: {}
 
   tsscmp@1.0.6: {}
-
-  tsyringe@4.10.0:
-    dependencies:
-      tslib: 1.14.1
 
   type-check@0.4.0:
     dependencies:
