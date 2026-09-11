@@ -37,7 +37,6 @@ export default function EntriesPage() {
     privateKeys,
     unlock,
     unlockWithShamirShares,
-    lock,
     decryptionMethods,
   } = useSeed();
   const { loading: otpLoading, otpEnabled, otpVerified } = useOtp();
@@ -67,17 +66,6 @@ export default function EntriesPage() {
       router.replace("/signup");
     }
   }, [authStatus, seedStatus, router]);
-
-  // Re-lock (wipe the derived private keys from memory) whenever this page
-  // is left — navigating to /write or /settings and back must require the
-  // passphrase (or Shamir shares) again, not silently stay unlocked.
-  // seedStatus/privateKeys live in SeedContext, which wraps the whole app
-  // and therefore survives client-side navigation by default; without this,
-  // once unlocked here, the diary stayed decrypted for the rest of the
-  // browser tab's lifetime regardless of which page was showing.
-  useEffect(() => {
-    return () => lock();
-  }, [lock]);
 
   useEffect(() => {
     // firestore.rules denies `entries` reads until OTP (if enabled on this

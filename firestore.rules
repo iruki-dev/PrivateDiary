@@ -57,28 +57,13 @@ service cloud.firestore {
     // `wrappedSeed` (ciphertext that's safe to read without the passphrase
     // per §3.1 step 7). Nothing in `users/{uid}` is plaintext or requires
     // OTP to be harmless; `entries` is where actual diary content lives.
-    //
-    // Bug fixed here: custom claims live on the Firebase Auth USER record,
-    // not on any one browser/device/session — so checking only "was
-    // otpVerifiedAt within the last 12h" meant verifying OTP on device A
-    // silently satisfied device B's freshly-issued ID token too, for up to
-    // 12h, without device B ever entering a code. Firestore rules can't see
-    // "which device" made the request, but `auth_time` (a standard claim on
-    // every ID token, seconds since epoch, set at sign-in and unchanged by
-    // token refreshes) IS per sign-in-session. Requiring
-    // otpVerifiedAt to be at/after THIS session's auth_time means a new
-    // sign-in on any device — same account or not — always starts back at
-    // "not verified" for that session, closing the cross-device gap, while
-    // still not re-prompting on every navigation within one already-verified
-    // session (auth_time doesn't change just from browsing around).
     function otpSatisfied() {
       // request.auth.token.get(key, default) — a bare `.otpEnabled` throws
       // an evaluation error (not just falsy) for accounts that never set
       // the claim, since Firestore rules maps raise on missing keys.
       return request.auth.token.get('otpEnabled', false) != true
           || (request.auth.token.get('otpVerified', false) == true
-              && request.auth.token.get('otpVerifiedAt', 0) >= request.auth.token.get('auth_time', 0) * 1000
-              && request.auth.token.get('otpVerifiedAt', 0) > request.time.toMillis() - 43200000); // 12h cap
+              && request.auth.token.get('otpVerifiedAt', 0) > request.time.toMillis() - 43200000); // 12h session
     }
 
     match /users/{uid} {
