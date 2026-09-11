@@ -17,12 +17,21 @@ export function proxy(request: NextRequest) {
 
   const csp = [
     "default-src 'self'",
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
+    // 'strict-dynamic' alone should let App Check's reCAPTCHA v3 script
+    // (injected by an already-trusted, nonce'd script — lib/firebase/appCheck.ts)
+    // load regardless of host, but the explicit google.com/gstatic.com
+    // sources stay as the documented fallback for browsers that don't
+    // support strict-dynamic (same pattern Google's own CSP guide uses).
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.google.com https://www.gstatic.com`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
+    "img-src 'self' data: https://www.gstatic.com",
     "font-src 'self'",
-    "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.cloudfunctions.net",
-    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
+    // App Check/reCAPTCHA v3 (README.md "DDoS 방지"): www.google.com for the
+    // reCAPTCHA verify call, {content-,}firebaseappcheck.googleapis.com for
+    // exchanging that for an App Check token. No-ops until
+    // NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY is actually set.
+    "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.cloudfunctions.net https://www.google.com https://firebaseappcheck.googleapis.com https://content-firebaseappcheck.googleapis.com",
+    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.google.com",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

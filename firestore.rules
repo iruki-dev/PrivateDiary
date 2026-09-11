@@ -88,10 +88,20 @@ service cloud.firestore {
       allow update: if request.auth.uid == uid && isKeyRotationRequest();
       allow delete: if false;
     }
+    // Caps the one variable-length field a write controls (base64
+    // ciphertext) so a scripted client can't run up storage/cost with
+    // giant garbage payloads — 500,000 chars is roughly a 375KB plaintext
+    // entry, far past anything a real diary entry needs. Defense in depth
+    // alongside App Check (README.md "DDoS 방지"), not a replacement for it:
+    // this only bounds the SIZE of an abusive write, not the RATE.
+    function isValidEntrySize(data) {
+      return data.ciphertext is string && data.ciphertext.size() <= 500000;
+    }
     match /entries/{entryId} {
       allow read: if request.auth.uid == resource.data.uid && otpSatisfied();
       allow create: if request.auth.uid == request.resource.data.uid
-                    && request.resource.data.entrySeq is int;
+                    && request.resource.data.entrySeq is int
+                    && isValidEntrySize(request.resource.data);
       allow update, delete: if false; // append-only: 수정/삭제 자체를 원천 차단
     }
     // The actual TOTP secret. Only functions/src/index.ts (Admin SDK, which

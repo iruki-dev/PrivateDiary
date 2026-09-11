@@ -8,6 +8,7 @@ import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { usePrivateWritingMode } from "@/hooks/usePrivateWritingMode";
 
 /**
  * Phase 5 write path (ARCHITECTURE.md §3.2 rule 5): works from any
@@ -27,6 +28,13 @@ export default function WritePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [privateMode] = usePrivateWritingMode();
+  // Per-moment override of the (persistent, cross-page) private-mode
+  // setting — lets the writer glance at their own text without walking
+  // over to /settings and back. Resets to hidden on every mount/reload,
+  // which is the safer default for a "someone might be next to me" feature.
+  const [revealing, setRevealing] = useState(false);
+  const obscured = privateMode && !revealing;
 
   useEffect(() => {
     if (authStatus === "signed-in" && seedStatus === "not-issued") {
@@ -92,18 +100,49 @@ export default function WritePage() {
           </Link>
         </div>
         <div className="space-y-1">
-          <textarea
-            ref={textareaRef}
-            required
-            autoFocus
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={handleKeyDown}
-            rows={12}
-            placeholder="오늘 하루는 어땠나요?"
-            aria-label="오늘의 일기 내용"
-            className="field min-h-48 resize-y"
-          />
+          {privateMode && (
+            <div className="flex items-center justify-between gap-3 rounded-t bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-violet-500/10 px-3 py-2 text-xs">
+              <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
+                🔒 프라이빗 모드 — 글자를 흐리게 표시합니다
+              </span>
+              <button
+                type="button"
+                onClick={() => setRevealing((prev) => !prev)}
+                aria-pressed={revealing}
+                className="link shrink-0"
+              >
+                {revealing ? "다시 가리기" : "잠깐 보기"}
+              </button>
+            </div>
+          )}
+          <div
+            className={`relative overflow-hidden rounded ${privateMode ? "rounded-t-none" : ""}`}
+          >
+            <textarea
+              ref={textareaRef}
+              required
+              autoFocus
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              rows={12}
+              placeholder="오늘 하루는 어땠나요?"
+              aria-label="오늘의 일기 내용"
+              className={`field min-h-48 resize-y transition-[filter] duration-300 ${
+                obscured ? "blur-md" : ""
+              }`}
+              style={obscured ? { caretColor: "transparent" } : undefined}
+            />
+            {/* Decorative only (aria-hidden) — a soft glow that reads as
+               "intentionally private" rather than a rendering glitch,
+               without adding anything a screen reader would announce. */}
+            {obscured && (
+              <div
+                aria-hidden
+                className="pointer-events-none absolute inset-0 bg-gradient-to-br from-violet-400/5 via-transparent to-fuchsia-400/5"
+              />
+            )}
+          </div>
           <p className="text-right text-xs text-zinc-400" aria-live="polite">
             {text.length.toLocaleString("ko-KR")}자
           </p>

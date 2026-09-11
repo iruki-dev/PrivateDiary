@@ -538,6 +538,42 @@ describe("entries/{entryId}", () => {
     );
   });
 
+  it("rejects an entry whose ciphertext exceeds the 500,000-char size cap", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(collection(alice, "entries"), {
+        uid: "alice",
+        entrySeq: 1,
+        ciphertext: "x".repeat(500_001),
+        iv: "iv",
+        wrappedContentKey: "wck",
+        wrappedContentKeyIv: "wckiv",
+        kemCiphertext: "kemct",
+        ephemeralX25519PublicKey: "eph",
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("allows an entry whose ciphertext is right at the 500,000-char size cap", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      addDoc(collection(alice, "entries"), {
+        uid: "alice",
+        entrySeq: 1,
+        ciphertext: "x".repeat(500_000),
+        iv: "iv",
+        wrappedContentKey: "wck",
+        wrappedContentKeyIv: "wckiv",
+        kemCiphertext: "kemct",
+        ephemeralX25519PublicKey: "eph",
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
   it("lets the owner read their own entry, denies other users", async () => {
     let entryId = "";
     await testEnv.withSecurityRulesDisabled(async (ctx) => {

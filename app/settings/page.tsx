@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
+import { usePrivateWritingMode } from "@/hooks/usePrivateWritingMode";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
 import { SecretReveal } from "@/components/SecretReveal";
@@ -52,6 +53,7 @@ export default function SettingsPage() {
 
   return (
     <main className="flex flex-1 flex-col items-center gap-10 px-4 py-10 sm:gap-12 sm:px-6 sm:py-20">
+      <PrivateWritingSection />
       <ChangePassphraseSection changePassphrase={changePassphrase} />
       {shamirConfig && (
         <ResetPassphraseSection
@@ -85,6 +87,46 @@ export default function SettingsPage() {
 
       <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
     </main>
+  );
+}
+
+/**
+ * Toggles the /write textarea's blur-while-typing display (this page never
+ * touches the diary's actual encryption — hooks/usePrivateWritingMode.ts's
+ * doc comment explains why it's a plain local preference, not something
+ * proven with the passphrase/OTP the way the sections below are).
+ */
+function PrivateWritingSection() {
+  const [enabled, setEnabled] = usePrivateWritingMode();
+
+  return (
+    <section className="w-full max-w-sm space-y-3 card">
+      <div className="flex items-center justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold">프라이빗 작성 모드</h2>
+          <p className="mt-1 muted">
+            일기를 쓰는 동안 화면의 글자를 흐리게 가려, 옆에서 보더라도 내용을 읽을 수 없게
+            합니다.
+          </p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          aria-checked={enabled}
+          aria-label="프라이빗 작성 모드"
+          onClick={() => setEnabled(!enabled)}
+          className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
+            enabled ? "bg-foreground" : "bg-zinc-300 dark:bg-zinc-700"
+          }`}
+        >
+          <span
+            className={`absolute top-1 h-5 w-5 rounded-full bg-background shadow transition-transform ${
+              enabled ? "translate-x-6" : "translate-x-1"
+            }`}
+          />
+        </button>
+      </div>
+    </section>
   );
 }
 

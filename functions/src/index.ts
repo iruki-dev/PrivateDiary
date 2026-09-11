@@ -27,6 +27,13 @@ import { generateSecret, generateURI, verify } from "otplib";
  * untouched by any of this: this whole module never sees the master
  * seed, a passphrase, Shamir shares, or plaintext — it only gates WHETHER
  * the (still fully client-side-decrypted) ciphertext can be fetched at all.
+ *
+ * `enforceAppCheck: APP_CHECK_ENFORCE` (README.md's "DDoS 방지" section):
+ * off by default so deploying this code alone can't lock out real users
+ * before the client actually has a working App Check token (that needs a
+ * reCAPTCHA v3 site key from Google's console, a manual per-domain step —
+ * see lib/firebase/appCheck.ts). Flip APP_CHECK_ENFORCE=true in
+ * functions/.env once that key is live and redeploy; no code change needed.
  */
 
 initializeApp();
@@ -36,6 +43,7 @@ const OTP_SECRETS_COLLECTION = "otpSecrets";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 60_000;
 const OTP_SESSION_MS = 12 * 60 * 60 * 1000; // 12h — how long a successful verify stays valid
+const APP_CHECK_ENFORCE = process.env.APP_CHECK_ENFORCE === "true";
 
 interface OtpSecretDoc {
   secret: string;
@@ -130,7 +138,7 @@ async function verifyStoredOtp(
 // to reach that check at all.
 
 /** Step 1 of setup: generates and stores a fresh (unconfirmed) secret, returns it + a QR URI. */
-export const startOtpSetup = onCall({ invoker: "public" }, async (request) => {
+export const startOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
 
@@ -153,7 +161,7 @@ export const startOtpSetup = onCall({ invoker: "public" }, async (request) => {
 });
 
 /** Step 2 of setup: proves the user actually scanned the QR by requiring one valid code. */
-export const confirmOtpSetup = onCall({ invoker: "public" }, async (request) => {
+export const confirmOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -165,7 +173,7 @@ export const confirmOtpSetup = onCall({ invoker: "public" }, async (request) => 
 });
 
 /** Verifies a code for the current session and stamps the auth token so Firestore rules allow reads. */
-export const verifyOtp = onCall({ invoker: "public" }, async (request) => {
+export const verifyOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -200,7 +208,7 @@ export const verifyOtp = onCall({ invoker: "public" }, async (request) => {
  * verifyOtp does, reusing firestore.rules' otpSatisfied() as-is — no
  * separate rule path needed for the bypass.
  */
-export const verifyShamirOtpBypass = onCall({ invoker: "public" }, async (request) => {
+export const verifyShamirOtpBypass = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const proof = requireProof(request.data);
@@ -225,7 +233,7 @@ export const verifyShamirOtpBypass = onCall({ invoker: "public" }, async (reques
 });
 
 /** Disables OTP. Requires a currently-valid code — the same "prove the current method" rule as recovery-key/Shamir changes. */
-export const disableOtp = onCall({ invoker: "public" }, async (request) => {
+export const disableOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
