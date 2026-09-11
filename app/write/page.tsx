@@ -134,7 +134,7 @@ export default function WritePage() {
               placeholder="오늘 하루는 어땠나요?"
               aria-label="오늘의 일기 내용"
               className={`field min-h-48 resize-y transition-[filter] duration-300 ${
-                obscured ? "blur-[3px]" : ""
+                obscured ? "blur-[4px]" : ""
               }`}
               style={obscured ? { caretColor: "transparent" } : undefined}
             />
