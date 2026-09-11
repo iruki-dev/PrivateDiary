@@ -18,15 +18,7 @@ export { deriveHybridKeyPair } from "./keys";
 
 export { wrapSeed, unwrapSeed, rewrapSeed } from "./passphrase";
 
-export {
-  RECOVERY_KEY_LENGTH,
-  generateRecoveryKey,
-  wrapSeedWithRecoveryKey,
-  unwrapSeedWithRecoveryKey,
-  splitSeedShamir,
-  combineSeedShamir,
-  seedMatchesPublicKeys,
-} from "./recovery";
+export { splitSeedShamir, combineSeedShamir, seedMatchesPublicKeys } from "./recovery";
 
 export { encapsulateContentKey, decapsulateContentKey } from "./hybridKem";
 export type { ContentKeyCapsule } from "./hybridKem";
@@ -38,8 +30,6 @@ export {
   publicKeysFromStorage,
   wrappedSeedToStorage,
   wrappedSeedFromStorage,
-  recoveryKeyWrappedSeedToStorage,
-  recoveryKeyWrappedSeedFromStorage,
   recoverySecretToText,
   textToRecoverySecret,
   entryToStorage,
@@ -48,12 +38,7 @@ export {
 
 export { wipeBytes } from "./memory";
 
-export {
-  WrongPassphraseError,
-  TamperedCiphertextError,
-  InvalidRecoveryKeyError,
-  InvalidShamirSharesError,
-} from "./errors";
+export { WrongPassphraseError, TamperedCiphertextError, InvalidShamirSharesError } from "./errors";
 
 export type {
   HybridKeyPair,
@@ -63,8 +48,6 @@ export type {
   WrappedSeed,
   WrappedSeedStorage,
   DecryptionMethodsConfig,
-  RecoveryKeyWrappedSeed,
-  RecoveryKeyWrappedSeedStorage,
   EntryAAD,
   EncryptedEntryPayload,
   EncryptedEntryStorage,

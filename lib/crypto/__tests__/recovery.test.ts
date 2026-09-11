@@ -1,40 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generateMasterSeed } from "../random";
 import { deriveHybridKeyPair } from "../keys";
-import {
-  combineSeedShamir,
-  generateRecoveryKey,
-  seedMatchesPublicKeys,
-  splitSeedShamir,
-  unwrapSeedWithRecoveryKey,
-  wrapSeedWithRecoveryKey,
-} from "../recovery";
-import { InvalidRecoveryKeyError } from "../errors";
-
-describe("recovery key wrap/unwrap", () => {
-  it("round-trips: wrap then unwrap with the same key recovers the seed", async () => {
-    const seed = generateMasterSeed();
-    const key = generateRecoveryKey();
-
-    const wrapped = await wrapSeedWithRecoveryKey(seed, key);
-    const recovered = await unwrapSeedWithRecoveryKey(wrapped, key);
-
-    expect(recovered).toEqual(seed);
-  });
-
-  it("rejects the wrong recovery key", async () => {
-    const seed = generateMasterSeed();
-    const wrapped = await wrapSeedWithRecoveryKey(seed, generateRecoveryKey());
-
-    await expect(unwrapSeedWithRecoveryKey(wrapped, generateRecoveryKey())).rejects.toThrow(
-      InvalidRecoveryKeyError
-    );
-  });
-
-  it("generates a fresh, unpredictable key every call", () => {
-    expect(generateRecoveryKey()).not.toEqual(generateRecoveryKey());
-  });
-});
+import { combineSeedShamir, seedMatchesPublicKeys, splitSeedShamir } from "../recovery";
 
 describe("Shamir split/combine", () => {
   it("reconstructs the seed from exactly the threshold number of shares", async () => {
@@ -62,6 +29,24 @@ describe("Shamir split/combine", () => {
 
     const recovered = await combineSeedShamir([shares[1], shares[2]]);
     expect(recovered).toEqual(seed);
+  });
+
+  it("reissuing (splitting the same seed again) produces entirely different shares", async () => {
+    // Structural basis for "the passphrase can't know the value of
+    // already-issued Shamir shares" (ARCHITECTURE.md §3.7): split() draws
+    // fresh randomness every call, so reissuing via the passphrase can
+    // never reproduce — or reveal — a previously-issued set of shares.
+    const seed = generateMasterSeed();
+    const first = await splitSeedShamir(seed, 3, 2);
+    const second = await splitSeedShamir(seed, 3, 2);
+
+    expect(first[0]).not.toEqual(second[0]);
+    expect(first[1]).not.toEqual(second[1]);
+    expect(first[2]).not.toEqual(second[2]);
+
+    // Both sets still independently reconstruct the same seed.
+    expect(await combineSeedShamir([first[0], first[1]])).toEqual(seed);
+    expect(await combineSeedShamir([second[1], second[2]])).toEqual(seed);
   });
 });
 

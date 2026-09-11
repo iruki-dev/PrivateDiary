@@ -21,14 +21,6 @@ export class TamperedCiphertextError extends Error {
   }
 }
 
-/** Thrown when a recovery key fails to unwrap the seed (wrong key, or corrupted recoveryWrappedSeed). */
-export class InvalidRecoveryKeyError extends Error {
-  constructor(message = "Incorrect recovery key or corrupted recovery data") {
-    super(message);
-    this.name = "InvalidRecoveryKeyError";
-  }
-}
-
 /**
  * Thrown when combined Shamir shares don't reconstruct the expected seed.
  * shamir-secret-sharing's combine() never throws by itself on wrong/insufficient

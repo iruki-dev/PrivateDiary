@@ -11,12 +11,11 @@ import { listEntries, type StoredEntry } from "@/lib/firebase/entries";
 import {
   decryptEntry,
   textToRecoverySecret,
-  InvalidRecoveryKeyError,
   InvalidShamirSharesError,
   WrongPassphraseError,
 } from "@/lib/crypto";
 
-type UnlockMode = "passphrase" | "recovery-key" | "shamir";
+type UnlockMode = "passphrase" | "shamir";
 
 /**
  * Phase 5 read path. Entry dates/count are always visible (they're not
@@ -24,9 +23,10 @@ type UnlockMode = "passphrase" | "recovery-key" | "shamir";
  * the seed is unlocked in this session (ARCHITECTURE.md §3.3, Phase 5:
  * "미입력 상태에서는 암호문 존재 여부만 노출하고 본문은 절대 노출하지 않음").
  *
- * The passphrase always works; a recovery key and/or Shamir shares are
- * additional, independently-enabled ways to reach the same "unlocked"
- * state — not a break-glass-only path, just alternatives.
+ * The passphrase and Shamir shares are co-equal master credentials
+ * (ARCHITECTURE.md §3.7, contexts/SeedContext.tsx) — either reaches the
+ * same "unlocked" state. Passphrase is the everyday default; Shamir is the
+ * fallback if it's forgotten.
  */
 export default function EntriesPage() {
   const { user, status: authStatus } = useAuth();
@@ -34,7 +34,6 @@ export default function EntriesPage() {
     status: seedStatus,
     privateKeys,
     unlock,
-    unlockWithRecoveryKey,
     unlockWithShamirShares,
     decryptionMethods,
   } = useSeed();
@@ -52,7 +51,6 @@ export default function EntriesPage() {
 
   const [unlockMode, setUnlockMode] = useState<UnlockMode>("passphrase");
   const [passphrase, setPassphrase] = useState("");
-  const [recoveryKeyInput, setRecoveryKeyInput] = useState("");
   const [shareInputs, setShareInputs] = useState<string[]>([]);
   const [unlockError, setUnlockError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
@@ -125,9 +123,6 @@ export default function EntriesPage() {
       if (unlockMode === "passphrase") {
         await unlock(passphrase);
         setPassphrase("");
-      } else if (unlockMode === "recovery-key") {
-        await unlockWithRecoveryKey(textToRecoverySecret(recoveryKeyInput));
-        setRecoveryKeyInput("");
       } else {
         await unlockWithShamirShares(shareInputs.map((s) => textToRecoverySecret(s)));
         setShareInputs(decryptionMethods?.shamir ? Array(decryptionMethods.shamir.k).fill("") : []);
@@ -136,11 +131,9 @@ export default function EntriesPage() {
       setUnlockError(
         err instanceof WrongPassphraseError
           ? "패스프레이즈가 올바르지 않습니다."
-          : err instanceof InvalidRecoveryKeyError
-            ? "복구 키가 올바르지 않습니다."
-            : err instanceof InvalidShamirSharesError
-              ? "조각들이 올바른 시드로 복원되지 않습니다."
-              : "잠금 해제에 실패했습니다."
+          : err instanceof InvalidShamirSharesError
+            ? "조각들이 올바른 시드로 복원되지 않습니다."
+            : "잠금 해제에 실패했습니다."
       );
     } finally {
       setUnlocking(false);
@@ -157,9 +150,6 @@ export default function EntriesPage() {
 
   const otherModes: { mode: UnlockMode; label: string }[] = [
     { mode: "passphrase" as const, label: "패스프레이즈로 잠금 해제" },
-    ...(decryptionMethods?.recoveryKeyEnabled
-      ? [{ mode: "recovery-key" as const, label: "복구 키로 잠금 해제" }]
-      : []),
     ...(decryptionMethods?.shamir
       ? [{ mode: "shamir" as const, label: "Shamir 조각으로 잠금 해제" }]
       : []),
@@ -202,19 +192,6 @@ export default function EntriesPage() {
                     onChange={(e) => setPassphrase(e.target.value)}
                     placeholder="패스프레이즈"
                     className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-                  />
-                </>
-              )}
-              {unlockMode === "recovery-key" && (
-                <>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">복구 키를 입력하세요.</p>
-                  <input
-                    type="text"
-                    required
-                    value={recoveryKeyInput}
-                    onChange={(e) => setRecoveryKeyInput(e.target.value)}
-                    placeholder="복구 키"
-                    className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
                   />
                 </>
               )}

@@ -12,7 +12,6 @@ import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
 import { IncorrectOtpCodeError, OtpLockedOutError, type OtpSetupMaterial } from "@/lib/firebase/otp";
 import {
-  InvalidRecoveryKeyError,
   InvalidShamirSharesError,
   WrongPassphraseError,
   recoverySecretToText,
@@ -24,16 +23,14 @@ export default function SettingsPage() {
   const {
     status: seedStatus,
     changePassphrase,
+    resetPassphraseWithShamirShares,
     resetKeys,
     decryptionMethods,
     stageSeedFromPassphrase,
-    stageSeedFromRecoveryKey,
     stageSeedFromShamirShares,
     discardStagedSeed,
-    prepareRecoveryKey,
-    prepareShamirRecovery,
-    confirmPendingMethod,
-    disableRecoveryKey,
+    prepareShamir,
+    confirmPendingShamir,
     disableShamir,
   } = useSeed();
   const router = useRouter();
@@ -52,34 +49,35 @@ export default function SettingsPage() {
     );
   }
 
+  const shamirConfig = decryptionMethods?.shamir ?? null;
+
   return (
     <main className="flex flex-1 flex-col items-center gap-12 px-6 py-24">
       <ChangePassphraseSection changePassphrase={changePassphrase} />
+      {shamirConfig && (
+        <ResetPassphraseSection
+          config={shamirConfig}
+          resetPassphraseWithShamirShares={resetPassphraseWithShamirShares}
+        />
+      )}
       <OtpSection />
 
       <section className="w-full max-w-sm space-y-2">
         <h2 className="text-lg font-semibold">일기 복호화 방법</h2>
         <p className="text-sm text-zinc-600 dark:text-zinc-400">
-          패스프레이즈는 항상 사용할 수 있는 기본 방법입니다. 아래 방법들은 원하는 만큼 추가로
-          켜둘 수 있고, 켜진 것 중 아무거나 하나로 잠금을 해제할 수 있습니다.
+          패스프레이즈와 Shamir 분산은 서로 동등한 자격입니다. 둘 중 무엇을 갖고 있어도 일기를
+          복호화하고, 패스프레이즈를 재설정하고, Shamir 분산을 새로 발급할 수 있습니다. 단, 어느
+          한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없습니다. 평소에는 패스프레이즈를
+          쓰고, 그마저 잃어버렸을 때를 위한 비상 수단이 Shamir 분산입니다.
         </p>
       </section>
-      <RecoveryKeySection
-        enabled={decryptionMethods?.recoveryKeyEnabled ?? false}
-        stageSeedFromPassphrase={stageSeedFromPassphrase}
-        stageSeedFromRecoveryKey={stageSeedFromRecoveryKey}
-        discardStagedSeed={discardStagedSeed}
-        prepareRecoveryKey={prepareRecoveryKey}
-        confirmPendingMethod={confirmPendingMethod}
-        disableRecoveryKey={disableRecoveryKey}
-      />
       <ShamirSection
-        config={decryptionMethods?.shamir ?? null}
+        config={shamirConfig}
         stageSeedFromPassphrase={stageSeedFromPassphrase}
         stageSeedFromShamirShares={stageSeedFromShamirShares}
         discardStagedSeed={discardStagedSeed}
-        prepareShamirRecovery={prepareShamirRecovery}
-        confirmPendingMethod={confirmPendingMethod}
+        prepareShamir={prepareShamir}
+        confirmPendingShamir={confirmPendingShamir}
         disableShamir={disableShamir}
       />
 
@@ -171,6 +169,138 @@ function ChangePassphraseSection({
           {submitting ? "변경 중..." : "변경하기"}
         </button>
       </form>
+    </section>
+  );
+}
+
+/**
+ * Passphrase reset via Shamir shares — for when the passphrase itself is
+ * forgotten, not just being routinely changed. No old passphrase is needed;
+ * K shares prove the same underlying master credential (contexts/
+ * SeedContext.tsx's doc comment). Only shown once Shamir is configured.
+ */
+function ResetPassphraseSection({
+  config,
+  resetPassphraseWithShamirShares,
+}: {
+  config: { n: number; k: number };
+  resetPassphraseWithShamirShares: (shares: Uint8Array[], newPassphrase: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [shareInputs, setShareInputs] = useState<string[]>(Array(config.k).fill(""));
+  const [newPassphrase, setNewPassphrase] = useState("");
+  const [confirmPassphrase, setConfirmPassphrase] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+
+  function cancel() {
+    setOpen(false);
+    setShareInputs(Array(config.k).fill(""));
+    setNewPassphrase("");
+    setConfirmPassphrase("");
+    setError(null);
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSuccess(false);
+
+    if (newPassphrase !== confirmPassphrase) {
+      setError("새 패스프레이즈 확인이 일치하지 않습니다.");
+      return;
+    }
+    if (!checkPassphraseStrength(newPassphrase).isStrongEnough) {
+      setError("새 패스프레이즈가 너무 약합니다.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await resetPassphraseWithShamirShares(
+        shareInputs.map((s) => textToRecoverySecret(s)),
+        newPassphrase
+      );
+      setSuccess(true);
+      setOpen(false);
+      setShareInputs(Array(config.k).fill(""));
+      setNewPassphrase("");
+      setConfirmPassphrase("");
+    } catch (err) {
+      setError(
+        err instanceof InvalidShamirSharesError
+          ? "조각들이 올바른 시드로 복원되지 않습니다."
+          : "재설정하지 못했습니다."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="w-full max-w-sm space-y-4 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+      <div>
+        <h2 className="text-lg font-semibold">패스프레이즈를 잊으셨나요?</h2>
+        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+          Shamir 분산 {config.k}개를 모으면 기존 일기를 그대로 유지한 채 새 패스프레이즈를 설정할
+          수 있습니다.
+        </p>
+      </div>
+      {success && <p className="text-sm text-green-600">패스프레이즈가 재설정되었습니다.</p>}
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="w-full rounded border border-zinc-400 px-4 py-2 text-sm font-medium dark:border-zinc-600"
+        >
+          Shamir 분산으로 재설정
+        </button>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          {shareInputs.map((value, i) => (
+            <input
+              key={i}
+              type="text"
+              required
+              value={value}
+              onChange={(e) =>
+                setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+              }
+              placeholder={`조각 ${i + 1}`}
+              className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          ))}
+          <input
+            type="password"
+            required
+            value={newPassphrase}
+            onChange={(e) => setNewPassphrase(e.target.value)}
+            placeholder="새 패스프레이즈"
+            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <PassphraseStrengthMeter passphrase={newPassphrase} />
+          <input
+            type="password"
+            required
+            value={confirmPassphrase}
+            onChange={(e) => setConfirmPassphrase(e.target.value)}
+            placeholder="새 패스프레이즈 확인"
+            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+          >
+            {submitting ? "재설정 중..." : "재설정하기"}
+          </button>
+          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+            취소
+          </button>
+        </form>
+      )}
     </section>
   );
 }
@@ -357,238 +487,39 @@ function OtpSection() {
   );
 }
 
+type ShamirPhase = "status" | "prove" | "reveal" | "disable";
+type ProveMode = "passphrase" | "shamir";
+
 /**
- * One independently-toggleable decryption method (replaces the removed
- * BIP39 mnemonic — see contexts/SeedContext.tsx's doc comment for the full
- * stage/prepare/confirm rationale). Enabling always proves via the
- * passphrase (always available); disabling requires proving THIS method
- * specifically, so a passphrase-only compromise can't silently strip away
- * an already-configured method.
+ * Shamir setup/reissue/disable — passphrase and Shamir shares are co-equal
+ * (contexts/SeedContext.tsx's doc comment), so every action here can be
+ * proven with EITHER credential. Setting up and reissuing are the same
+ * operation: proving identity, then splitting the current seed into a fresh
+ * set of shares that overwrites whatever was configured before.
  */
-type RecoveryKeyPhase = "status" | "enable" | "reveal" | "disable";
-
-function RecoveryKeySection({
-  enabled,
-  stageSeedFromPassphrase,
-  stageSeedFromRecoveryKey,
-  discardStagedSeed,
-  prepareRecoveryKey,
-  confirmPendingMethod,
-  disableRecoveryKey,
-}: {
-  enabled: boolean;
-  stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
-  stageSeedFromRecoveryKey: (key: Uint8Array) => Promise<void>;
-  discardStagedSeed: () => void;
-  prepareRecoveryKey: () => Promise<Uint8Array>;
-  confirmPendingMethod: () => Promise<void>;
-  disableRecoveryKey: () => Promise<void>;
-}) {
-  const [phase, setPhase] = useState<RecoveryKeyPhase>("status");
-  const [passphrase, setPassphrase] = useState("");
-  const [proofInput, setProofInput] = useState("");
-  const [revealedKey, setRevealedKey] = useState<Uint8Array | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
-
-  function cancel() {
-    discardStagedSeed();
-    setPhase("status");
-    setError(null);
-    setPassphrase("");
-    setProofInput("");
-    setRevealedKey(null);
-  }
-
-  async function handleEnable(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      await stageSeedFromPassphrase(passphrase);
-      setPassphrase("");
-      const key = await prepareRecoveryKey();
-      setRevealedKey(key);
-      setPhase("reveal");
-    } catch (err) {
-      setError(err instanceof WrongPassphraseError ? "패스프레이즈가 올바르지 않습니다." : "준비하지 못했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleConfirmReveal() {
-    setSubmitting(true);
-    try {
-      // Firestore is only written here, after the user has acknowledged
-      // (via SecretReveal) that they saved the key. Leaving before this
-      // point discards everything prepared — never a method configured in
-      // Firestore that nobody actually holds the key for.
-      await confirmPendingMethod();
-      setRevealedKey(null);
-      setPhase("status");
-      setMessage("복구 키가 활성화되었습니다.");
-    } catch {
-      setError("저장하지 못했습니다. 다시 시도해주세요.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleDisable(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      await stageSeedFromRecoveryKey(textToRecoverySecret(proofInput));
-      await disableRecoveryKey();
-      setProofInput("");
-      setPhase("status");
-      setMessage("복구 키가 비활성화되었습니다.");
-    } catch (err) {
-      setError(err instanceof InvalidRecoveryKeyError ? "복구 키가 올바르지 않습니다." : "비활성화하지 못했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  if (phase === "reveal" && revealedKey) {
-    return (
-      <section className="w-full max-w-lg space-y-3">
-        <SecretReveal
-          title="복구 키"
-          description="이 키가 있으면 패스프레이즈 없이도 일기를 복호화할 수 있습니다. 안전한 곳(금고, 비밀번호 관리자 등)에 보관하세요. 이 화면은 다시 표시되지 않습니다."
-          confirmLabel={submitting ? "저장 중..." : "완료 — 이 키를 활성화합니다"}
-          confirming={submitting}
-          onConfirm={() => void handleConfirmReveal()}
-        >
-          <SecretCard
-            label="복구 키"
-            text={recoverySecretToText(revealedKey)}
-            filename="privatediary-recovery-key.txt"
-          />
-        </SecretReveal>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
-          취소 (활성화하지 않음)
-        </button>
-      </section>
-    );
-  }
-
-  if (phase === "enable") {
-    return (
-      <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">복구 키 활성화</h2>
-        <form onSubmit={handleEnable} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">본인 확인을 위해 패스프레이즈를 입력하세요.</p>
-          <input
-            type="password"
-            required
-            value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
-            placeholder="패스프레이즈"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-          >
-            {submitting ? "확인 중..." : "다음"}
-          </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
-            취소
-          </button>
-        </form>
-      </section>
-    );
-  }
-
-  if (phase === "disable") {
-    return (
-      <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">복구 키 비활성화</h2>
-        <form onSubmit={handleDisable} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            현재 복구 키를 입력해 본인 확인을 해주세요.
-          </p>
-          <input
-            type="text"
-            required
-            value={proofInput}
-            onChange={(e) => setProofInput(e.target.value)}
-            placeholder="복구 키"
-            className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
-          />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
-            {submitting ? "확인 중..." : "비활성화"}
-          </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
-            취소
-          </button>
-        </form>
-      </section>
-    );
-  }
-
-  return (
-    <section className="w-full max-w-sm space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
-      <p className="text-sm font-medium">
-        복구 키: <strong>{enabled ? "사용 중" : "사용 안 함"}</strong>
-      </p>
-      <p className="text-xs text-zinc-500">
-        랜덤 키 하나로 잠금 해제. 간단하지만, 그 키 하나가 유출되면 그대로 노출됩니다.
-      </p>
-      {message && <p className="text-sm text-green-600">{message}</p>}
-      <button
-        type="button"
-        onClick={() => setPhase(enabled ? "disable" : "enable")}
-        className={
-          enabled
-            ? "w-full rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-500"
-            : "w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background"
-        }
-      >
-        {enabled ? "비활성화" : "활성화"}
-      </button>
-    </section>
-  );
-}
-
-type ShamirPhase = "status" | "enable" | "reveal" | "disable";
-
 function ShamirSection({
   config,
   stageSeedFromPassphrase,
   stageSeedFromShamirShares,
   discardStagedSeed,
-  prepareShamirRecovery,
-  confirmPendingMethod,
+  prepareShamir,
+  confirmPendingShamir,
   disableShamir,
 }: {
   config: { n: number; k: number } | null;
   stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
   stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
   discardStagedSeed: () => void;
-  prepareShamirRecovery: (n: number, k: number) => Promise<Uint8Array[]>;
-  confirmPendingMethod: () => Promise<void>;
+  prepareShamir: (n: number, k: number) => Promise<Uint8Array[]>;
+  confirmPendingShamir: () => Promise<void>;
   disableShamir: () => Promise<void>;
 }) {
   const [phase, setPhase] = useState<ShamirPhase>("status");
+  const [proveMode, setProveMode] = useState<ProveMode>("passphrase");
   const [passphrase, setPassphrase] = useState("");
+  const [proofShares, setProofShares] = useState<string[]>(config ? Array(config.k).fill("") : []);
   const [newN, setNewN] = useState(5);
   const [newK, setNewK] = useState(3);
-  const [proofShares, setProofShares] = useState<string[]>([]);
   const [revealedShares, setRevealedShares] = useState<Uint8Array[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -601,17 +532,33 @@ function ShamirSection({
     setPhase("status");
     setError(null);
     setPassphrase("");
-    setProofShares([]);
+    setProofShares(config ? Array(config.k).fill("") : []);
     setRevealedShares([]);
   }
 
-  function startDisable() {
+  function startProve(mode: ShamirPhase) {
     setError(null);
+    setProveMode("passphrase");
     setProofShares(config ? Array(config.k).fill("") : []);
-    setPhase("disable");
+    setPhase(mode);
   }
 
-  async function handleEnable(event: FormEvent<HTMLFormElement>) {
+  async function stage() {
+    if (proveMode === "passphrase") {
+      await stageSeedFromPassphrase(passphrase);
+      setPassphrase("");
+    } else {
+      await stageSeedFromShamirShares(proofShares.map((s) => textToRecoverySecret(s)));
+    }
+  }
+
+  function proveErrorMessage(err: unknown): string {
+    if (err instanceof WrongPassphraseError) return "패스프레이즈가 올바르지 않습니다.";
+    if (err instanceof InvalidShamirSharesError) return "조각들이 올바른 시드로 복원되지 않습니다.";
+    return "본인 확인에 실패했습니다.";
+  }
+
+  async function handleProveForSetup(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     if (newK < 2 || newN < newK || newN > 10) {
@@ -620,13 +567,12 @@ function ShamirSection({
     }
     setSubmitting(true);
     try {
-      await stageSeedFromPassphrase(passphrase);
-      setPassphrase("");
-      const shares = await prepareShamirRecovery(newN, newK);
+      await stage();
+      const shares = await prepareShamir(newN, newK);
       setRevealedShares(shares);
       setPhase("reveal");
     } catch (err) {
-      setError(err instanceof WrongPassphraseError ? "패스프레이즈가 올바르지 않습니다." : "준비하지 못했습니다.");
+      setError(proveErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
@@ -635,10 +581,13 @@ function ShamirSection({
   async function handleConfirmReveal() {
     setSubmitting(true);
     try {
-      await confirmPendingMethod();
+      // Firestore is only written here, after the user has acknowledged
+      // (via SecretReveal) that they saved the new shares. Leaving before
+      // this point discards everything prepared.
+      await confirmPendingShamir();
       setRevealedShares([]);
       setPhase("status");
-      setMessage("Shamir 분산이 활성화되었습니다.");
+      setMessage(config ? "Shamir 분산이 재발급되었습니다." : "Shamir 분산이 활성화되었습니다.");
     } catch {
       setError("저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
@@ -646,33 +595,56 @@ function ShamirSection({
     }
   }
 
-  async function handleDisable(event: FormEvent<HTMLFormElement>) {
+  async function handleProveForDisable(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await stageSeedFromShamirShares(proofShares.map((s) => textToRecoverySecret(s)));
+      await stage();
       await disableShamir();
-      setProofShares([]);
       setPhase("status");
       setMessage("Shamir 분산이 비활성화되었습니다.");
     } catch (err) {
-      setError(
-        err instanceof InvalidShamirSharesError
-          ? "조각들이 올바른 시드로 복원되지 않습니다."
-          : "비활성화하지 못했습니다."
-      );
+      setError(proveErrorMessage(err));
     } finally {
       setSubmitting(false);
     }
   }
+
+  const proveModeToggle = (
+    <div className="flex gap-2 text-xs">
+      <button
+        type="button"
+        onClick={() => setProveMode("passphrase")}
+        className={
+          proveMode === "passphrase"
+            ? "flex-1 rounded bg-foreground px-2 py-1 font-medium text-background"
+            : "flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700"
+        }
+      >
+        패스프레이즈로 인증
+      </button>
+      <button
+        type="button"
+        disabled={!config}
+        onClick={() => setProveMode("shamir")}
+        className={
+          proveMode === "shamir"
+            ? "flex-1 rounded bg-foreground px-2 py-1 font-medium text-background disabled:opacity-50"
+            : "flex-1 rounded border border-zinc-300 px-2 py-1 disabled:opacity-50 dark:border-zinc-700"
+        }
+      >
+        기존 조각으로 인증
+      </button>
+    </div>
+  );
 
   if (phase === "reveal" && revealedShares.length > 0) {
     return (
       <section className="w-full max-w-lg space-y-3">
         <SecretReveal
           title="Shamir 분산 조각"
-          description={`총 ${revealedShares.length}개의 조각 중 ${newK}개를 모으면 시드를 복원할 수 있습니다. 조각 하나만으로는 아무 의미가 없으니, 각 조각을 서로 다른 안전한 곳에 나눠 보관하세요. 이 화면은 다시 표시되지 않습니다.`}
+          description={`총 ${revealedShares.length}개의 조각 중 ${newK}개를 모으면 시드를 복원할 수 있습니다. 조각 하나만으로는 아무 의미가 없으니, 각 조각을 서로 다른 안전한 곳에 나눠 보관하세요. 이전에 발급된 조각이 있었다면 이제 무효가 됩니다. 이 화면은 다시 표시되지 않습니다.`}
           confirmLabel={submitting ? "저장 중..." : "완료 — 이 조각들을 활성화합니다"}
           confirming={submitting}
           onConfirm={() => void handleConfirmReveal()}
@@ -696,20 +668,38 @@ function ShamirSection({
     );
   }
 
-  if (phase === "enable") {
+  if (phase === "prove") {
     return (
       <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">Shamir 분산 활성화</h2>
-        <form onSubmit={handleEnable} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">본인 확인을 위해 패스프레이즈를 입력하세요.</p>
-          <input
-            type="password"
-            required
-            value={passphrase}
-            onChange={(e) => setPassphrase(e.target.value)}
-            placeholder="패스프레이즈"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-          />
+        <h2 className="text-lg font-semibold">{config ? "Shamir 분산 재발급" : "Shamir 분산 활성화"}</h2>
+        <form onSubmit={handleProveForSetup} className="space-y-3">
+          {proveModeToggle}
+          {proveMode === "passphrase" ? (
+            <input
+              type="password"
+              required
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="패스프레이즈"
+              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            />
+          ) : (
+            <div className="space-y-2">
+              {proofShares.map((value, i) => (
+                <input
+                  key={i}
+                  type="text"
+                  required
+                  value={value}
+                  onChange={(e) =>
+                    setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+                  }
+                  placeholder={`조각 ${i + 1}`}
+                  className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                />
+              ))}
+            </div>
+          )}
           <div className="flex gap-2">
             <label className="flex-1 text-xs">
               전체(N)
@@ -754,23 +744,34 @@ function ShamirSection({
     return (
       <section className="w-full max-w-sm space-y-4">
         <h2 className="text-lg font-semibold">Shamir 분산 비활성화</h2>
-        <form onSubmit={handleDisable} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            본인 확인을 위해 {config.k}개의 조각을 입력하세요.
-          </p>
-          {proofShares.map((value, i) => (
+        <form onSubmit={handleProveForDisable} className="space-y-3">
+          {proveModeToggle}
+          {proveMode === "passphrase" ? (
             <input
-              key={i}
-              type="text"
+              type="password"
               required
-              value={value}
-              onChange={(e) =>
-                setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
-              }
-              placeholder={`조각 ${i + 1}`}
-              className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="패스프레이즈"
+              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
             />
-          ))}
+          ) : (
+            <div className="space-y-2">
+              {proofShares.map((value, i) => (
+                <input
+                  key={i}
+                  type="text"
+                  required
+                  value={value}
+                  onChange={(e) =>
+                    setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+                  }
+                  placeholder={`조각 ${i + 1}`}
+                  className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                />
+              ))}
+            </div>
+          )}
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"
@@ -797,17 +798,24 @@ function ShamirSection({
         N개 조각으로 나눠, K개를 모아야 잠금 해제. 조각 하나만 유출되면 무의미해 더 안전합니다.
       </p>
       {message && <p className="text-sm text-green-600">{message}</p>}
-      <button
-        type="button"
-        onClick={() => (config ? startDisable() : setPhase("enable"))}
-        className={
-          config
-            ? "w-full rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-500"
-            : "w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background"
-        }
-      >
-        {config ? "비활성화" : "활성화"}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => startProve("prove")}
+          className="flex-1 rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background"
+        >
+          {config ? "재발급" : "활성화"}
+        </button>
+        {config && (
+          <button
+            type="button"
+            onClick={() => startProve("disable")}
+            className="flex-1 rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-500"
+          >
+            비활성화
+          </button>
+        )}
+      </div>
     </section>
   );
 }
@@ -863,9 +871,9 @@ function ResetKeysSection({
       <div>
         <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">초기화</h2>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
-          기존 패스프레이즈를 모른다면 새 시드를 발급하는 방법뿐입니다. <strong>지금까지 작성한
-          모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 활성화해둔 복호화 방법도 함께
-          꺼집니다. 이 작업은 되돌릴 수 없습니다.
+          패스프레이즈와 Shamir 분산을 모두 잃어버렸다면 새 시드를 발급하는 방법뿐입니다.{" "}
+          <strong>지금까지 작성한 모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 설정해둔
+          Shamir 분산도 함께 꺼집니다. 이 작업은 되돌릴 수 없습니다.
         </p>
       </div>
 

@@ -24,7 +24,7 @@ lib/
                     # 모듈의 기능을 사용한다 (감사 용이성 확보를 위한 단일 진입점).
     index.ts       # 공개 API 배럴 — 이 파일 외부에서 개별 파일을 직접 import하지 않는다
     constants.ts   # 알고리즘 버전 태그, KDF 반복 횟수 등 상수
-    errors.ts      # WrongPassphraseError / TamperedCiphertextError / InvalidRecoveryKeyError / InvalidShamirSharesError
+    errors.ts      # WrongPassphraseError / TamperedCiphertextError / InvalidShamirSharesError
     types.ts       # 바이트 기반 타입(HybridKeyPair 등) + Firestore 저장용 base64 타입
     encoding.ts    # 의존성 없는 base64/base64url 인코딩
     memory.ts       # wipeBytes() — 세션 종료 시 키 폐기용
@@ -33,9 +33,10 @@ lib/
     subSeeds.ts        # HKDF로 X25519/ML-KEM 하위 시드 파생
     keys.ts             # deriveHybridKeyPair() — 시드로부터 결정론적 키 쌍 재구성
     passphrase.ts        # wrapSeed / unwrapSeed / rewrapSeed (PBKDF2 + AES-GCM)
-    recovery.ts            # 복구 키(랜덤 256비트 AES-GCM wrap) / Shamir 비밀 분산 — 니모닉 대체.
-                            # 둘 다 옵트인이며, 재구성된 시드가 진짜인지는 seedMatchesPublicKeys()로
-                            # 검증한다 (Firestore에 이미 저장된 publicKeys와 재파생 결과를 비교)
+    recovery.ts            # Shamir 비밀 분산 — 니모닉 대체이자 패스프레이즈와 동등한 자격의
+                            # 유일한 대안. opt-in이며, 재구성된 시드가 진짜인지는
+                            # seedMatchesPublicKeys()로 검증한다 (Firestore에 이미 저장된
+                            # publicKeys와 재파생 결과를 비교)
     hybridKem.ts             # encapsulateContentKey / decapsulateContentKey (X25519+ML-KEM-768)
     entry.ts                  # encryptEntry / decryptEntry (일기 항목 단위)
     codec.ts                   # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
@@ -52,13 +53,13 @@ contexts/
   AuthContext.tsx    # Firebase 로그인 상태만 추적
   OtpContext.tsx      # OTP 활성화 여부/이번 세션 인증 여부를 ID 토큰 커스텀 클레임에서 추적.
                        # AuthContext와 SeedContext 사이에 위치 (로그인 이후, 시드 상태 이전 게이트)
-  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + 활성화된 복호화 방법들을 추적.
-                       # unlock/lock/changePassphrase/resetKeys 외에, 방법별
-                       # 활성화/비활성화를 위한 stage/prepare/confirm 3단계 API 보유
-                       # (활성화는 패스프레이즈로, 비활성화는 그 방법 자체로 증명해야 함)
+  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + Shamir 설정 여부를 추적.
+                       # unlock/lock/changePassphrase/resetKeys 외에, Shamir 설정/재발급을
+                       # 위한 stage/prepare/confirm 3단계 API와 resetPassphraseWithShamirShares
+                       # 보유 (패스프레이즈·Shamir 어느 쪽으로도 서로를 관리 가능 — 아래 참조)
 
 components/
-  SecretReveal.tsx              # "한 번만 보여주고 다시 못 봄" 공용 스캐폴드 (복구 키/Shamir 조각에 재사용)
+  SecretReveal.tsx              # "한 번만 보여주고 다시 못 봄" 공용 스캐폴드 (Shamir 조각에 재사용)
   SecretCard.tsx                 # 복호화 비밀 하나를 QR + 텍스트 + 다운로드로 표시
   OtpGate.tsx                     # OTP 활성화 시 코드 입력 전까지 children을 가리는 래퍼 (/entries에서 사용)
   OtpQrCard.tsx                    # OTP 설정용 QR(otpauth:// URI) + 수동 입력 코드 표시
@@ -88,13 +89,22 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 
 ## 일기 복호화 방법
 
-원래 설계(ARCHITECTURE.md §3.1)의 BIP39 24단어 니모닉은 제거했다. "패스프레이즈를 잃어버리면 애초에 복구할 방법이 없다"는 걸 깨닫고, "복구용 백업"이라는 프레이밍 자체를 버렸다 — 대신 패스프레이즈와 **동등한 자격의, 독립적으로 켜고 끌 수 있는 복호화 방법**을 `/settings`에서 원하는 만큼 추가할 수 있다.
+원래 설계(ARCHITECTURE.md §3.1)의 BIP39 24단어 니모닉은 제거했다. 이후 독립적으로 켜고 끄는 복수의 "복구 방법"(복구 키 + Shamir, OR로 결합) 모델을 거쳐, 지금은 **패스프레이즈와 Shamir 비밀 분산 두 가지만 남기고, 이 둘을 완전히 동등한 자격("상호보안적")으로** 만들었다.
 
-- **패스프레이즈 (항상 켜져 있음)** — 유일하게 끌 수 없는 기본 방법. 이것 하나만 쓴다면 잃어버렸을 때 정말로 복구 불가능하다는 점은 여전하다.
-- **복구 키 (opt-in)** — 랜덤 256비트 키로 시드를 AES-GCM wrap해 Firestore에 저장(`decryptionMethods.recoveryKey`). 키 자체는 한 번만 보여주고 어디에도 저장하지 않는다. QR/텍스트 파일로 내보낼 수 있다.
+- **패스프레이즈 (항상 켜져 있음)** — 평소에 쓰는 기본 방법. 끌 수 없다.
 - **Shamir 비밀 분산 (opt-in)** — 시드 자체를 N개 조각으로 분할, K개 이상 모아야 복원(`shamir-secret-sharing`, Cure53·Zellic 감사 완료 라이브러리, WASM 없음). Firestore에는 `(n, k)` 형태만 저장되고 조각 자체는 서버에 전혀 남지 않는다.
 
-셋 중 활성화된 것 아무거나 하나로 잠금 해제할 수 있다(AND가 아니라 OR) — 둘 다, 하나만, 또는 패스프레이즈만 쓸 수도 있다. **활성화**는 패스프레이즈로 증명하면 되고, **비활성화는 그 방법 자체를 증명해야** 한다(2FA 설정 변경에 2FA를 요구하는 것과 같은 이유 — 패스프레이즈만 탈취당한 공격자가 다른 방법을 조용히 꺼버리지 못하게 함). 재구성된 시드가 진짜인지는 별도 저장 없이 `deriveHybridKeyPair(seed).publicKeys`를 Firestore에 이미 있는 공개키와 비교해서 검증한다(`seedMatchesPublicKeys`).
+둘 중 **어느 쪽을 알고 있어도** 다음 세 가지를 모두 할 수 있다:
+
+1. 일기를 복호화한다 (`unlock` / `unlockWithShamirShares`).
+2. 패스프레이즈를 재설정한다 (`changePassphrase`는 기존 패스프레이즈로, `resetPassphraseWithShamirShares`는 K개의 Shamir 조각으로 — 어느 쪽이든 시드 자체는 그대로이므로 기존 일기와 이미 발급된 Shamir 조각이 계속 유효하다).
+3. Shamir 조각을 새로 만들거나 재발급한다 (`prepareShamir`/`confirmPendingShamir` — 어느 쪽으로 증명했든 같은 동작).
+
+단, **어느 한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없다** — 구조적으로 보장된다. Shamir 조각을 복원해도 패스프레이즈 문자열 자체는 얻을 수 없고(시드로부터 패스프레이즈가 유도되지 않으므로), 패스프레이즈로 시드를 풀어도 이미 발급된 Shamir 조각의 실제 값은 알 수 없다(`splitSeedShamir`가 호출할 때마다 새 난수를 뽑으므로, 재발급은 이전 조각과 무관한 완전히 새로운 조각을 만들 뿐 — `recovery.test.ts`의 "reissuing" 테스트가 이를 검증한다).
+
+평소에는 패스프레이즈만 쓰고, 그것을 잊어버렸을 때 비로소 Shamir가 비상 수단으로 쓰인다. Shamir로 복구한 뒤에는 새 패스프레이즈를 설정하길 권장한다(강제는 아님). 반대로 Shamir 조각을 잃어버렸다면 패스프레이즈로 새 조각을 재발급하면 된다. 재구성된 시드가 진짜인지는 별도 저장 없이 `deriveHybridKeyPair(seed).publicKeys`를 Firestore에 이미 있는 공개키와 비교해서 검증한다(`seedMatchesPublicKeys`).
+
+패스프레이즈와 Shamir를 **둘 다** 잃어버린 경우에만 `/settings`의 "초기화"(브랜드 뉴 시드 발급, 기존 일기 전부 영구 손실)가 남는다.
 
 ## OTP 인증 (접근 게이트, 암호화 요인 아님)
 
@@ -103,7 +113,7 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 - TOTP 시크릿은 `functions/`(Cloud Functions, Admin SDK)만 만들고 저장한다 — `otpSecrets/{uid}`는 `firestore.rules`에서 클라이언트에 완전히 차단.
 - 코드가 맞으면 Cloud Function이 Firebase Auth ID 토큰에 `otpEnabled` / `otpVerified` / `otpVerifiedAt` 커스텀 클레임을 심고, `firestore.rules`의 `otpSatisfied()`가 `entries` 읽기에서 이를 요구한다.
 - `users/{uid}` 읽기는 OTP로 게이트하지 **않는다** — `publicKeys`가 있어야 쓰기가 되는데, 쓰기는 잠금 여부와 무관하게 항상 가능해야 하기 때문(ARCHITECTURE.md §3.2 규칙 5).
-- 활성화는 QR 스캔 + 코드 1회 확인, 비활성화는 현재 유효한 코드가 있어야 함(복호화 방법 비활성화와 같은 "그 방법 자체로 증명" 원칙).
+- 활성화는 QR 스캔 + 코드 1회 확인, 비활성화는 현재 유효한 코드가 있어야 함.
 - 6자리 코드의 낮은 엔트로피 때문에 Cloud Function에 실패 5회당 60초 잠금을 넣었다 — 없으면 유효한 로그인 세션을 가진 공격자가 무차별 대입할 수 있다.
 
 ## Firestore 규칙 / Cloud Functions 배포

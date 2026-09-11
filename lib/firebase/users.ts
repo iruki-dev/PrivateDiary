@@ -11,15 +11,11 @@ import { db } from "./config";
 import {
   publicKeysFromStorage,
   publicKeysToStorage,
-  recoveryKeyWrappedSeedFromStorage,
-  recoveryKeyWrappedSeedToStorage,
   wrappedSeedFromStorage,
   wrappedSeedToStorage,
   type DecryptionMethodsConfig,
   type HybridPublicKeysRaw,
   type HybridPublicKeysStorage,
-  type RecoveryKeyWrappedSeed,
-  type RecoveryKeyWrappedSeedStorage,
   type WrappedSeed,
   type WrappedSeedStorage,
 } from "@/lib/crypto";
@@ -32,7 +28,6 @@ import {
  */
 
 interface DecryptionMethodsDocData {
-  recoveryKey?: { wrappedSeed: RecoveryKeyWrappedSeedStorage };
   shamir?: { n: number; k: number };
 }
 
@@ -47,22 +42,13 @@ export interface UserKeyRecord {
   publicKeys: HybridPublicKeysRaw;
   wrappedSeed: WrappedSeed;
   decryptionMethods: DecryptionMethodsConfig;
-  /** Only present when decryptionMethods.recoveryKeyEnabled is true. */
-  recoveryWrappedSeed: RecoveryKeyWrappedSeed | null;
 }
 
-function parseDecryptionMethods(data: DecryptionMethodsDocData | undefined): {
-  decryptionMethods: DecryptionMethodsConfig;
-  recoveryWrappedSeed: RecoveryKeyWrappedSeed | null;
-} {
+function parseDecryptionMethods(
+  data: DecryptionMethodsDocData | undefined
+): DecryptionMethodsConfig {
   return {
-    decryptionMethods: {
-      recoveryKeyEnabled: data?.recoveryKey != null,
-      shamir: data?.shamir ? { n: data.shamir.n, k: data.shamir.k } : null,
-    },
-    recoveryWrappedSeed: data?.recoveryKey
-      ? recoveryKeyWrappedSeedFromStorage(data.recoveryKey.wrappedSeed)
-      : null,
+    shamir: data?.shamir ? { n: data.shamir.n, k: data.shamir.k } : null,
   };
 }
 
@@ -76,7 +62,7 @@ export async function getUserKeyRecord(uid: string): Promise<UserKeyRecord | nul
   return {
     publicKeys: publicKeysFromStorage(data.publicKeys),
     wrappedSeed: wrappedSeedFromStorage(data.wrappedSeed),
-    ...parseDecryptionMethods(data.decryptionMethods),
+    decryptionMethods: parseDecryptionMethods(data.decryptionMethods),
   };
 }
 
@@ -94,7 +80,14 @@ export async function createUserKeyRecord(
   });
 }
 
-/** Passphrase change (Phase 4, ARCHITECTURE.md §3.6 rule 5): only the wrapped seed changes. */
+/**
+ * Passphrase change (ARCHITECTURE.md §3.6 rule 5 / §3.7): only the wrapped
+ * seed changes. Symmetric with Shamir — this is called whether the caller
+ * proved the OLD passphrase (normal change) or Shamir shares (resetting a
+ * forgotten passphrase); either way only the wrapping changes, never the
+ * seed itself, so existing entries and any configured Shamir shares stay
+ * valid.
+ */
 export async function updateWrappedSeed(uid: string, wrappedSeed: WrappedSeed): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
     wrappedSeed: wrappedSeedToStorage(wrappedSeed),
@@ -108,10 +101,11 @@ export async function updateWrappedSeed(uid: string, wrappedSeed: WrappedSeed): 
  * requires it stay equal to the existing value, matching the original
  * account creation time rather than the reset time.
  *
- * Every configured decryption method is cleared: a recovery key or Shamir
- * share set up against the OLD seed can no longer reconstruct anything
- * meaningful once the seed changes, so leaving them configured would just
- * be a stale, misleading UI state.
+ * Any configured Shamir shares are cleared: shares split against the OLD
+ * seed can no longer reconstruct anything meaningful once the seed
+ * changes. This is the true last resort — for a merely-forgotten
+ * passphrase, prefer updateWrappedSeed() via Shamir proof instead, which
+ * keeps the same seed (and thus every existing entry) intact.
  */
 export async function resetUserKeyRecord(
   uid: string,
@@ -125,31 +119,14 @@ export async function resetUserKeyRecord(
   });
 }
 
-/** Enables recovery-key decryption, leaving Shamir (if enabled) untouched. */
-export async function enableRecoveryKeyMethod(
-  uid: string,
-  wrapped: RecoveryKeyWrappedSeed
-): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    "decryptionMethods.recoveryKey": { wrappedSeed: recoveryKeyWrappedSeedToStorage(wrapped) },
-  });
-}
-
-/** Disables recovery-key decryption, leaving Shamir (if enabled) untouched. */
-export async function disableRecoveryKeyMethod(uid: string): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    "decryptionMethods.recoveryKey": deleteField(),
-  });
-}
-
-/** Enables Shamir-split decryption, leaving the recovery key (if enabled) untouched. No share material is stored — only the (n, k) shape. */
-export async function enableShamirMethod(uid: string, n: number, k: number): Promise<void> {
+/** Sets up or reissues Shamir shares — the same write either way, since reissuing just overwrites the (n, k) shape (the shares themselves were never stored). */
+export async function setShamirMethod(uid: string, n: number, k: number): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
     "decryptionMethods.shamir": { n, k },
   });
 }
 
-/** Disables Shamir-split decryption, leaving the recovery key (if enabled) untouched. */
+/** Turns Shamir off entirely. */
 export async function disableShamirMethod(uid: string): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
     "decryptionMethods.shamir": deleteField(),

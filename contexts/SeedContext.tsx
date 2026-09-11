@@ -13,9 +13,7 @@ import { useAuth } from "./AuthContext";
 import {
   getUserKeyRecord,
   resetUserKeyRecord,
-  enableRecoveryKeyMethod as enableRecoveryKeyMethodFirestore,
-  disableRecoveryKeyMethod as disableRecoveryKeyMethodFirestore,
-  enableShamirMethod as enableShamirMethodFirestore,
+  setShamirMethod as setShamirMethodFirestore,
   disableShamirMethod as disableShamirMethodFirestore,
   updateWrappedSeed,
 } from "@/lib/firebase/users";
@@ -23,21 +21,16 @@ import {
   combineSeedShamir,
   deriveHybridKeyPair,
   generateMasterSeed,
-  generateRecoveryKey,
   rewrapSeed,
   seedMatchesPublicKeys,
   splitSeedShamir,
   unwrapSeed,
-  unwrapSeedWithRecoveryKey,
   wipeBytes,
   wrapSeed,
-  wrapSeedWithRecoveryKey,
-  InvalidRecoveryKeyError,
   InvalidShamirSharesError,
   type DecryptionMethodsConfig,
   type HybridPrivateKeys,
   type HybridPublicKeysRaw,
-  type RecoveryKeyWrappedSeed,
   type WrappedSeed,
 } from "@/lib/crypto";
 
@@ -52,41 +45,53 @@ import {
  *
  * Writing an entry only needs `publicKeys` + being signed in — it works in
  * "locked" state too (ARCHITECTURE.md §3.2 rule 5). Only reading needs
- * "unlocked", reachable via the passphrase (always available — there is
- * deliberately no way to disable it, since losing every configured method
- * would mean permanent data loss with nothing left to fall back to) or,
- * if independently enabled, a recovery key and/or Shamir shares
- * (unlockWithRecoveryKey / unlockWithShamirShares). Any ONE of the active
- * methods is sufficient — they're everyday alternatives to the passphrase,
- * not a break-glass-only "recovery" path.
+ * "unlocked", reachable via the passphrase or, if configured, K of the
+ * enabled Shamir shares.
  *
- * Managing decryption methods (enable/disable) follows a three-phase
- * stage/prepare/confirm protocol:
+ * Passphrase and Shamir shares are CO-EQUAL master credentials
+ * (ARCHITECTURE.md §3.7) — either one, on its own, can:
+ *   1. Decrypt the diary (unlock / unlockWithShamirShares).
+ *   2. Reset the passphrase to a new value (changePassphrase /
+ *      resetPassphraseWithShamirShares) without touching the seed, so every
+ *      existing entry and any already-issued Shamir shares stay valid.
+ *   3. Create or reissue Shamir shares from the current seed (stage +
+ *      prepareShamir + confirmPendingShamir).
+ * Neither can reveal the other's actual value: reconstructing the seed from
+ * Shamir shares never yields the passphrase string (the passphrase is never
+ * derived from or embedded in the seed), and unwrapping the seed via the
+ * passphrase never yields a previously-issued set of Shamir shares (split()
+ * draws fresh randomness on every call — see recovery.test.ts). This is why
+ * the passphrase is the everyday default, with Shamir as the one thing that
+ * still works if the passphrase itself is lost.
  *
- * 1. STAGE proves you can currently decrypt — via the passphrase, or via
- *    any OTHER already-enabled method. This only reconstructs the seed in
- *    memory; nothing is written to Firestore yet. To DISABLE a specific
- *    method, though, you must stage via THAT method specifically (see
- *    disableRecoveryKey / disableShamir) — otherwise a passphrase-only
- *    compromise could silently strip away someone's other safety nets.
- * 2. PREPARE generates the new method's material (a recovery key, or
- *    Shamir shares) from the staged seed and returns it for display —
- *    still nothing written to Firestore.
- * 3. CONFIRM is the ONLY step that writes to Firestore, merging the new
- *    method in alongside whatever else is already enabled, and only fires
- *    when the user has acknowledged (via SecretReveal) that they've saved
- *    the material. If the user navigates away before confirming, nothing
- *    was ever written. discardStagedSeed() (also called automatically on
- *    unmount) wipes any staged seed and unconfirmed prepared material.
+ * Setting up or reissuing Shamir follows a three-phase stage/prepare/confirm
+ * protocol so nothing is written to Firestore until the user has
+ * acknowledged saving the newly generated shares:
+ *
+ * 1. STAGE proves you currently hold ONE of the two co-equal credentials —
+ *    via the passphrase, or via K existing Shamir shares. This only
+ *    reconstructs the seed in memory; nothing is written to Firestore yet.
+ * 2. PREPARE splits the staged seed into a fresh set of Shamir shares and
+ *    returns them for display — still nothing written to Firestore.
+ * 3. CONFIRM is the ONLY step that writes to Firestore, overwriting whatever
+ *    Shamir configuration existed before, and only fires once the user has
+ *    acknowledged (via SecretReveal) that they've saved the shares. If the
+ *    user navigates away before confirming, nothing was ever written.
+ *    discardStagedSeed() (also called automatically on unmount) wipes any
+ *    staged seed and unconfirmed prepared shares.
+ *
+ * Disabling Shamir only requires a staged seed (via either credential,
+ * since they're co-equal) — there is no "prove this specific method" gate
+ * the way there was under the earlier OR-toggle recovery-method design.
  */
 
 export type SeedStatus = "unknown" | "not-issued" | "locked" | "unlocked";
 
-type StagedVia = "passphrase" | "recovery-key" | "shamir";
-
-type PendingMethod =
-  | { kind: "recovery-key"; key: Uint8Array; wrapped: RecoveryKeyWrappedSeed }
-  | { kind: "shamir"; shares: Uint8Array[]; n: number; k: number };
+interface PendingShamir {
+  shares: Uint8Array[];
+  n: number;
+  k: number;
+}
 
 interface SeedContextValue {
   status: SeedStatus;
@@ -94,8 +99,6 @@ interface SeedContextValue {
   privateKeys: HybridPrivateKeys | null;
   /** Unwraps the seed with `passphrase` and derives private keys for this session. Throws WrongPassphraseError on failure. */
   unlock: (passphrase: string) => Promise<void>;
-  /** Unlocks using the enabled recovery key instead of the passphrase. Throws InvalidRecoveryKeyError on failure. */
-  unlockWithRecoveryKey: (recoveryKey: Uint8Array) => Promise<void>;
   /** Unlocks using K of the enabled Shamir shares instead of the passphrase. Throws InvalidShamirSharesError on failure. */
   unlockWithShamirShares: (shares: Uint8Array[]) => Promise<void>;
   /** Wipes private keys from memory; returns to "locked". */
@@ -103,16 +106,26 @@ interface SeedContextValue {
   /** Re-reads users/{uid} from Firestore (e.g. right after key issuance). */
   refresh: () => Promise<void>;
   /**
-   * Passphrase change (ARCHITECTURE.md §3.6 rule 5): requires the correct
-   * current passphrase. Throws WrongPassphraseError otherwise, and changes
-   * nothing.
+   * Passphrase change: requires the correct current passphrase. Throws
+   * WrongPassphraseError otherwise, and changes nothing.
    */
   changePassphrase: (oldPassphrase: string, newPassphrase: string) => Promise<void>;
   /**
+   * Resets a forgotten passphrase using K of the enabled Shamir shares
+   * instead of the old passphrase. The underlying seed is unchanged — every
+   * existing entry and any already-issued Shamir shares stay valid. Also
+   * unlocks the session, since the caller just proved a master credential.
+   * Throws InvalidShamirSharesError if the shares don't reconstruct the
+   * seed on file.
+   */
+  resetPassphraseWithShamirShares: (shares: Uint8Array[], newPassphrase: string) => Promise<void>;
+  /**
    * "초기화" (ARCHITECTURE.md §3.6 rule 5): issues a brand-new seed and
-   * discards the old one, including every enabled decryption method. Every
+   * discards the old one, including any configured Shamir shares. Every
    * previously written entry becomes permanently undecryptable — the
    * caller (UI) is responsible for warning the user before calling this.
+   * This is the true last resort; a merely-forgotten passphrase should use
+   * resetPassphraseWithShamirShares instead, which keeps every entry.
    */
   resetKeys: (newPassphrase: string) => Promise<void>;
 
@@ -120,21 +133,15 @@ interface SeedContextValue {
   decryptionMethods: DecryptionMethodsConfig | null;
   /** Stage a seed via the passphrase. Throws WrongPassphraseError on failure. */
   stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
-  /** Stage a seed by proving the enabled recovery key. Throws InvalidRecoveryKeyError on failure. */
-  stageSeedFromRecoveryKey: (recoveryKey: Uint8Array) => Promise<void>;
   /** Stage a seed by proving K of the enabled Shamir shares. Throws InvalidShamirSharesError on failure. */
   stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
-  /** Discards a staged seed and any unconfirmed prepared material without writing anything (cancel, or automatic on unmount). */
+  /** Discards a staged seed and any unconfirmed prepared shares without writing anything (cancel, or automatic on unmount). */
   discardStagedSeed: () => void;
-  /** Generates a new recovery key from the staged seed and returns it for display. Does NOT write to Firestore yet. */
-  prepareRecoveryKey: () => Promise<Uint8Array>;
-  /** Splits the staged seed into Shamir shares and returns them for display. Does NOT write to Firestore yet. */
-  prepareShamirRecovery: (n: number, k: number) => Promise<Uint8Array[]>;
-  /** Writes whatever was prepared (recovery key or Shamir config) to Firestore, alongside any already-enabled method. Call only after the user has acknowledged saving the material. */
-  confirmPendingMethod: () => Promise<void>;
-  /** Disables the recovery key. Requires having staged via the recovery key itself. */
-  disableRecoveryKey: () => Promise<void>;
-  /** Disables Shamir. Requires having staged via Shamir shares themselves. */
+  /** Splits the staged seed into a fresh set of Shamir shares and returns them for display. Does NOT write to Firestore yet — works for both first-time setup and reissue. */
+  prepareShamir: (n: number, k: number) => Promise<Uint8Array[]>;
+  /** Writes the prepared Shamir configuration to Firestore, overwriting any previous one. Call only after the user has acknowledged saving the shares. */
+  confirmPendingShamir: () => Promise<void>;
+  /** Disables Shamir. Requires a staged seed (via either co-equal credential). */
   disableShamir: () => Promise<void>;
 }
 
@@ -149,11 +156,9 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     null
   );
   const wrappedSeedRef = useRef<WrappedSeed | null>(null);
-  const recoveryWrappedSeedRef = useRef<RecoveryKeyWrappedSeed | null>(null);
   const publicKeysRef = useRef<HybridPublicKeysRaw | null>(null);
   const stagedSeedRef = useRef<Uint8Array | null>(null);
-  const stagedViaRef = useRef<StagedVia | null>(null);
-  const pendingMethodRef = useRef<PendingMethod | null>(null);
+  const pendingShamirRef = useRef<PendingShamir | null>(null);
 
   const wipePrivateKeys = useCallback(() => {
     setPrivateKeys((prev) => {
@@ -162,27 +167,21 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
-  const clearPendingMethod = useCallback(() => {
-    const pending = pendingMethodRef.current;
-    if (pending?.kind === "recovery-key") {
-      wipeBytes(pending.key);
-    } else if (pending?.kind === "shamir") {
-      wipeBytes(...pending.shares);
-    }
-    pendingMethodRef.current = null;
+  const clearPendingShamir = useCallback(() => {
+    const pending = pendingShamirRef.current;
+    if (pending) wipeBytes(...pending.shares);
+    pendingShamirRef.current = null;
   }, []);
 
   const clearStagedSeed = useCallback(() => {
     if (stagedSeedRef.current) wipeBytes(stagedSeedRef.current);
     stagedSeedRef.current = null;
-    stagedViaRef.current = null;
-    clearPendingMethod();
-  }, [clearPendingMethod]);
+    clearPendingShamir();
+  }, [clearPendingShamir]);
 
   const refresh = useCallback(async () => {
     if (!user) {
       wrappedSeedRef.current = null;
-      recoveryWrappedSeedRef.current = null;
       publicKeysRef.current = null;
       setPublicKeys(null);
       setDecryptionMethods(null);
@@ -192,7 +191,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     const record = await getUserKeyRecord(user.uid);
     if (!record) {
       wrappedSeedRef.current = null;
-      recoveryWrappedSeedRef.current = null;
       publicKeysRef.current = null;
       setPublicKeys(null);
       setDecryptionMethods(null);
@@ -200,7 +198,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       return;
     }
     wrappedSeedRef.current = record.wrappedSeed;
-    recoveryWrappedSeedRef.current = record.recoveryWrappedSeed;
     publicKeysRef.current = record.publicKeys;
     setPublicKeys(record.publicKeys);
     setDecryptionMethods(record.decryptionMethods);
@@ -219,7 +216,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       wipePrivateKeys();
       clearStagedSeed();
       wrappedSeedRef.current = null;
-      recoveryWrappedSeedRef.current = null;
       publicKeysRef.current = null;
       setPublicKeys(null);
       setDecryptionMethods(null);
@@ -240,22 +236,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         throw new Error("No wrapped seed available to unlock");
       }
       const seed = await unwrapSeed(wrappedSeedRef.current, passphrase);
-      deriveAndUnlock(seed);
-      wipeBytes(seed);
-    },
-    [deriveAndUnlock]
-  );
-
-  const unlockWithRecoveryKey = useCallback(
-    async (recoveryKey: Uint8Array) => {
-      if (!recoveryWrappedSeedRef.current) {
-        throw new Error("No recovery key is enabled");
-      }
-      const seed = await unwrapSeedWithRecoveryKey(recoveryWrappedSeedRef.current, recoveryKey);
-      if (!publicKeysRef.current || !seedMatchesPublicKeys(seed, publicKeysRef.current)) {
-        wipeBytes(seed);
-        throw new InvalidRecoveryKeyError();
-      }
       deriveAndUnlock(seed);
       wipeBytes(seed);
     },
@@ -292,6 +272,25 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     [user]
   );
 
+  const resetPassphraseWithShamirShares = useCallback(
+    async (shares: Uint8Array[], newPassphrase: string) => {
+      if (!user) {
+        throw new Error("Not signed in");
+      }
+      const seed = await combineSeedShamir(shares);
+      if (!publicKeysRef.current || !seedMatchesPublicKeys(seed, publicKeysRef.current)) {
+        wipeBytes(seed);
+        throw new InvalidShamirSharesError();
+      }
+      const wrapped = await wrapSeed(seed, newPassphrase);
+      await updateWrappedSeed(user.uid, wrapped);
+      wrappedSeedRef.current = wrapped;
+      deriveAndUnlock(seed);
+      wipeBytes(seed);
+    },
+    [user, deriveAndUnlock]
+  );
+
   const resetKeys = useCallback(
     async (newPassphrase: string) => {
       if (!user) {
@@ -305,10 +304,9 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       await resetUserKeyRecord(user.uid, newPublicKeys, wrapped);
 
       wrappedSeedRef.current = wrapped;
-      recoveryWrappedSeedRef.current = null;
       publicKeysRef.current = newPublicKeys;
       setPublicKeys(newPublicKeys);
-      setDecryptionMethods({ recoveryKeyEnabled: false, shamir: null });
+      setDecryptionMethods({ shamir: null });
       wipePrivateKeys();
       setStatus("locked");
     },
@@ -323,24 +321,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       const seed = await unwrapSeed(wrappedSeedRef.current, passphrase);
       clearStagedSeed();
       stagedSeedRef.current = seed;
-      stagedViaRef.current = "passphrase";
-    },
-    [clearStagedSeed]
-  );
-
-  const stageSeedFromRecoveryKey = useCallback(
-    async (recoveryKey: Uint8Array) => {
-      if (!recoveryWrappedSeedRef.current) {
-        throw new Error("No recovery key is enabled");
-      }
-      const seed = await unwrapSeedWithRecoveryKey(recoveryWrappedSeedRef.current, recoveryKey);
-      if (!publicKeysRef.current || !seedMatchesPublicKeys(seed, publicKeysRef.current)) {
-        wipeBytes(seed);
-        throw new InvalidRecoveryKeyError();
-      }
-      clearStagedSeed();
-      stagedSeedRef.current = seed;
-      stagedViaRef.current = "recovery-key";
     },
     [clearStagedSeed]
   );
@@ -354,85 +334,42 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       }
       clearStagedSeed();
       stagedSeedRef.current = seed;
-      stagedViaRef.current = "shamir";
     },
     [clearStagedSeed]
   );
 
   const discardStagedSeed = useCallback(() => clearStagedSeed(), [clearStagedSeed]);
 
-  const prepareRecoveryKey = useCallback(async () => {
-    if (!stagedSeedRef.current) {
-      throw new Error("No staged seed to prepare a recovery key from");
-    }
-    const key = generateRecoveryKey();
-    const wrapped = await wrapSeedWithRecoveryKey(stagedSeedRef.current, key);
-    clearPendingMethod();
-    pendingMethodRef.current = { kind: "recovery-key", key, wrapped };
-    return key;
-  }, [clearPendingMethod]);
-
-  const prepareShamirRecovery = useCallback(
+  const prepareShamir = useCallback(
     async (n: number, k: number) => {
       if (!stagedSeedRef.current) {
         throw new Error("No staged seed to prepare Shamir shares from");
       }
       const shares = await splitSeedShamir(stagedSeedRef.current, n, k);
-      clearPendingMethod();
-      pendingMethodRef.current = { kind: "shamir", shares, n, k };
+      clearPendingShamir();
+      pendingShamirRef.current = { shares, n, k };
       return shares;
     },
-    [clearPendingMethod]
+    [clearPendingShamir]
   );
 
-  const confirmPendingMethod = useCallback(async () => {
-    if (!user || !pendingMethodRef.current) {
-      throw new Error("No prepared material to confirm");
+  const confirmPendingShamir = useCallback(async () => {
+    if (!user || !pendingShamirRef.current) {
+      throw new Error("No prepared Shamir shares to confirm");
     }
-    const pending = pendingMethodRef.current;
-    if (pending.kind === "recovery-key") {
-      await enableRecoveryKeyMethodFirestore(user.uid, pending.wrapped);
-      recoveryWrappedSeedRef.current = pending.wrapped;
-      setDecryptionMethods((prev) => ({
-        recoveryKeyEnabled: true,
-        shamir: prev?.shamir ?? null,
-      }));
-    } else {
-      await enableShamirMethodFirestore(user.uid, pending.n, pending.k);
-      setDecryptionMethods((prev) => ({
-        recoveryKeyEnabled: prev?.recoveryKeyEnabled ?? false,
-        shamir: { n: pending.n, k: pending.k },
-      }));
-    }
+    const { n, k } = pendingShamirRef.current;
+    await setShamirMethodFirestore(user.uid, n, k);
+    setDecryptionMethods({ shamir: { n, k } });
     clearStagedSeed();
-  }, [user, clearStagedSeed]);
-
-  const disableRecoveryKey = useCallback(async () => {
-    if (!user || !stagedSeedRef.current) {
-      throw new Error("No staged seed to prove removal with");
-    }
-    if (stagedViaRef.current !== "recovery-key") {
-      throw new Error("Disabling the recovery key requires proving it specifically");
-    }
-    await disableRecoveryKeyMethodFirestore(user.uid);
-    clearStagedSeed();
-    recoveryWrappedSeedRef.current = null;
-    setDecryptionMethods((prev) => ({ recoveryKeyEnabled: false, shamir: prev?.shamir ?? null }));
   }, [user, clearStagedSeed]);
 
   const disableShamir = useCallback(async () => {
     if (!user || !stagedSeedRef.current) {
       throw new Error("No staged seed to prove removal with");
     }
-    if (stagedViaRef.current !== "shamir") {
-      throw new Error("Disabling Shamir requires proving it specifically");
-    }
     await disableShamirMethodFirestore(user.uid);
     clearStagedSeed();
-    setDecryptionMethods((prev) => ({
-      recoveryKeyEnabled: prev?.recoveryKeyEnabled ?? false,
-      shamir: null,
-    }));
+    setDecryptionMethods({ shamir: null });
   }, [user, clearStagedSeed]);
 
   return (
@@ -442,21 +379,18 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         publicKeys,
         privateKeys,
         unlock,
-        unlockWithRecoveryKey,
         unlockWithShamirShares,
         lock,
         refresh,
         changePassphrase,
+        resetPassphraseWithShamirShares,
         resetKeys,
         decryptionMethods,
         stageSeedFromPassphrase,
-        stageSeedFromRecoveryKey,
         stageSeedFromShamirShares,
         discardStagedSeed,
-        prepareRecoveryKey,
-        prepareShamirRecovery,
-        confirmPendingMethod,
-        disableRecoveryKey,
+        prepareShamir,
+        confirmPendingShamir,
         disableShamir,
       }}
     >

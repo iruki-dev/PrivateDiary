@@ -216,7 +216,7 @@ describe("users/{uid}.decryptionMethods", () => {
     );
   });
 
-  it("allows enabling the recovery key via a dotted-path update", async () => {
+  it("allows setting up Shamir via a dotted-path update", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
@@ -229,67 +229,67 @@ describe("users/{uid}.decryptionMethods", () => {
 
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
-      updateDoc(doc(alice, "users/alice"), {
-        "decryptionMethods.recoveryKey": { wrappedSeed: { ciphertext: "ct", iv: "iv" } },
-      })
-    );
-  });
-
-  it("allows enabling Shamir without disturbing an already-enabled recovery key", async () => {
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      const db = ctx.firestore() as unknown as Firestore;
-      await setDoc(doc(db, "users/alice"), {
-        publicKeys: validPublicKeys(),
-        wrappedSeed: validWrappedSeed(),
-        decryptionMethods: { recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } } },
-        createdAt: new Date(2024, 0, 1),
-      });
-    });
-
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
-    await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": { n: 5, k: 3 } })
-    );
-
-    const snapshot = await getDoc(doc(alice, "users/alice"));
-    expect(snapshot.data()?.decryptionMethods).toEqual({
-      recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } },
-      shamir: { n: 5, k: 3 },
-    });
-  });
-
-  it("allows disabling just the recovery key, leaving Shamir enabled", async () => {
-    await testEnv.withSecurityRulesDisabled(async (ctx) => {
-      const db = ctx.firestore() as unknown as Firestore;
-      await setDoc(doc(db, "users/alice"), {
-        publicKeys: validPublicKeys(),
-        wrappedSeed: validWrappedSeed(),
-        decryptionMethods: {
-          recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } },
-          shamir: { n: 5, k: 3 },
-        },
-        createdAt: new Date(2024, 0, 1),
-      });
-    });
-
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
-    await assertSucceeds(
-      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.recoveryKey": deleteField() })
     );
 
     const snapshot = await getDoc(doc(alice, "users/alice"));
     expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: { n: 5, k: 3 } });
   });
 
-  it("rejects a recoveryKey entry missing the wrapped seed", async () => {
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
-    await assertFails(
-      setDoc(doc(alice, "users/alice"), {
+  it("allows reissuing Shamir (overwriting the existing n/k shape)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        decryptionMethods: { recoveryKey: {} },
-        createdAt: new Date(),
-      })
+        decryptionMethods: { shamir: { n: 5, k: 3 } },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": { n: 3, k: 2 } })
+    );
+
+    const snapshot = await getDoc(doc(alice, "users/alice"));
+    expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: { n: 3, k: 2 } });
+  });
+
+  it("allows disabling Shamir entirely", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        decryptionMethods: { shamir: { n: 5, k: 3 } },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": deleteField() })
+    );
+
+    const snapshot = await getDoc(doc(alice, "users/alice"));
+    expect(snapshot.data()?.decryptionMethods).toEqual({});
+  });
+
+  it("allows resetting the passphrase (wrappedSeed only) regardless of what proved it — rules can't tell passphrase-proof from Shamir-proof, by design", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("old"),
+        decryptionMethods: { shamir: { n: 5, k: 3 } },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { wrappedSeed: validWrappedSeed("new") })
     );
   });
 

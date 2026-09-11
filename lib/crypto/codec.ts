@@ -11,8 +11,6 @@ import type {
   EncryptedEntryStorage,
   HybridPublicKeysRaw,
   HybridPublicKeysStorage,
-  RecoveryKeyWrappedSeed,
-  RecoveryKeyWrappedSeedStorage,
   WrappedSeed,
   WrappedSeedStorage,
 } from "./types";
@@ -51,31 +49,13 @@ export function wrappedSeedFromStorage(stored: WrappedSeedStorage): WrappedSeed 
   };
 }
 
-/** Text encoding for a recovery key or a single Shamir share, shown to / re-entered by the user. */
+/** Text encoding for a single Shamir share, shown to / re-entered by the user. */
 export function recoverySecretToText(bytes: Uint8Array): string {
   return bytesToBase64(bytes);
 }
 
 export function textToRecoverySecret(text: string): Uint8Array {
   return base64ToBytes(text.trim());
-}
-
-export function recoveryKeyWrappedSeedToStorage(
-  wrapped: RecoveryKeyWrappedSeed
-): RecoveryKeyWrappedSeedStorage {
-  return {
-    ciphertext: bytesToBase64(wrapped.ciphertext),
-    iv: bytesToBase64(wrapped.iv),
-  };
-}
-
-export function recoveryKeyWrappedSeedFromStorage(
-  stored: RecoveryKeyWrappedSeedStorage
-): RecoveryKeyWrappedSeed {
-  return {
-    ciphertext: base64ToBytes(stored.ciphertext),
-    iv: base64ToBytes(stored.iv),
-  };
 }
 
 export function entryToStorage(entry: EncryptedEntryPayload): EncryptedEntryStorage {

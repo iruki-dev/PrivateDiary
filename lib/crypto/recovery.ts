@@ -1,57 +1,28 @@
 import { combine, split } from "shamir-secret-sharing";
-import { randomBytes } from "@noble/hashes/utils.js";
-import { aesGcmDecrypt, aesGcmEncrypt } from "./aesGcm";
-import { AES_GCM_IV_LENGTH, MASTER_SEED_LENGTH } from "./constants";
-import { InvalidRecoveryKeyError, InvalidShamirSharesError } from "./errors";
+import { MASTER_SEED_LENGTH } from "./constants";
+import { InvalidShamirSharesError } from "./errors";
 import { deriveHybridKeyPair } from "./keys";
 import { wipeBytes } from "./memory";
-import type { HybridPublicKeysRaw, RecoveryKeyWrappedSeed } from "./types";
+import type { HybridPublicKeysRaw } from "./types";
 
 /**
- * Opt-in secondary recovery paths for the master seed, replacing the BIP39
- * mnemonic. Two independent mechanisms, both entirely separate from the
- * passphrase (rule 5: login/passphrase and encryption keys never mix):
+ * Shamir's Secret Sharing, the sole alternative to the passphrase, replacing
+ * the BIP39 mnemonic. The seed itself is split into N shares (K needed to
+ * reconstruct); nothing about the shares is ever stored server-side — a
+ * single leaked share reveals nothing (below threshold, shares are
+ * information-theoretically independent of the secret).
  *
- * - Recovery key: a random 256-bit key wraps the seed (AES-GCM) into a blob
- *   Firestore can safely hold, because without the key — which is shown
- *   exactly once and never stored anywhere — it's just ciphertext.
- * - Shamir: the seed itself is split into N shares (K needed to
- *   reconstruct). Nothing about the shares is ever stored server-side; a
- *   single leaked share reveals nothing (below threshold, shares are
- *   information-theoretically independent of the secret).
- *
- * Both require proving current possession before they can be changed or
- * removed — see contexts/SeedContext.tsx's stage/commit flow.
+ * Passphrase and Shamir are deliberately symmetric, mutually-trusting
+ * credentials over the account (see contexts/SeedContext.tsx): either one
+ * decrypts the diary, resets the passphrase, and reissues Shamir shares —
+ * without ever revealing the OTHER credential's actual value. That
+ * non-revelation is a structural property, not something enforced by a
+ * check anywhere: splitSeedShamir() draws fresh randomness every call (see
+ * shamir-secret-sharing's own docs), so reissuing via the passphrase can
+ * never reproduce a previously-issued set of shares even in principle, and
+ * unwrapping the seed is one-directional — nothing recovers the passphrase
+ * string from the seed it once unwrapped.
  */
-
-export const RECOVERY_KEY_LENGTH = 32;
-
-export function generateRecoveryKey(): Uint8Array {
-  return randomBytes(RECOVERY_KEY_LENGTH);
-}
-
-export async function wrapSeedWithRecoveryKey(
-  masterSeed: Uint8Array,
-  recoveryKey: Uint8Array
-): Promise<RecoveryKeyWrappedSeed> {
-  if (masterSeed.length !== MASTER_SEED_LENGTH) {
-    throw new Error(`masterSeed must be ${MASTER_SEED_LENGTH} bytes`);
-  }
-  const iv = randomBytes(AES_GCM_IV_LENGTH);
-  const ciphertext = await aesGcmEncrypt(recoveryKey, iv, masterSeed);
-  return { ciphertext, iv };
-}
-
-export async function unwrapSeedWithRecoveryKey(
-  wrapped: RecoveryKeyWrappedSeed,
-  recoveryKey: Uint8Array
-): Promise<Uint8Array> {
-  try {
-    return await aesGcmDecrypt(recoveryKey, wrapped.iv, wrapped.ciphertext);
-  } catch {
-    throw new InvalidRecoveryKeyError();
-  }
-}
 
 /**
  * Splits the master seed into `n` Shamir shares, `k` of which reconstruct
@@ -94,11 +65,11 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 }
 
 /**
- * The actual integrity check for any reconstructed-from-proof seed
- * (recovery key OR Shamir shares): re-derive the public key pair and
- * compare against what's already on record in Firestore. Cheap, exact, and
- * needs no extra stored verifier data — deriveHybridKeyPair() is
- * deterministic, so a wrong seed provably yields different public keys.
+ * The actual integrity check for a seed reconstructed from Shamir shares:
+ * re-derive the public key pair and compare against what's already on
+ * record in Firestore. Cheap, exact, and needs no extra stored verifier
+ * data — deriveHybridKeyPair() is deterministic, so a wrong seed provably
+ * yields different public keys.
  */
 export function seedMatchesPublicKeys(
   candidateSeed: Uint8Array,
