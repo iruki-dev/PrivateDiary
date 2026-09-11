@@ -62,7 +62,7 @@ export type {
   HybridPublicKeysStorage,
   WrappedSeed,
   WrappedSeedStorage,
-  RecoveryConfig,
+  DecryptionMethodsConfig,
   RecoveryKeyWrappedSeed,
   RecoveryKeyWrappedSeedStorage,
   EntryAAD,

@@ -73,16 +73,21 @@ export interface EncryptedEntryStorage {
 }
 
 /**
- * Optional secondary way to recover the master seed without the passphrase
- * (opt-in, user's choice). The seed itself is never stored unwrapped —
- * "recovery-key" wraps it with a random 256-bit key the user holds offline;
- * "shamir" splits the seed directly into N shares (K needed to reconstruct)
- * that are never stored anywhere at all, only shown once.
+ * Additional, independently-toggleable ways to decrypt the diary besides
+ * the passphrase (which is always active — there is no "disable the
+ * passphrase" option, since losing every configured method would mean
+ * permanent, unrecoverable data loss with nothing left to fall back to).
+ * Either, both, or neither can be enabled at once — they're OR'd together,
+ * not a single exclusive choice: any ONE of the active methods is enough
+ * to decrypt. The seed itself is never stored unwrapped — "recovery key"
+ * wraps it with a random 256-bit key the user holds offline; "shamir"
+ * splits the seed directly into N shares (K needed to reconstruct) that
+ * are never stored anywhere at all, only shown once.
  */
-export type RecoveryConfig =
-  | { type: "none" }
-  | { type: "recovery-key" }
-  | { type: "shamir"; n: number; k: number };
+export interface DecryptionMethodsConfig {
+  recoveryKeyEnabled: boolean;
+  shamir: { n: number; k: number } | null;
+}
 
 export interface RecoveryKeyWrappedSeed {
   ciphertext: Uint8Array;

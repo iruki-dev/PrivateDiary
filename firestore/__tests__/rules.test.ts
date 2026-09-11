@@ -3,6 +3,7 @@ import {
   addDoc,
   collection,
   deleteDoc,
+  deleteField,
   doc,
   getDoc,
   getDocs,
@@ -16,7 +17,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from "@firebase/rules-unit-testing";
-import { afterAll, beforeAll, beforeEach, describe, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 
 /**
  * Runs against the real Firestore emulator with firestore.rules loaded —
@@ -202,26 +203,26 @@ describe("users/{uid}", () => {
   });
 });
 
-describe("users/{uid}.recovery", () => {
-  it("allows creating with recovery: none", async () => {
+describe("users/{uid}.decryptionMethods", () => {
+  it("allows creating with an empty decryptionMethods map", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       setDoc(doc(alice, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        recovery: { type: "none" },
+        decryptionMethods: {},
         createdAt: new Date(),
       })
     );
   });
 
-  it("allows setting up recovery-key (only `recovery` changes)", async () => {
+  it("allows enabling the recovery key via a dotted-path update", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        recovery: { type: "none" },
+        decryptionMethods: {},
         createdAt: new Date(2024, 0, 1),
       });
     });
@@ -229,35 +230,64 @@ describe("users/{uid}.recovery", () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), {
-        recovery: { type: "recovery-key", wrappedSeed: { ciphertext: "ct", iv: "iv" } },
+        "decryptionMethods.recoveryKey": { wrappedSeed: { ciphertext: "ct", iv: "iv" } },
       })
     );
   });
 
-  it("allows setting up Shamir recovery", async () => {
+  it("allows enabling Shamir without disturbing an already-enabled recovery key", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        recovery: { type: "none" },
+        decryptionMethods: { recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } } },
         createdAt: new Date(2024, 0, 1),
       });
     });
 
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
-      updateDoc(doc(alice, "users/alice"), { recovery: { type: "shamir", n: 5, k: 3 } })
+      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": { n: 5, k: 3 } })
     );
+
+    const snapshot = await getDoc(doc(alice, "users/alice"));
+    expect(snapshot.data()?.decryptionMethods).toEqual({
+      recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } },
+      shamir: { n: 5, k: 3 },
+    });
   });
 
-  it("rejects a recovery-key entry missing the wrapped seed", async () => {
+  it("allows disabling just the recovery key, leaving Shamir enabled", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        decryptionMethods: {
+          recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } },
+          shamir: { n: 5, k: 3 },
+        },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.recoveryKey": deleteField() })
+    );
+
+    const snapshot = await getDoc(doc(alice, "users/alice"));
+    expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: { n: 5, k: 3 } });
+  });
+
+  it("rejects a recoveryKey entry missing the wrapped seed", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertFails(
       setDoc(doc(alice, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        recovery: { type: "recovery-key" },
+        decryptionMethods: { recoveryKey: {} },
         createdAt: new Date(),
       })
     );
@@ -269,19 +299,19 @@ describe("users/{uid}.recovery", () => {
       setDoc(doc(alice, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        recovery: { type: "shamir", n: 5, k: "three" },
+        decryptionMethods: { shamir: { n: 5, k: "three" } },
         createdAt: new Date(),
       })
     );
   });
 
-  it("rejects an unrecognized recovery type", async () => {
+  it("rejects an unrecognized key under decryptionMethods", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertFails(
       setDoc(doc(alice, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        recovery: { type: "sms" },
+        decryptionMethods: { sms: true },
         createdAt: new Date(),
       })
     );

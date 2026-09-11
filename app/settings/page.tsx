@@ -17,7 +17,6 @@ import {
   WrongPassphraseError,
   recoverySecretToText,
   textToRecoverySecret,
-  type RecoveryConfig,
 } from "@/lib/crypto";
 
 export default function SettingsPage() {
@@ -26,15 +25,16 @@ export default function SettingsPage() {
     status: seedStatus,
     changePassphrase,
     resetKeys,
-    recoveryConfig,
+    decryptionMethods,
     stageSeedFromPassphrase,
     stageSeedFromRecoveryKey,
     stageSeedFromShamirShares,
     discardStagedSeed,
     prepareRecoveryKey,
     prepareShamirRecovery,
-    confirmPendingRecovery,
-    commitRemoveRecovery,
+    confirmPendingMethod,
+    disableRecoveryKey,
+    disableShamir,
   } = useSeed();
   const router = useRouter();
 
@@ -56,17 +56,33 @@ export default function SettingsPage() {
     <main className="flex flex-1 flex-col items-center gap-12 px-6 py-24">
       <ChangePassphraseSection changePassphrase={changePassphrase} />
       <OtpSection />
-      <RecoverySection
-        recoveryConfig={recoveryConfig}
+
+      <section className="w-full max-w-sm space-y-2">
+        <h2 className="text-lg font-semibold">일기 복호화 방법</h2>
+        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          패스프레이즈는 항상 사용할 수 있는 기본 방법입니다. 아래 방법들은 원하는 만큼 추가로
+          켜둘 수 있고, 켜진 것 중 아무거나 하나로 잠금을 해제할 수 있습니다.
+        </p>
+      </section>
+      <RecoveryKeySection
+        enabled={decryptionMethods?.recoveryKeyEnabled ?? false}
         stageSeedFromPassphrase={stageSeedFromPassphrase}
         stageSeedFromRecoveryKey={stageSeedFromRecoveryKey}
-        stageSeedFromShamirShares={stageSeedFromShamirShares}
         discardStagedSeed={discardStagedSeed}
         prepareRecoveryKey={prepareRecoveryKey}
-        prepareShamirRecovery={prepareShamirRecovery}
-        confirmPendingRecovery={confirmPendingRecovery}
-        commitRemoveRecovery={commitRemoveRecovery}
+        confirmPendingMethod={confirmPendingMethod}
+        disableRecoveryKey={disableRecoveryKey}
       />
+      <ShamirSection
+        config={decryptionMethods?.shamir ?? null}
+        stageSeedFromPassphrase={stageSeedFromPassphrase}
+        stageSeedFromShamirShares={stageSeedFromShamirShares}
+        discardStagedSeed={discardStagedSeed}
+        prepareShamirRecovery={prepareShamirRecovery}
+        confirmPendingMethod={confirmPendingMethod}
+        disableShamir={disableShamir}
+      />
+
       <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
     </main>
   );
@@ -164,8 +180,7 @@ function ChangePassphraseSection({
  * functions/src/index.ts and contexts/OtpContext.tsx for why this is a
  * server-verified gate rather than a cryptographic factor combined into
  * the diary's encryption. Enabling requires scanning a QR and confirming
- * one live code; disabling requires a currently-valid code (same "prove
- * the current method" rule used for changing/removing a recovery method).
+ * one live code; disabling requires a currently-valid code.
  */
 type OtpPhase = "status" | "setup" | "disable";
 
@@ -315,8 +330,8 @@ function OtpSection() {
       <h2 className="text-lg font-semibold">OTP 인증</h2>
       <p className="text-sm text-zinc-600 dark:text-zinc-400">
         구글 OTP 같은 인증 앱의 코드가 맞아야 저장된 일기를 불러올 수 있도록 하는 추가 접근
-        게이트입니다. 암호화 자체와는 별개로 서버가 코드를 검증합니다 — 자세한 내용은 앱 코드의
-        설명을 참고하세요. 현재: <strong>{otpEnabled ? "사용 중" : "사용 안 함"}</strong>
+        게이트입니다. 암호화 자체와는 별개로 서버가 코드를 검증합니다. 현재:{" "}
+        <strong>{otpEnabled ? "사용 중" : "사용 안 함"}</strong>
       </p>
       {message && <p className="text-sm text-green-600">{message}</p>}
       {error && <p className="text-sm text-red-600">{error}</p>}
@@ -343,224 +358,112 @@ function OtpSection() {
 }
 
 /**
- * Recovery method management (replaces the removed BIP39 mnemonic).
- * Two-phase flow: STAGE proves identity (passphrase if none is configured
- * yet, otherwise the currently-configured method itself), then COMMIT
- * installs a new method or removes the current one. See
- * contexts/SeedContext.tsx's doc comment for the full rationale.
+ * One independently-toggleable decryption method (replaces the removed
+ * BIP39 mnemonic — see contexts/SeedContext.tsx's doc comment for the full
+ * stage/prepare/confirm rationale). Enabling always proves via the
+ * passphrase (always available); disabling requires proving THIS method
+ * specifically, so a passphrase-only compromise can't silently strip away
+ * an already-configured method.
  */
-type RecoveryPhase =
-  | "status"
-  | "enter-passphrase"
-  | "enter-recovery-key"
-  | "enter-shamir-shares"
-  | "choose-new-method"
-  | "reveal-key"
-  | "reveal-shamir";
+type RecoveryKeyPhase = "status" | "enable" | "reveal" | "disable";
 
-function RecoverySection({
-  recoveryConfig,
+function RecoveryKeySection({
+  enabled,
   stageSeedFromPassphrase,
   stageSeedFromRecoveryKey,
-  stageSeedFromShamirShares,
   discardStagedSeed,
   prepareRecoveryKey,
-  prepareShamirRecovery,
-  confirmPendingRecovery,
-  commitRemoveRecovery,
+  confirmPendingMethod,
+  disableRecoveryKey,
 }: {
-  recoveryConfig: RecoveryConfig | null;
+  enabled: boolean;
   stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
   stageSeedFromRecoveryKey: (key: Uint8Array) => Promise<void>;
-  stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
   discardStagedSeed: () => void;
   prepareRecoveryKey: () => Promise<Uint8Array>;
-  prepareShamirRecovery: (n: number, k: number) => Promise<Uint8Array[]>;
-  confirmPendingRecovery: () => Promise<void>;
-  commitRemoveRecovery: () => Promise<void>;
+  confirmPendingMethod: () => Promise<void>;
+  disableRecoveryKey: () => Promise<void>;
 }) {
-  const [phase, setPhase] = useState<RecoveryPhase>("status");
+  const [phase, setPhase] = useState<RecoveryKeyPhase>("status");
+  const [passphrase, setPassphrase] = useState("");
+  const [proofInput, setProofInput] = useState("");
+  const [revealedKey, setRevealedKey] = useState<Uint8Array | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const [passphrase, setPassphrase] = useState("");
-  const [recoveryKeyInput, setRecoveryKeyInput] = useState("");
-  const [shareInputs, setShareInputs] = useState<string[]>([]);
-
-  const [newN, setNewN] = useState(5);
-  const [newK, setNewK] = useState(3);
-
-  const [revealedKey, setRevealedKey] = useState<Uint8Array | null>(null);
-  const [revealedShares, setRevealedShares] = useState<Uint8Array[]>([]);
-
-  useEffect(() => {
-    // If the user navigates away mid-flow, don't leave a proven seed
-    // sitting in memory unused.
-    return () => discardStagedSeed();
-  }, [discardStagedSeed]);
+  useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
 
   function cancel() {
     discardStagedSeed();
     setPhase("status");
     setError(null);
     setPassphrase("");
-    setRecoveryKeyInput("");
-    setShareInputs([]);
+    setProofInput("");
+    setRevealedKey(null);
   }
 
-  function startCreate() {
-    setError(null);
-    setPhase("enter-passphrase");
-  }
-
-  function startChangeOrRemove() {
-    setError(null);
-    if (recoveryConfig?.type === "recovery-key") {
-      setPhase("enter-recovery-key");
-    } else if (recoveryConfig?.type === "shamir") {
-      setShareInputs(Array(recoveryConfig.k).fill(""));
-      setPhase("enter-shamir-shares");
-    }
-  }
-
-  async function handlePassphraseSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleEnable(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
       await stageSeedFromPassphrase(passphrase);
       setPassphrase("");
-      setPhase("choose-new-method");
-    } catch (err) {
-      setError(err instanceof WrongPassphraseError ? "패스프레이즈가 올바르지 않습니다." : "확인하지 못했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleRecoveryKeySubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      await stageSeedFromRecoveryKey(textToRecoverySecret(recoveryKeyInput));
-      setRecoveryKeyInput("");
-      setPhase("choose-new-method");
-    } catch (err) {
-      setError(
-        err instanceof InvalidRecoveryKeyError
-          ? "복구 키가 올바르지 않습니다."
-          : "복구 키 형식이 올바르지 않습니다."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handleShamirSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setSubmitting(true);
-    try {
-      const shares = shareInputs.map((s) => textToRecoverySecret(s));
-      await stageSeedFromShamirShares(shares);
-      setShareInputs([]);
-      setPhase("choose-new-method");
-    } catch (err) {
-      setError(
-        err instanceof InvalidShamirSharesError
-          ? "조각들이 올바른 시드로 복원되지 않습니다."
-          : "조각 형식이 올바르지 않습니다."
-      );
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  async function handlePrepareRecoveryKey() {
-    setError(null);
-    setSubmitting(true);
-    try {
       const key = await prepareRecoveryKey();
       setRevealedKey(key);
-      setPhase("reveal-key");
-    } catch {
-      setError("복구 키를 준비하지 못했습니다.");
+      setPhase("reveal");
+    } catch (err) {
+      setError(err instanceof WrongPassphraseError ? "패스프레이즈가 올바르지 않습니다." : "준비하지 못했습니다.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handlePrepareShamir() {
-    setError(null);
-    if (newK < 2 || newN < newK || newN > 10) {
-      setError("조각 수(N)는 2~10, 필요 조각 수(K)는 2 이상이면서 N 이하여야 합니다.");
-      return;
-    }
+  async function handleConfirmReveal() {
     setSubmitting(true);
     try {
-      const shares = await prepareShamirRecovery(newN, newK);
-      setRevealedShares(shares);
-      setPhase("reveal-shamir");
-    } catch {
-      setError("Shamir 분산을 준비하지 못했습니다.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  function cancelReveal() {
-    discardStagedSeed();
-    setRevealedKey(null);
-    setRevealedShares([]);
-    setError(null);
-    setPhase("status");
-  }
-
-  async function handleConfirmReveal(successMessage: string) {
-    setSubmitting(true);
-    try {
-      // The write to Firestore only happens here — after the user has
-      // acknowledged (via SecretReveal's checkbox) that they saved the
-      // material. Leaving the page before this point discards everything
-      // that was prepared, so there's never a recovery method configured
-      // in Firestore that nobody actually holds the key/shares for.
-      await confirmPendingRecovery();
+      // Firestore is only written here, after the user has acknowledged
+      // (via SecretReveal) that they saved the key. Leaving before this
+      // point discards everything prepared — never a method configured in
+      // Firestore that nobody actually holds the key for.
+      await confirmPendingMethod();
       setRevealedKey(null);
-      setRevealedShares([]);
       setPhase("status");
-      setStatusMessage(successMessage);
+      setMessage("복구 키가 활성화되었습니다.");
     } catch {
-      setError("복구 수단을 저장하지 못했습니다. 다시 시도해주세요.");
+      setError("저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function handleCommitRemove() {
+  async function handleDisable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError(null);
     setSubmitting(true);
     try {
-      await commitRemoveRecovery();
+      await stageSeedFromRecoveryKey(textToRecoverySecret(proofInput));
+      await disableRecoveryKey();
+      setProofInput("");
       setPhase("status");
-      setStatusMessage("복구 수단이 제거되었습니다.");
-    } catch {
-      setError("복구 수단을 제거하지 못했습니다.");
+      setMessage("복구 키가 비활성화되었습니다.");
+    } catch (err) {
+      setError(err instanceof InvalidRecoveryKeyError ? "복구 키가 올바르지 않습니다." : "비활성화하지 못했습니다.");
     } finally {
       setSubmitting(false);
     }
   }
 
-  if (phase === "reveal-key" && revealedKey) {
+  if (phase === "reveal" && revealedKey) {
     return (
       <section className="w-full max-w-lg space-y-3">
         <SecretReveal
           title="복구 키"
           description="이 키가 있으면 패스프레이즈 없이도 일기를 복호화할 수 있습니다. 안전한 곳(금고, 비밀번호 관리자 등)에 보관하세요. 이 화면은 다시 표시되지 않습니다."
-          confirmLabel={submitting ? "저장 중..." : "완료 — 이 키를 설정합니다"}
+          confirmLabel={submitting ? "저장 중..." : "완료 — 이 키를 활성화합니다"}
           confirming={submitting}
-          onConfirm={() => void handleConfirmReveal("복구 키가 설정되었습니다.")}
+          onConfirm={() => void handleConfirmReveal()}
         >
           <SecretCard
             label="복구 키"
@@ -569,122 +472,18 @@ function RecoverySection({
           />
         </SecretReveal>
         {error && <p className="text-sm text-red-600">{error}</p>}
-        <button type="button" onClick={cancelReveal} className="w-full text-center text-xs underline">
-          취소 (설정하지 않음)
-        </button>
-      </section>
-    );
-  }
-
-  if (phase === "reveal-shamir" && revealedShares.length > 0) {
-    return (
-      <section className="w-full max-w-lg space-y-3">
-        <SecretReveal
-          title="Shamir 복구 조각"
-          description={`총 ${revealedShares.length}개의 조각 중 ${newK}개를 모으면 시드를 복구할 수 있습니다. 조각 하나만으로는 아무 의미가 없으니, 각 조각을 서로 다른 안전한 곳에 나눠 보관하세요. 이 화면은 다시 표시되지 않습니다.`}
-          confirmLabel={submitting ? "저장 중..." : "완료 — 이 조각들을 설정합니다"}
-          confirming={submitting}
-          onConfirm={() => void handleConfirmReveal("Shamir 복구 조각이 설정되었습니다.")}
-        >
-          <div className="space-y-4">
-            {revealedShares.map((share, i) => (
-              <SecretCard
-                key={i}
-                label={`조각 ${i + 1} / ${revealedShares.length}`}
-                text={recoverySecretToText(share)}
-                filename={`privatediary-shamir-share-${i + 1}-of-${revealedShares.length}.txt`}
-              />
-            ))}
-          </div>
-        </SecretReveal>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button type="button" onClick={cancelReveal} className="w-full text-center text-xs underline">
-          취소 (설정하지 않음)
-        </button>
-      </section>
-    );
-  }
-
-  if (phase === "choose-new-method") {
-    return (
-      <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">복구 수단 설정</h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">본인 확인이 완료되었습니다. 새 복구 수단을 선택하세요.</p>
-
-        <div className="space-y-2 rounded border border-zinc-300 p-4 dark:border-zinc-700">
-          <p className="text-sm font-medium">복구 키</p>
-          <p className="text-xs text-zinc-500">랜덤 키 하나로 복구. 간단하지만, 그 키 하나가 유출되면 그대로 노출됩니다.</p>
-          <button
-            type="button"
-            onClick={() => void handlePrepareRecoveryKey()}
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
-          >
-            복구 키로 설정
-          </button>
-        </div>
-
-        <div className="space-y-2 rounded border border-zinc-300 p-4 dark:border-zinc-700">
-          <p className="text-sm font-medium">Shamir 분산</p>
-          <p className="text-xs text-zinc-500">N개 조각으로 나눠, K개를 모아야 복구. 조각 하나만 유출되면 무의미해 더 안전합니다.</p>
-          <div className="flex gap-2">
-            <label className="flex-1 text-xs">
-              전체(N)
-              <input
-                type="number"
-                min={2}
-                max={10}
-                value={newN}
-                onChange={(e) => setNewN(Number(e.target.value))}
-                className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              />
-            </label>
-            <label className="flex-1 text-xs">
-              필요(K)
-              <input
-                type="number"
-                min={2}
-                max={newN}
-                value={newK}
-                onChange={(e) => setNewK(Number(e.target.value))}
-                className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-              />
-            </label>
-          </div>
-          <button
-            type="button"
-            onClick={() => void handlePrepareShamir()}
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background disabled:opacity-50"
-          >
-            Shamir 분산으로 설정
-          </button>
-        </div>
-
-        {recoveryConfig?.type !== "none" && (
-          <button
-            type="button"
-            onClick={() => void handleCommitRemove()}
-            disabled={submitting}
-            className="w-full rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 disabled:opacity-50 dark:text-red-500"
-          >
-            복구 수단 제거만 하기 (설정 안 함)
-          </button>
-        )}
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
         <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
-          취소
+          취소 (활성화하지 않음)
         </button>
       </section>
     );
   }
 
-  if (phase === "enter-passphrase") {
+  if (phase === "enable") {
     return (
       <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">복구 수단 설정</h2>
-        <form onSubmit={handlePassphraseSubmit} className="space-y-3">
+        <h2 className="text-lg font-semibold">복구 키 활성화</h2>
+        <form onSubmit={handleEnable} className="space-y-3">
           <p className="text-sm text-zinc-600 dark:text-zinc-400">본인 확인을 위해 패스프레이즈를 입력하세요.</p>
           <input
             type="password"
@@ -710,22 +509,231 @@ function RecoverySection({
     );
   }
 
-  if (phase === "enter-recovery-key") {
+  if (phase === "disable") {
     return (
       <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">복구 수단 변경/제거</h2>
-        <form onSubmit={handleRecoveryKeySubmit} className="space-y-3">
+        <h2 className="text-lg font-semibold">복구 키 비활성화</h2>
+        <form onSubmit={handleDisable} className="space-y-3">
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            현재 설정된 복구 키를 입력해 본인 확인을 해주세요.
+            현재 복구 키를 입력해 본인 확인을 해주세요.
           </p>
           <input
             type="text"
             required
-            value={recoveryKeyInput}
-            onChange={(e) => setRecoveryKeyInput(e.target.value)}
+            value={proofInput}
+            onChange={(e) => setProofInput(e.target.value)}
             placeholder="복구 키"
             className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
           />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {submitting ? "확인 중..." : "비활성화"}
+          </button>
+          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+            취소
+          </button>
+        </form>
+      </section>
+    );
+  }
+
+  return (
+    <section className="w-full max-w-sm space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+      <p className="text-sm font-medium">
+        복구 키: <strong>{enabled ? "사용 중" : "사용 안 함"}</strong>
+      </p>
+      <p className="text-xs text-zinc-500">
+        랜덤 키 하나로 잠금 해제. 간단하지만, 그 키 하나가 유출되면 그대로 노출됩니다.
+      </p>
+      {message && <p className="text-sm text-green-600">{message}</p>}
+      <button
+        type="button"
+        onClick={() => setPhase(enabled ? "disable" : "enable")}
+        className={
+          enabled
+            ? "w-full rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-500"
+            : "w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background"
+        }
+      >
+        {enabled ? "비활성화" : "활성화"}
+      </button>
+    </section>
+  );
+}
+
+type ShamirPhase = "status" | "enable" | "reveal" | "disable";
+
+function ShamirSection({
+  config,
+  stageSeedFromPassphrase,
+  stageSeedFromShamirShares,
+  discardStagedSeed,
+  prepareShamirRecovery,
+  confirmPendingMethod,
+  disableShamir,
+}: {
+  config: { n: number; k: number } | null;
+  stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
+  stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
+  discardStagedSeed: () => void;
+  prepareShamirRecovery: (n: number, k: number) => Promise<Uint8Array[]>;
+  confirmPendingMethod: () => Promise<void>;
+  disableShamir: () => Promise<void>;
+}) {
+  const [phase, setPhase] = useState<ShamirPhase>("status");
+  const [passphrase, setPassphrase] = useState("");
+  const [newN, setNewN] = useState(5);
+  const [newK, setNewK] = useState(3);
+  const [proofShares, setProofShares] = useState<string[]>([]);
+  const [revealedShares, setRevealedShares] = useState<Uint8Array[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
+
+  function cancel() {
+    discardStagedSeed();
+    setPhase("status");
+    setError(null);
+    setPassphrase("");
+    setProofShares([]);
+    setRevealedShares([]);
+  }
+
+  function startDisable() {
+    setError(null);
+    setProofShares(config ? Array(config.k).fill("") : []);
+    setPhase("disable");
+  }
+
+  async function handleEnable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    if (newK < 2 || newN < newK || newN > 10) {
+      setError("조각 수(N)는 2~10, 필요 조각 수(K)는 2 이상이면서 N 이하여야 합니다.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await stageSeedFromPassphrase(passphrase);
+      setPassphrase("");
+      const shares = await prepareShamirRecovery(newN, newK);
+      setRevealedShares(shares);
+      setPhase("reveal");
+    } catch (err) {
+      setError(err instanceof WrongPassphraseError ? "패스프레이즈가 올바르지 않습니다." : "준비하지 못했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleConfirmReveal() {
+    setSubmitting(true);
+    try {
+      await confirmPendingMethod();
+      setRevealedShares([]);
+      setPhase("status");
+      setMessage("Shamir 분산이 활성화되었습니다.");
+    } catch {
+      setError("저장하지 못했습니다. 다시 시도해주세요.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDisable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await stageSeedFromShamirShares(proofShares.map((s) => textToRecoverySecret(s)));
+      await disableShamir();
+      setProofShares([]);
+      setPhase("status");
+      setMessage("Shamir 분산이 비활성화되었습니다.");
+    } catch (err) {
+      setError(
+        err instanceof InvalidShamirSharesError
+          ? "조각들이 올바른 시드로 복원되지 않습니다."
+          : "비활성화하지 못했습니다."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (phase === "reveal" && revealedShares.length > 0) {
+    return (
+      <section className="w-full max-w-lg space-y-3">
+        <SecretReveal
+          title="Shamir 분산 조각"
+          description={`총 ${revealedShares.length}개의 조각 중 ${newK}개를 모으면 시드를 복원할 수 있습니다. 조각 하나만으로는 아무 의미가 없으니, 각 조각을 서로 다른 안전한 곳에 나눠 보관하세요. 이 화면은 다시 표시되지 않습니다.`}
+          confirmLabel={submitting ? "저장 중..." : "완료 — 이 조각들을 활성화합니다"}
+          confirming={submitting}
+          onConfirm={() => void handleConfirmReveal()}
+        >
+          <div className="space-y-4">
+            {revealedShares.map((share, i) => (
+              <SecretCard
+                key={i}
+                label={`조각 ${i + 1} / ${revealedShares.length}`}
+                text={recoverySecretToText(share)}
+                filename={`privatediary-shamir-share-${i + 1}-of-${revealedShares.length}.txt`}
+              />
+            ))}
+          </div>
+        </SecretReveal>
+        {error && <p className="text-sm text-red-600">{error}</p>}
+        <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+          취소 (활성화하지 않음)
+        </button>
+      </section>
+    );
+  }
+
+  if (phase === "enable") {
+    return (
+      <section className="w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold">Shamir 분산 활성화</h2>
+        <form onSubmit={handleEnable} className="space-y-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">본인 확인을 위해 패스프레이즈를 입력하세요.</p>
+          <input
+            type="password"
+            required
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            placeholder="패스프레이즈"
+            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          <div className="flex gap-2">
+            <label className="flex-1 text-xs">
+              전체(N)
+              <input
+                type="number"
+                min={2}
+                max={10}
+                value={newN}
+                onChange={(e) => setNewN(Number(e.target.value))}
+                className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+            <label className="flex-1 text-xs">
+              필요(K)
+              <input
+                type="number"
+                min={2}
+                max={newN}
+                value={newK}
+                onChange={(e) => setNewK(Number(e.target.value))}
+                className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              />
+            </label>
+          </div>
           {error && <p className="text-sm text-red-600">{error}</p>}
           <button
             type="submit"
@@ -742,22 +750,22 @@ function RecoverySection({
     );
   }
 
-  if (phase === "enter-shamir-shares" && recoveryConfig?.type === "shamir") {
+  if (phase === "disable" && config) {
     return (
       <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">복구 수단 변경/제거</h2>
-        <form onSubmit={handleShamirSubmit} className="space-y-3">
+        <h2 className="text-lg font-semibold">Shamir 분산 비활성화</h2>
+        <form onSubmit={handleDisable} className="space-y-3">
           <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            본인 확인을 위해 {recoveryConfig.k}개의 조각을 입력하세요.
+            본인 확인을 위해 {config.k}개의 조각을 입력하세요.
           </p>
-          {shareInputs.map((value, i) => (
+          {proofShares.map((value, i) => (
             <input
               key={i}
               type="text"
               required
               value={value}
               onChange={(e) =>
-                setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+                setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
               }
               placeholder={`조각 ${i + 1}`}
               className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
@@ -767,9 +775,9 @@ function RecoverySection({
           <button
             type="submit"
             disabled={submitting}
-            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {submitting ? "확인 중..." : "다음"}
+            {submitting ? "확인 중..." : "비활성화"}
           </button>
           <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
             취소
@@ -779,38 +787,27 @@ function RecoverySection({
     );
   }
 
-  const statusLabel =
-    recoveryConfig?.type === "recovery-key"
-      ? "복구 키"
-      : recoveryConfig?.type === "shamir"
-        ? `Shamir 분산 (${recoveryConfig.n}개 중 ${recoveryConfig.k}개 필요)`
-        : "없음";
-
   return (
-    <section className="w-full max-w-sm space-y-4">
-      <h2 className="text-lg font-semibold">복구 수단</h2>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
-        패스프레이즈를 잊었을 때를 대비한 별도 수단입니다. 선택 사항이며, 두지 않는 것이 가장
-        안전합니다(훔칠 대상 자체가 없으므로). 현재: <strong>{statusLabel}</strong>
+    <section className="w-full max-w-sm space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+      <p className="text-sm font-medium">
+        Shamir 분산:{" "}
+        <strong>{config ? `사용 중 (${config.n}개 중 ${config.k}개 필요)` : "사용 안 함"}</strong>
       </p>
-      {statusMessage && <p className="text-sm text-green-600">{statusMessage}</p>}
-      {recoveryConfig?.type === "none" ? (
-        <button
-          type="button"
-          onClick={startCreate}
-          className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background"
-        >
-          복구 수단 설정하기
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={startChangeOrRemove}
-          className="w-full rounded border border-zinc-300 px-4 py-2 text-sm font-medium dark:border-zinc-700"
-        >
-          변경 또는 제거
-        </button>
-      )}
+      <p className="text-xs text-zinc-500">
+        N개 조각으로 나눠, K개를 모아야 잠금 해제. 조각 하나만 유출되면 무의미해 더 안전합니다.
+      </p>
+      {message && <p className="text-sm text-green-600">{message}</p>}
+      <button
+        type="button"
+        onClick={() => (config ? startDisable() : setPhase("enable"))}
+        className={
+          config
+            ? "w-full rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-500"
+            : "w-full rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background"
+        }
+      >
+        {config ? "비활성화" : "활성화"}
+      </button>
     </section>
   );
 }
@@ -867,8 +864,8 @@ function ResetKeysSection({
         <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">초기화</h2>
         <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           기존 패스프레이즈를 모른다면 새 시드를 발급하는 방법뿐입니다. <strong>지금까지 작성한
-          모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 기존에 설정한 복구 수단도 함께
-          제거됩니다. 이 작업은 되돌릴 수 없습니다.
+          모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 활성화해둔 복호화 방법도 함께
+          꺼집니다. 이 작업은 되돌릴 수 없습니다.
         </p>
       </div>
 

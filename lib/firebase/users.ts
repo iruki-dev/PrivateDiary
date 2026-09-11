@@ -1,4 +1,12 @@
-import { doc, getDoc, serverTimestamp, setDoc, updateDoc, type Timestamp } from "firebase/firestore";
+import {
+  deleteField,
+  doc,
+  getDoc,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  type Timestamp,
+} from "firebase/firestore";
 import { db } from "./config";
 import {
   publicKeysFromStorage,
@@ -7,9 +15,9 @@ import {
   recoveryKeyWrappedSeedToStorage,
   wrappedSeedFromStorage,
   wrappedSeedToStorage,
+  type DecryptionMethodsConfig,
   type HybridPublicKeysRaw,
   type HybridPublicKeysStorage,
-  type RecoveryConfig,
   type RecoveryKeyWrappedSeed,
   type RecoveryKeyWrappedSeedStorage,
   type WrappedSeed,
@@ -23,42 +31,38 @@ import {
  * already-encrypted storage shapes to/from Firestore.
  */
 
-type RecoveryDocData =
-  | { type: "none" }
-  | { type: "recovery-key"; wrappedSeed: RecoveryKeyWrappedSeedStorage }
-  | { type: "shamir"; n: number; k: number };
+interface DecryptionMethodsDocData {
+  recoveryKey?: { wrappedSeed: RecoveryKeyWrappedSeedStorage };
+  shamir?: { n: number; k: number };
+}
 
 interface UserDocData {
   publicKeys: HybridPublicKeysStorage;
   wrappedSeed: WrappedSeedStorage;
-  recovery?: RecoveryDocData;
+  decryptionMethods?: DecryptionMethodsDocData;
   createdAt?: Timestamp;
 }
 
 export interface UserKeyRecord {
   publicKeys: HybridPublicKeysRaw;
   wrappedSeed: WrappedSeed;
-  recoveryConfig: RecoveryConfig;
-  /** Only present when recoveryConfig.type === "recovery-key". */
+  decryptionMethods: DecryptionMethodsConfig;
+  /** Only present when decryptionMethods.recoveryKeyEnabled is true. */
   recoveryWrappedSeed: RecoveryKeyWrappedSeed | null;
 }
 
-function parseRecovery(recovery: RecoveryDocData | undefined): {
-  recoveryConfig: RecoveryConfig;
+function parseDecryptionMethods(data: DecryptionMethodsDocData | undefined): {
+  decryptionMethods: DecryptionMethodsConfig;
   recoveryWrappedSeed: RecoveryKeyWrappedSeed | null;
 } {
-  if (!recovery || recovery.type === "none") {
-    return { recoveryConfig: { type: "none" }, recoveryWrappedSeed: null };
-  }
-  if (recovery.type === "recovery-key") {
-    return {
-      recoveryConfig: { type: "recovery-key" },
-      recoveryWrappedSeed: recoveryKeyWrappedSeedFromStorage(recovery.wrappedSeed),
-    };
-  }
   return {
-    recoveryConfig: { type: "shamir", n: recovery.n, k: recovery.k },
-    recoveryWrappedSeed: null,
+    decryptionMethods: {
+      recoveryKeyEnabled: data?.recoveryKey != null,
+      shamir: data?.shamir ? { n: data.shamir.n, k: data.shamir.k } : null,
+    },
+    recoveryWrappedSeed: data?.recoveryKey
+      ? recoveryKeyWrappedSeedFromStorage(data.recoveryKey.wrappedSeed)
+      : null,
   };
 }
 
@@ -72,7 +76,7 @@ export async function getUserKeyRecord(uid: string): Promise<UserKeyRecord | nul
   return {
     publicKeys: publicKeysFromStorage(data.publicKeys),
     wrappedSeed: wrappedSeedFromStorage(data.wrappedSeed),
-    ...parseRecovery(data.recovery),
+    ...parseDecryptionMethods(data.decryptionMethods),
   };
 }
 
@@ -85,7 +89,7 @@ export async function createUserKeyRecord(
   await setDoc(doc(db, "users", uid), {
     publicKeys: publicKeysToStorage(publicKeys),
     wrappedSeed: wrappedSeedToStorage(wrappedSeed),
-    recovery: { type: "none" },
+    decryptionMethods: {},
     createdAt: serverTimestamp(),
   });
 }
@@ -104,10 +108,10 @@ export async function updateWrappedSeed(uid: string, wrappedSeed: WrappedSeed): 
  * requires it stay equal to the existing value, matching the original
  * account creation time rather than the reset time.
  *
- * Any existing recovery method is cleared back to "none": a recovery-key or
- * Shamir share set up against the OLD seed can no longer reconstruct
- * anything meaningful once the seed changes, so leaving it configured would
- * just be a stale, misleading UI state.
+ * Every configured decryption method is cleared: a recovery key or Shamir
+ * share set up against the OLD seed can no longer reconstruct anything
+ * meaningful once the seed changes, so leaving them configured would just
+ * be a stale, misleading UI state.
  */
 export async function resetUserKeyRecord(
   uid: string,
@@ -117,30 +121,37 @@ export async function resetUserKeyRecord(
   await updateDoc(doc(db, "users", uid), {
     publicKeys: publicKeysToStorage(publicKeys),
     wrappedSeed: wrappedSeedToStorage(wrappedSeed),
-    recovery: { type: "none" },
+    decryptionMethods: {},
   });
 }
 
-/** Sets up (or replaces) recovery-key-based recovery. */
-export async function setUserRecoveryKey(
+/** Enables recovery-key decryption, leaving Shamir (if enabled) untouched. */
+export async function enableRecoveryKeyMethod(
   uid: string,
   wrapped: RecoveryKeyWrappedSeed
 ): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
-    recovery: { type: "recovery-key", wrappedSeed: recoveryKeyWrappedSeedToStorage(wrapped) },
+    "decryptionMethods.recoveryKey": { wrappedSeed: recoveryKeyWrappedSeedToStorage(wrapped) },
   });
 }
 
-/** Sets up (or replaces) Shamir-split recovery. No share material is stored — only the (n, k) shape. */
-export async function setUserShamirRecovery(uid: string, n: number, k: number): Promise<void> {
+/** Disables recovery-key decryption, leaving Shamir (if enabled) untouched. */
+export async function disableRecoveryKeyMethod(uid: string): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
-    recovery: { type: "shamir", n, k },
+    "decryptionMethods.recoveryKey": deleteField(),
   });
 }
 
-/** Removes whatever recovery method is currently configured. */
-export async function clearUserRecovery(uid: string): Promise<void> {
+/** Enables Shamir-split decryption, leaving the recovery key (if enabled) untouched. No share material is stored — only the (n, k) shape. */
+export async function enableShamirMethod(uid: string, n: number, k: number): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
-    recovery: { type: "none" },
+    "decryptionMethods.shamir": { n, k },
+  });
+}
+
+/** Disables Shamir-split decryption, leaving the recovery key (if enabled) untouched. */
+export async function disableShamirMethod(uid: string): Promise<void> {
+  await updateDoc(doc(db, "users", uid), {
+    "decryptionMethods.shamir": deleteField(),
   });
 }

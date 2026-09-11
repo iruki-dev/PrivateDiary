@@ -52,15 +52,14 @@ contexts/
   AuthContext.tsx    # Firebase 로그인 상태만 추적
   OtpContext.tsx      # OTP 활성화 여부/이번 세션 인증 여부를 ID 토큰 커스텀 클레임에서 추적.
                        # AuthContext와 SeedContext 사이에 위치 (로그인 이후, 시드 상태 이전 게이트)
-  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + 복구 수단 상태 추적.
-                       # unlock/lock/changePassphrase/resetKeys 외에, 복구 수단
-                       # 생성/변경/제거를 위한 stage*/commit* 2단계 API 보유
-                       # (생성은 패스프레이즈로, 변경·제거는 현재 설정된 복구
-                       # 수단 자체로 증명해야 함)
+  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + 활성화된 복호화 방법들을 추적.
+                       # unlock/lock/changePassphrase/resetKeys 외에, 방법별
+                       # 활성화/비활성화를 위한 stage/prepare/confirm 3단계 API 보유
+                       # (활성화는 패스프레이즈로, 비활성화는 그 방법 자체로 증명해야 함)
 
 components/
   SecretReveal.tsx              # "한 번만 보여주고 다시 못 봄" 공용 스캐폴드 (복구 키/Shamir 조각에 재사용)
-  SecretCard.tsx                 # 복구 비밀 하나를 QR + 텍스트 + 다운로드로 표시
+  SecretCard.tsx                 # 복호화 비밀 하나를 QR + 텍스트 + 다운로드로 표시
   OtpGate.tsx                     # OTP 활성화 시 코드 입력 전까지 children을 가리는 래퍼 (/entries에서 사용)
   OtpQrCard.tsx                    # OTP 설정용 QR(otpauth:// URI) + 수동 입력 코드 표시
   PassphraseStrengthMeter.tsx
@@ -87,15 +86,15 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 - 서버(Vercel/Cloud Functions 포함) 코드에는 복호화 로직이 존재하지 않는다. `functions/`(OTP 검증)이 이 프로젝트의 유일한 서버 코드인데, 시드·개인키·평문 중 어느 것도 절대 보지 않는다 — 접근을 게이트할 뿐 무엇을 암호화하거나 복호화하지 않는다. `proxy.ts`는 보안 헤더만 설정하고 크립토/Firebase 코드를 일절 import하지 않는다.
 - 모든 암호화 연산은 `lib/crypto/`를 통해서만 수행한다.
 
-## 시드 백업 / 복구 수단
+## 일기 복호화 방법
 
-원래 설계(ARCHITECTURE.md §3.1)의 BIP39 24단어 니모닉은 제거했다. 대신 `/settings`에서 세 가지 중 선택할 수 있다.
+원래 설계(ARCHITECTURE.md §3.1)의 BIP39 24단어 니모닉은 제거했다. "패스프레이즈를 잃어버리면 애초에 복구할 방법이 없다"는 걸 깨닫고, "복구용 백업"이라는 프레이밍 자체를 버렸다 — 대신 패스프레이즈와 **동등한 자격의, 독립적으로 켜고 끌 수 있는 복호화 방법**을 `/settings`에서 원하는 만큼 추가할 수 있다.
 
-- **없음 (기본값)** — 패스프레이즈만이 유일한 열쇠. 훔칠 백업 아티팩트 자체가 없어 가장 안전하지만, 패스프레이즈를 잊으면 정말로 복구 불가능.
-- **복구 키** — 랜덤 256비트 키로 시드를 AES-GCM wrap해 Firestore에 저장(`recovery.wrappedSeed`). 키 자체는 한 번만 보여주고 어디에도 저장하지 않는다. QR/텍스트 파일로 내보낼 수 있다.
-- **Shamir 비밀 분산** — 시드 자체를 N개 조각으로 분할, K개 이상 모아야 복구(`shamir-secret-sharing`, Cure53·Zellic 감사 완료 라이브러리, WASM 없음). Firestore에는 `(n, k)` 형태만 저장되고 조각 자체는 서버에 전혀 남지 않는다.
+- **패스프레이즈 (항상 켜져 있음)** — 유일하게 끌 수 없는 기본 방법. 이것 하나만 쓴다면 잃어버렸을 때 정말로 복구 불가능하다는 점은 여전하다.
+- **복구 키 (opt-in)** — 랜덤 256비트 키로 시드를 AES-GCM wrap해 Firestore에 저장(`decryptionMethods.recoveryKey`). 키 자체는 한 번만 보여주고 어디에도 저장하지 않는다. QR/텍스트 파일로 내보낼 수 있다.
+- **Shamir 비밀 분산 (opt-in)** — 시드 자체를 N개 조각으로 분할, K개 이상 모아야 복원(`shamir-secret-sharing`, Cure53·Zellic 감사 완료 라이브러리, WASM 없음). Firestore에는 `(n, k)` 형태만 저장되고 조각 자체는 서버에 전혀 남지 않는다.
 
-세 방식 모두 opt-in이며, 생성은 패스프레이즈로, **변경·제거는 현재 설정된 복구 수단 자체를 증명해야** 가능하다(2FA 설정 변경에 2FA를 요구하는 것과 같은 이유 — 패스프레이즈만 탈취당한 공격자가 복구 수단을 조용히 바꿔치기하지 못하게 함). 재구성된 시드가 진짜인지는 별도 저장 없이 `deriveHybridKeyPair(seed).publicKeys`를 Firestore에 이미 있는 공개키와 비교해서 검증한다(`seedMatchesPublicKeys`).
+셋 중 활성화된 것 아무거나 하나로 잠금 해제할 수 있다(AND가 아니라 OR) — 둘 다, 하나만, 또는 패스프레이즈만 쓸 수도 있다. **활성화**는 패스프레이즈로 증명하면 되고, **비활성화는 그 방법 자체를 증명해야** 한다(2FA 설정 변경에 2FA를 요구하는 것과 같은 이유 — 패스프레이즈만 탈취당한 공격자가 다른 방법을 조용히 꺼버리지 못하게 함). 재구성된 시드가 진짜인지는 별도 저장 없이 `deriveHybridKeyPair(seed).publicKeys`를 Firestore에 이미 있는 공개키와 비교해서 검증한다(`seedMatchesPublicKeys`).
 
 ## OTP 인증 (접근 게이트, 암호화 요인 아님)
 
@@ -104,7 +103,7 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 - TOTP 시크릿은 `functions/`(Cloud Functions, Admin SDK)만 만들고 저장한다 — `otpSecrets/{uid}`는 `firestore.rules`에서 클라이언트에 완전히 차단.
 - 코드가 맞으면 Cloud Function이 Firebase Auth ID 토큰에 `otpEnabled` / `otpVerified` / `otpVerifiedAt` 커스텀 클레임을 심고, `firestore.rules`의 `otpSatisfied()`가 `entries` 읽기에서 이를 요구한다.
 - `users/{uid}` 읽기는 OTP로 게이트하지 **않는다** — `publicKeys`가 있어야 쓰기가 되는데, 쓰기는 잠금 여부와 무관하게 항상 가능해야 하기 때문(ARCHITECTURE.md §3.2 규칙 5).
-- 활성화는 QR 스캔 + 코드 1회 확인, 비활성화는 현재 유효한 코드가 있어야 함(복구 수단 변경/제거와 같은 "현재 수단으로 증명" 원칙).
+- 활성화는 QR 스캔 + 코드 1회 확인, 비활성화는 현재 유효한 코드가 있어야 함(복호화 방법 비활성화와 같은 "그 방법 자체로 증명" 원칙).
 - 6자리 코드의 낮은 엔트로피 때문에 Cloud Function에 실패 5회당 60초 잠금을 넣었다 — 없으면 유효한 로그인 세션을 가진 공격자가 무차별 대입할 수 있다.
 
 ## Firestore 규칙 / Cloud Functions 배포
