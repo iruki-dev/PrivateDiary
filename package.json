@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-privatediary \"vitest run --config vitest.rules.config.ts\""
   },
   "dependencies": {
     "@noble/curves": "^2.4.0",
@@ -23,12 +24,14 @@
     "zxcvbn-ts": "^2.4.0"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.2",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.4",
+    "firebase-tools": "^15.30.0",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^5.0.0"

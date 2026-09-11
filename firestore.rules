@@ -1,0 +1,39 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isValidUserDoc(data) {
+      return data.keys().hasOnly(['publicKeys', 'signingPublicKey', 'wrappedSeed', 'createdAt'])
+          && data.publicKeys.keys().hasOnly(['x25519', 'mlkem768']);
+    }
+
+    // ARCHITECTURE.md §5 gives `allow update: if ... isKeyRotationRequest()`
+    // without defining the function — filled in here. It covers two
+    // self-service mutations of the account owner's OWN document:
+    //   1. Passphrase change (Phase 4 rewrapSeed): only wrappedSeed changes.
+    //   2. Full key reset ("초기화", ARCHITECTURE.md §3.6 rule 5): a brand
+    //      new seed, so publicKeys + wrappedSeed both change together.
+    // Either way createdAt is immutable and the document shape stays valid.
+    // This only ever narrows what an authenticated uid can do to ITS OWN
+    // doc — the outer `request.auth.uid == uid` check is what actually
+    // prevents cross-user access, not this function.
+    function isKeyRotationRequest() {
+      return isValidUserDoc(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt;
+    }
+
+    match /users/{uid} {
+      allow read: if request.auth.uid == uid;
+      allow create: if request.auth.uid == uid
+                    && isValidUserDoc(request.resource.data);
+      allow update: if request.auth.uid == uid && isKeyRotationRequest();
+      allow delete: if false;
+    }
+    match /entries/{entryId} {
+      allow read: if request.auth.uid == resource.data.uid;
+      allow create: if request.auth.uid == request.resource.data.uid
+                    && request.resource.data.entrySeq is int;
+      allow update, delete: if false; // append-only: 수정/삭제 자체를 원천 차단
+    }
+  }
+}

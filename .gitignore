@@ -43,3 +43,7 @@ next-env.d.ts
 
 # design doc kept local-only, not committed
 ARCHITECTURE.md
+
+# firebase emulator
+*-debug.log
+.firebase/
