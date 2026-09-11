@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // functions/ is a separate TypeScript project (its own tsconfig.json,
+    // own npm-managed node_modules) linted/type-checked independently —
+    // see functions/package.json's own build script.
+    "functions/**",
   ]),
 ]);
 
