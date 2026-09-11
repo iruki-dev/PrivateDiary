@@ -11,6 +11,8 @@ import type {
   EncryptedEntryStorage,
   HybridPublicKeysRaw,
   HybridPublicKeysStorage,
+  ShamirWrappedSeed,
+  ShamirWrappedSeedStorage,
   WrappedSeed,
   WrappedSeedStorage,
 } from "./types";
@@ -46,6 +48,20 @@ export function wrappedSeedFromStorage(stored: WrappedSeedStorage): WrappedSeed 
     salt: base64ToBytes(stored.salt),
     kdf: stored.kdf,
     kdfParams: stored.kdfParams,
+  };
+}
+
+export function shamirWrappedSeedToStorage(wrapped: ShamirWrappedSeed): ShamirWrappedSeedStorage {
+  return {
+    ciphertext: bytesToBase64(wrapped.ciphertext),
+    iv: bytesToBase64(wrapped.iv),
+  };
+}
+
+export function shamirWrappedSeedFromStorage(stored: ShamirWrappedSeedStorage): ShamirWrappedSeed {
+  return {
+    ciphertext: base64ToBytes(stored.ciphertext),
+    iv: base64ToBytes(stored.iv),
   };
 }
 

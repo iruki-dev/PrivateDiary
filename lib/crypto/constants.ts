@@ -31,3 +31,7 @@ export const CONTENT_KEY_WRAP_INFO = "diary-content-key-wrap-v1";
 export const PBKDF2_SALT_LENGTH = 16;
 export const PBKDF2_ITERATIONS = 600_000;
 export const PBKDF2_HASH = "SHA-256" as const;
+
+// Shamir path (ARCHITECTURE.md §3.7): shares split a random AES-256 key, not
+// the master seed itself, so reissuing can actually invalidate old shares.
+export const SHAMIR_WRAP_KEY_LENGTH = 32;

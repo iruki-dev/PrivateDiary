@@ -72,6 +72,11 @@ export interface EncryptedEntryStorage {
   aad: EntryAAD;
 }
 
+export interface ShamirWrappedSeedStorage {
+  ciphertext: string;
+  iv: string;
+}
+
 /**
  * Shamir's Secret Sharing: the sole alternative to the passphrase (opt-in).
  * Passphrase and Shamir are symmetric, mutually-trusting credentials over
@@ -85,4 +90,16 @@ export interface EncryptedEntryStorage {
  */
 export interface DecryptionMethodsConfig {
   shamir: { n: number; k: number } | null;
+}
+
+/**
+ * The master seed, AES-GCM-wrapped under a random key that Shamir shares
+ * split (lib/crypto/recovery.ts) — NOT the seed split directly. This is
+ * what makes reissuing shares actually invalidate the old ones: reissue
+ * generates a fresh wrap key and REPLACES this ciphertext, so old shares
+ * reconstruct a wrap key that can no longer decrypt anything stored.
+ */
+export interface ShamirWrappedSeed {
+  ciphertext: Uint8Array;
+  iv: Uint8Array;
 }

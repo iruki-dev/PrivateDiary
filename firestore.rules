@@ -5,13 +5,17 @@ service cloud.firestore {
     // Shamir's Secret Sharing: the sole alternative to the passphrase
     // (opt-in) — replaces the removed BIP39 mnemonic and the earlier
     // recovery-key option (see lib/crypto/recovery.ts, ARCHITECTURE.md
-    // §3.7). Only the (n, k) shape is stored; the shares themselves are
-    // never sent to Firestore at all.
+    // §3.7). Shares split a random wrap key, not the seed itself, so that
+    // key's `wrappedSeed` ciphertext (AES-GCM, same shape as the top-level
+    // wrappedSeed) is what's stored here — the shares themselves are never
+    // sent to Firestore at all. Reissuing overwrites this ciphertext, which
+    // is what actually invalidates any previously-issued shares.
     function isValidDecryptionMethods(methods) {
       return methods.keys().hasOnly(['shamir'])
           && (!('shamir' in methods)
-              || (methods.shamir.keys().hasOnly(['n', 'k'])
-                  && methods.shamir.n is int && methods.shamir.k is int));
+              || (methods.shamir.keys().hasOnly(['n', 'k', 'wrappedSeed'])
+                  && methods.shamir.n is int && methods.shamir.k is int
+                  && methods.shamir.wrappedSeed.keys().hasOnly(['ciphertext', 'iv'])));
     }
 
     function isValidUserDoc(data) {

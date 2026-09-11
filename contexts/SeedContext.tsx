@@ -22,7 +22,6 @@ import {
   deriveHybridKeyPair,
   generateMasterSeed,
   rewrapSeed,
-  seedMatchesPublicKeys,
   splitSeedShamir,
   unwrapSeed,
   wipeBytes,
@@ -31,6 +30,7 @@ import {
   type DecryptionMethodsConfig,
   type HybridPrivateKeys,
   type HybridPublicKeysRaw,
+  type ShamirWrappedSeed,
   type WrappedSeed,
 } from "@/lib/crypto";
 
@@ -59,10 +59,21 @@ import {
  * Neither can reveal the other's actual value: reconstructing the seed from
  * Shamir shares never yields the passphrase string (the passphrase is never
  * derived from or embedded in the seed), and unwrapping the seed via the
- * passphrase never yields a previously-issued set of Shamir shares (split()
- * draws fresh randomness on every call — see recovery.test.ts). This is why
- * the passphrase is the everyday default, with Shamir as the one thing that
- * still works if the passphrase itself is lost.
+ * passphrase never yields a previously-issued set of Shamir shares. This is
+ * why the passphrase is the everyday default, with Shamir as the one thing
+ * that still works if the passphrase itself is lost.
+ *
+ * Critically, "reissue" for BOTH credentials actually invalidates what came
+ * before, not just cosmetically: `changePassphrase`/`resetPassphraseWithShamirShares`
+ * overwrite `wrappedSeed` with a freshly-salted ciphertext, and
+ * `confirmPendingShamir` overwrites the analogous Shamir-side ciphertext
+ * (see lib/crypto/recovery.ts's `ShamirWrappedSeed` — shares split a random
+ * wrap KEY, never the seed itself, precisely so reissuing can replace that
+ * ciphertext and strand old shares). The seed under everything never
+ * changes, so every entry stays decryptable through either current
+ * credential — but an old passphrase or an old share set stops working the
+ * moment its wrapping layer is replaced, even if someone captured it before
+ * the reset.
  *
  * Setting up or reissuing Shamir follows a three-phase stage/prepare/confirm
  * protocol so nothing is written to Firestore until the user has
@@ -89,6 +100,7 @@ export type SeedStatus = "unknown" | "not-issued" | "locked" | "unlocked";
 
 interface PendingShamir {
   shares: Uint8Array[];
+  wrappedSeed: ShamirWrappedSeed;
   n: number;
   k: number;
 }
@@ -156,6 +168,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     null
   );
   const wrappedSeedRef = useRef<WrappedSeed | null>(null);
+  const shamirWrappedSeedRef = useRef<ShamirWrappedSeed | null>(null);
   const publicKeysRef = useRef<HybridPublicKeysRaw | null>(null);
   const stagedSeedRef = useRef<Uint8Array | null>(null);
   const pendingShamirRef = useRef<PendingShamir | null>(null);
@@ -182,6 +195,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     if (!user) {
       wrappedSeedRef.current = null;
+      shamirWrappedSeedRef.current = null;
       publicKeysRef.current = null;
       setPublicKeys(null);
       setDecryptionMethods(null);
@@ -191,6 +205,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     const record = await getUserKeyRecord(user.uid);
     if (!record) {
       wrappedSeedRef.current = null;
+      shamirWrappedSeedRef.current = null;
       publicKeysRef.current = null;
       setPublicKeys(null);
       setDecryptionMethods(null);
@@ -198,6 +213,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       return;
     }
     wrappedSeedRef.current = record.wrappedSeed;
+    shamirWrappedSeedRef.current = record.shamirWrappedSeed;
     publicKeysRef.current = record.publicKeys;
     setPublicKeys(record.publicKeys);
     setDecryptionMethods(record.decryptionMethods);
@@ -216,6 +232,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       wipePrivateKeys();
       clearStagedSeed();
       wrappedSeedRef.current = null;
+      shamirWrappedSeedRef.current = null;
       publicKeysRef.current = null;
       setPublicKeys(null);
       setDecryptionMethods(null);
@@ -244,11 +261,10 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const unlockWithShamirShares = useCallback(
     async (shares: Uint8Array[]) => {
-      const seed = await combineSeedShamir(shares);
-      if (!publicKeysRef.current || !seedMatchesPublicKeys(seed, publicKeysRef.current)) {
-        wipeBytes(seed);
+      if (!shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
+      const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
       deriveAndUnlock(seed);
       wipeBytes(seed);
     },
@@ -274,14 +290,10 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const resetPassphraseWithShamirShares = useCallback(
     async (shares: Uint8Array[], newPassphrase: string) => {
-      if (!user) {
-        throw new Error("Not signed in");
-      }
-      const seed = await combineSeedShamir(shares);
-      if (!publicKeysRef.current || !seedMatchesPublicKeys(seed, publicKeysRef.current)) {
-        wipeBytes(seed);
+      if (!user || !shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
+      const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
       const wrapped = await wrapSeed(seed, newPassphrase);
       await updateWrappedSeed(user.uid, wrapped);
       wrappedSeedRef.current = wrapped;
@@ -304,6 +316,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       await resetUserKeyRecord(user.uid, newPublicKeys, wrapped);
 
       wrappedSeedRef.current = wrapped;
+      shamirWrappedSeedRef.current = null;
       publicKeysRef.current = newPublicKeys;
       setPublicKeys(newPublicKeys);
       setDecryptionMethods({ shamir: null });
@@ -327,11 +340,10 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const stageSeedFromShamirShares = useCallback(
     async (shares: Uint8Array[]) => {
-      const seed = await combineSeedShamir(shares);
-      if (!publicKeysRef.current || !seedMatchesPublicKeys(seed, publicKeysRef.current)) {
-        wipeBytes(seed);
+      if (!shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
+      const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
       clearStagedSeed();
       stagedSeedRef.current = seed;
     },
@@ -345,9 +357,9 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       if (!stagedSeedRef.current) {
         throw new Error("No staged seed to prepare Shamir shares from");
       }
-      const shares = await splitSeedShamir(stagedSeedRef.current, n, k);
+      const { shares, wrappedSeed } = await splitSeedShamir(stagedSeedRef.current, n, k);
       clearPendingShamir();
-      pendingShamirRef.current = { shares, n, k };
+      pendingShamirRef.current = { shares, wrappedSeed, n, k };
       return shares;
     },
     [clearPendingShamir]
@@ -357,8 +369,9 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     if (!user || !pendingShamirRef.current) {
       throw new Error("No prepared Shamir shares to confirm");
     }
-    const { n, k } = pendingShamirRef.current;
-    await setShamirMethodFirestore(user.uid, n, k);
+    const { n, k, wrappedSeed } = pendingShamirRef.current;
+    await setShamirMethodFirestore(user.uid, n, k, wrappedSeed);
+    shamirWrappedSeedRef.current = wrappedSeed;
     setDecryptionMethods({ shamir: { n, k } });
     clearStagedSeed();
   }, [user, clearStagedSeed]);
@@ -368,6 +381,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       throw new Error("No staged seed to prove removal with");
     }
     await disableShamirMethodFirestore(user.uid);
+    shamirWrappedSeedRef.current = null;
     clearStagedSeed();
     setDecryptionMethods({ shamir: null });
   }, [user, clearStagedSeed]);

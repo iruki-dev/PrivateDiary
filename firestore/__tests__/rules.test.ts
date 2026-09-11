@@ -47,6 +47,10 @@ function validWrappedSeed(tag = "a") {
   };
 }
 
+function validShamir(n: number, k: number, tag = "a") {
+  return { n, k, wrappedSeed: { ciphertext: `shamir-ct-${tag}`, iv: `shamir-iv-${tag}` } };
+}
+
 beforeAll(async () => {
   testEnv = await initializeTestEnvironment({
     projectId: PROJECT_ID,
@@ -229,11 +233,11 @@ describe("users/{uid}.decryptionMethods", () => {
 
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
-      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": { n: 5, k: 3 } })
+      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": validShamir(5, 3) })
     );
 
     const snapshot = await getDoc(doc(alice, "users/alice"));
-    expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: { n: 5, k: 3 } });
+    expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: validShamir(5, 3) });
   });
 
   it("rejects any update that leaves a legacy recoveryKey field in the merged document", async () => {
@@ -280,24 +284,28 @@ describe("users/{uid}.decryptionMethods", () => {
     expect(snapshot.data()?.decryptionMethods).toEqual({});
   });
 
-  it("allows reissuing Shamir (overwriting the existing n/k shape)", async () => {
+  it("allows reissuing Shamir (overwriting the existing n/k/wrappedSeed shape)", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        decryptionMethods: { shamir: { n: 5, k: 3 } },
+        decryptionMethods: { shamir: validShamir(5, 3, "gen1") },
         createdAt: new Date(2024, 0, 1),
       });
     });
 
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
-      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": { n: 3, k: 2 } })
+      updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": validShamir(3, 2, "gen2") })
     );
 
     const snapshot = await getDoc(doc(alice, "users/alice"));
-    expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: { n: 3, k: 2 } });
+    // The old generation's wrappedSeed ciphertext is gone entirely, not
+    // merged with the new one — this replace-not-merge semantics at the
+    // rules/Firestore layer is what lib/crypto/recovery.ts's reissue
+    // relies on to actually invalidate previously-issued shares.
+    expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: validShamir(3, 2, "gen2") });
   });
 
   it("allows disabling Shamir entirely", async () => {
@@ -306,7 +314,7 @@ describe("users/{uid}.decryptionMethods", () => {
       await setDoc(doc(db, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        decryptionMethods: { shamir: { n: 5, k: 3 } },
+        decryptionMethods: { shamir: validShamir(5, 3) },
         createdAt: new Date(2024, 0, 1),
       });
     });
@@ -326,7 +334,7 @@ describe("users/{uid}.decryptionMethods", () => {
       await setDoc(doc(db, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed("old"),
-        decryptionMethods: { shamir: { n: 5, k: 3 } },
+        decryptionMethods: { shamir: validShamir(5, 3) },
         createdAt: new Date(2024, 0, 1),
       });
     });
@@ -343,7 +351,19 @@ describe("users/{uid}.decryptionMethods", () => {
       setDoc(doc(alice, "users/alice"), {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
-        decryptionMethods: { shamir: { n: 5, k: "three" } },
+        decryptionMethods: { shamir: { n: 5, k: "three", wrappedSeed: { ciphertext: "ct", iv: "iv" } } },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("rejects a shamir entry missing the wrappedSeed sub-object", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        decryptionMethods: { shamir: { n: 5, k: 3 } },
         createdAt: new Date(),
       })
     );

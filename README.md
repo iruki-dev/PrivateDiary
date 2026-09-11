@@ -34,9 +34,11 @@ lib/
     keys.ts             # deriveHybridKeyPair() — 시드로부터 결정론적 키 쌍 재구성
     passphrase.ts        # wrapSeed / unwrapSeed / rewrapSeed (PBKDF2 + AES-GCM)
     recovery.ts            # Shamir 비밀 분산 — 니모닉 대체이자 패스프레이즈와 동등한 자격의
-                            # 유일한 대안. opt-in이며, 재구성된 시드가 진짜인지는
-                            # seedMatchesPublicKeys()로 검증한다 (Firestore에 이미 저장된
-                            # publicKeys와 재파생 결과를 비교)
+                            # 유일한 대안. 조각은 시드가 아니라 무작위 AES 래핑 키를 쪼개고,
+                            # 그 키로 시드를 wrap한 결과(ShamirWrappedSeed)를 저장한다 —
+                            # 그래야 재발급이 옛 조각을 실제로 무효화한다. 복원 성공 여부는
+                            # AES-GCM 인증 태그로 판별(passphrase.ts의 WrongPassphraseError와
+                            # 동일한 패턴)
     hybridKem.ts             # encapsulateContentKey / decapsulateContentKey (X25519+ML-KEM-768)
     entry.ts                  # encryptEntry / decryptEntry (일기 항목 단위)
     codec.ts                   # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
@@ -92,7 +94,7 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 원래 설계(ARCHITECTURE.md §3.1)의 BIP39 24단어 니모닉은 제거했다. 이후 독립적으로 켜고 끄는 복수의 "복구 방법"(복구 키 + Shamir, OR로 결합) 모델을 거쳐, 지금은 **패스프레이즈와 Shamir 비밀 분산 두 가지만 남기고, 이 둘을 완전히 동등한 자격("상호보안적")으로** 만들었다.
 
 - **패스프레이즈 (항상 켜져 있음)** — 평소에 쓰는 기본 방법. 끌 수 없다.
-- **Shamir 비밀 분산 (opt-in)** — 시드 자체를 N개 조각으로 분할, K개 이상 모아야 복원(`shamir-secret-sharing`, Cure53·Zellic 감사 완료 라이브러리, WASM 없음). Firestore에는 `(n, k)` 형태만 저장되고 조각 자체는 서버에 전혀 남지 않는다.
+- **Shamir 비밀 분산 (opt-in)** — `shamir-secret-sharing`(Cure53·Zellic 감사 완료, WASM 없음)으로 N개 조각을 만들고 K개 이상 모아야 복원. **조각이 직접 시드를 쪼개진 않는다** — 무작위로 생성한 AES-256 래핑 키를 쪼개고, 그 키로 시드를 AES-GCM wrap한 결과(`decryptionMethods.shamir.wrappedSeed`)를 Firestore에 저장한다(패스프레이즈가 `wrappedSeed`를 wrap하는 것과 같은 구조). `(n, k)`와 이 wrap 결과만 저장되고, 조각 자체·래핑 키는 서버에 전혀 남지 않는다.
 
 둘 중 **어느 쪽을 알고 있어도** 다음 세 가지를 모두 할 수 있다:
 
@@ -100,11 +102,15 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 2. 패스프레이즈를 재설정한다 (`changePassphrase`는 기존 패스프레이즈로, `resetPassphraseWithShamirShares`는 K개의 Shamir 조각으로 — 어느 쪽이든 시드 자체는 그대로이므로 기존 일기와 이미 발급된 Shamir 조각이 계속 유효하다).
 3. Shamir 조각을 새로 만들거나 재발급한다 (`prepareShamir`/`confirmPendingShamir` — 어느 쪽으로 증명했든 같은 동작).
 
-단, **어느 한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없다** — 구조적으로 보장된다. Shamir 조각을 복원해도 패스프레이즈 문자열 자체는 얻을 수 없고(시드로부터 패스프레이즈가 유도되지 않으므로), 패스프레이즈로 시드를 풀어도 이미 발급된 Shamir 조각의 실제 값은 알 수 없다(`splitSeedShamir`가 호출할 때마다 새 난수를 뽑으므로, 재발급은 이전 조각과 무관한 완전히 새로운 조각을 만들 뿐 — `recovery.test.ts`의 "reissuing" 테스트가 이를 검증한다).
+단, **어느 한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없다** — 구조적으로 보장된다. Shamir 조각을 복원해도 얻는 건 시드뿐, 패스프레이즈 문자열은 애초에 시드로부터 유도되지 않으므로 알아낼 수 없다. 패스프레이즈로 시드를 풀어도 이미 발급된 Shamir 조각의 실제 값은 알 수 없다.
 
-평소에는 패스프레이즈만 쓰고, 그것을 잊어버렸을 때 비로소 Shamir가 비상 수단으로 쓰인다. Shamir로 복구한 뒤에는 새 패스프레이즈를 설정하길 권장한다(강제는 아님). 반대로 Shamir 조각을 잃어버렸다면 패스프레이즈로 새 조각을 재발급하면 된다. 재구성된 시드가 진짜인지는 별도 저장 없이 `deriveHybridKeyPair(seed).publicKeys`를 Firestore에 이미 있는 공개키와 비교해서 검증한다(`seedMatchesPublicKeys`).
+**재발급은 실제로 이전 것을 무효화한다(단순히 "새 조각을 추가로 내주는" 게 아니다).** 위의 래핑 키 wrap 구조 덕분에, Shamir를 재발급하면 새 래핑 키로 시드를 다시 wrap해 Firestore의 `wrappedSeed` 값을 완전히 교체한다 — 이전 조각들은 (수학적으로는 여전히 유효한 옛 래핑 키를 복원하지만) 그 키로 열 수 있는 암호문이 더 이상 존재하지 않으므로 무력화된다. 시드를 직접 쪼개기만 했다면 재발급이 옛 조각을 결코 무효화하지 못했을 것이다(수학적으로 같은 비밀을 계속 복원하므로) — 이게 바로 애초에 이 래핑 키 계층을 둔 이유다. 패스프레이즈 재설정도 같은 원리로 이미 안전하다(`wrapSeed`가 매번 새 salt로 wrap하므로 옛 패스프레이즈는 교체된 `wrappedSeed`를 열 수 없다). 두 경로 모두 시드 자체와 `entries`(append-only)는 전혀 건드리지 않으므로, 자격 증명을 교체해도 모든 일기가 그대로 읽힌다.
+
+평소에는 패스프레이즈만 쓰고, 그것을 잊어버렸을 때 비로소 Shamir가 비상 수단으로 쓰인다. Shamir로 복구한 뒤에는 새 패스프레이즈를 설정하길 권장한다(강제는 아님). 반대로 Shamir 조각을 잃어버렸다면 패스프레이즈로 새 조각을 재발급하면 된다. 재구성이 진짜인지는 별도 검증 데이터 없이 AES-GCM의 인증 태그 자체로 판별한다(`combineSeedShamir`가 wrap된 시드를 복호화하는 데 실패하면 `InvalidShamirSharesError`) — 패스프레이즈 경로가 `unwrapSeed`의 AES-GCM 인증 실패를 그대로 신호로 쓰는 것과 동일한 패턴이다.
 
 패스프레이즈와 Shamir를 **둘 다** 잃어버린 경우에만 `/settings`의 "초기화"(브랜드 뉴 시드 발급, 기존 일기 전부 영구 손실)가 남는다.
+
+> **마이그레이션 주의**: 이 래핑 키 indirection 이전에 Shamir를 설정해둔 계정은 Firestore에 `wrappedSeed` 없이 `{n, k}`만 있는 옛 형태로 저장되어 있다. 그런 계정은 Shamir로 잠금 해제/재설정을 시도하기 전에 **한 번 재발급**해야 한다(패스프레이즈로 증명 후 `/settings`에서 재발급).
 
 ## OTP 인증 (접근 게이트, 암호화 요인 아님)
 

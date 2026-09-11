@@ -11,11 +11,15 @@ import { db } from "./config";
 import {
   publicKeysFromStorage,
   publicKeysToStorage,
+  shamirWrappedSeedFromStorage,
+  shamirWrappedSeedToStorage,
   wrappedSeedFromStorage,
   wrappedSeedToStorage,
   type DecryptionMethodsConfig,
   type HybridPublicKeysRaw,
   type HybridPublicKeysStorage,
+  type ShamirWrappedSeed,
+  type ShamirWrappedSeedStorage,
   type WrappedSeed,
   type WrappedSeedStorage,
 } from "@/lib/crypto";
@@ -28,7 +32,7 @@ import {
  */
 
 interface DecryptionMethodsDocData {
-  shamir?: { n: number; k: number };
+  shamir?: { n: number; k: number; wrappedSeed: ShamirWrappedSeedStorage };
 }
 
 interface UserDocData {
@@ -42,6 +46,8 @@ export interface UserKeyRecord {
   publicKeys: HybridPublicKeysRaw;
   wrappedSeed: WrappedSeed;
   decryptionMethods: DecryptionMethodsConfig;
+  /** The Shamir wrap-key indirection (lib/crypto/recovery.ts) — null unless Shamir is configured. */
+  shamirWrappedSeed: ShamirWrappedSeed | null;
 }
 
 /**
@@ -58,11 +64,29 @@ export interface UserKeyRecord {
  */
 const legacyRecoveryKeyCleanup = { "decryptionMethods.recoveryKey": deleteField() };
 
+/**
+ * Migration shim (ARCHITECTURE.md §3.7 rev. 4): before this revision, Shamir
+ * split the master seed directly and Firestore stored only `{ n, k }` — no
+ * `wrappedSeed`. Any account that set up Shamir before this shipped still
+ * has that old shape. Those old shares are unusable under the new
+ * (wrap-key) scheme regardless — trying to parse a missing `wrappedSeed`
+ * would otherwise throw and break `refresh()` entirely — so such a config
+ * is treated as if Shamir were never set up, surfacing as "off" in the UI
+ * rather than crashing. The user just needs to set it up again (via the
+ * passphrase) to get a working, reissuable Shamir credential.
+ */
+function hasWrappedSeed(
+  shamir: DecryptionMethodsDocData["shamir"]
+): shamir is { n: number; k: number; wrappedSeed: ShamirWrappedSeedStorage } {
+  return shamir != null && shamir.wrappedSeed != null;
+}
+
 function parseDecryptionMethods(
   data: DecryptionMethodsDocData | undefined
 ): DecryptionMethodsConfig {
+  const shamir = data?.shamir;
   return {
-    shamir: data?.shamir ? { n: data.shamir.n, k: data.shamir.k } : null,
+    shamir: hasWrappedSeed(shamir) ? { n: shamir.n, k: shamir.k } : null,
   };
 }
 
@@ -73,10 +97,14 @@ export async function getUserKeyRecord(uid: string): Promise<UserKeyRecord | nul
     return null;
   }
   const data = snapshot.data() as UserDocData;
+  const shamir = data.decryptionMethods?.shamir;
   return {
     publicKeys: publicKeysFromStorage(data.publicKeys),
     wrappedSeed: wrappedSeedFromStorage(data.wrappedSeed),
     decryptionMethods: parseDecryptionMethods(data.decryptionMethods),
+    shamirWrappedSeed: hasWrappedSeed(shamir)
+      ? shamirWrappedSeedFromStorage(shamir.wrappedSeed)
+      : null,
   };
 }
 
@@ -134,10 +162,21 @@ export async function resetUserKeyRecord(
   });
 }
 
-/** Sets up or reissues Shamir shares — the same write either way, since reissuing just overwrites the (n, k) shape (the shares themselves were never stored). */
-export async function setShamirMethod(uid: string, n: number, k: number): Promise<void> {
+/**
+ * Sets up or reissues Shamir shares — the same write either way. Reissuing
+ * overwrites `wrappedSeed` with a freshly wrap-keyed ciphertext (see
+ * lib/crypto/recovery.ts), which is what actually invalidates whatever
+ * shares were issued before this call — the shares themselves are never
+ * stored, only this ciphertext and the (n, k) shape.
+ */
+export async function setShamirMethod(
+  uid: string,
+  n: number,
+  k: number,
+  wrappedSeed: ShamirWrappedSeed
+): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
-    "decryptionMethods.shamir": { n, k },
+    "decryptionMethods.shamir": { n, k, wrappedSeed: shamirWrappedSeedToStorage(wrappedSeed) },
     ...legacyRecoveryKeyCleanup,
   });
 }

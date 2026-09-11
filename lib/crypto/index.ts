@@ -18,7 +18,8 @@ export { deriveHybridKeyPair } from "./keys";
 
 export { wrapSeed, unwrapSeed, rewrapSeed } from "./passphrase";
 
-export { splitSeedShamir, combineSeedShamir, seedMatchesPublicKeys } from "./recovery";
+export { splitSeedShamir, combineSeedShamir } from "./recovery";
+export type { ShamirSplitResult } from "./recovery";
 
 export { encapsulateContentKey, decapsulateContentKey } from "./hybridKem";
 export type { ContentKeyCapsule } from "./hybridKem";
@@ -30,6 +31,8 @@ export {
   publicKeysFromStorage,
   wrappedSeedToStorage,
   wrappedSeedFromStorage,
+  shamirWrappedSeedToStorage,
+  shamirWrappedSeedFromStorage,
   recoverySecretToText,
   textToRecoverySecret,
   entryToStorage,
@@ -47,6 +50,8 @@ export type {
   HybridPublicKeysStorage,
   WrappedSeed,
   WrappedSeedStorage,
+  ShamirWrappedSeed,
+  ShamirWrappedSeedStorage,
   DecryptionMethodsConfig,
   EntryAAD,
   EncryptedEntryPayload,
