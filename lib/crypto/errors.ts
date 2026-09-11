@@ -21,10 +21,23 @@ export class TamperedCiphertextError extends Error {
   }
 }
 
-/** Thrown by mnemonicToSeed on a malformed phrase or bad BIP39 checksum. */
-export class InvalidMnemonicError extends Error {
-  constructor(message = "Invalid mnemonic phrase or checksum") {
+/** Thrown when a recovery key fails to unwrap the seed (wrong key, or corrupted recoveryWrappedSeed). */
+export class InvalidRecoveryKeyError extends Error {
+  constructor(message = "Incorrect recovery key or corrupted recovery data") {
     super(message);
-    this.name = "InvalidMnemonicError";
+    this.name = "InvalidRecoveryKeyError";
+  }
+}
+
+/**
+ * Thrown when combined Shamir shares don't reconstruct the expected seed.
+ * shamir-secret-sharing's combine() never throws by itself on wrong/insufficient
+ * shares (see lib/crypto/recovery.ts) — this is raised by our own verification
+ * step instead.
+ */
+export class InvalidShamirSharesError extends Error {
+  constructor(message = "These shares do not reconstruct the correct seed") {
+    super(message);
+    this.name = "InvalidShamirSharesError";
   }
 }

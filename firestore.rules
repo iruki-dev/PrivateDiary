@@ -2,20 +2,38 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Opt-in secondary seed-recovery method (replaces the removed BIP39
+    // mnemonic — see lib/crypto/recovery.ts). "recovery-key" stores an
+    // AES-GCM-wrapped seed that's meaningless without the offline key;
+    // "shamir" stores only the (n, k) shape — the shares themselves are
+    // never sent to Firestore at all.
+    function isValidRecovery(recovery) {
+      return recovery.type == 'none'
+          || (recovery.type == 'recovery-key'
+              && recovery.keys().hasOnly(['type', 'wrappedSeed'])
+              && recovery.wrappedSeed.keys().hasOnly(['ciphertext', 'iv']))
+          || (recovery.type == 'shamir'
+              && recovery.keys().hasOnly(['type', 'n', 'k'])
+              && recovery.n is int && recovery.k is int);
+    }
+
     function isValidUserDoc(data) {
-      return data.keys().hasOnly(['publicKeys', 'signingPublicKey', 'wrappedSeed', 'createdAt'])
-          && data.publicKeys.keys().hasOnly(['x25519', 'mlkem768']);
+      return data.keys().hasOnly(['publicKeys', 'signingPublicKey', 'wrappedSeed', 'recovery', 'createdAt'])
+          && data.publicKeys.keys().hasOnly(['x25519', 'mlkem768'])
+          && (!('recovery' in data) || isValidRecovery(data.recovery));
     }
 
     // ARCHITECTURE.md §5 gives `allow update: if ... isKeyRotationRequest()`
-    // without defining the function — filled in here. It covers two
+    // without defining the function — filled in here. It covers all
     // self-service mutations of the account owner's OWN document:
     //   1. Passphrase change (Phase 4 rewrapSeed): only wrappedSeed changes.
     //   2. Full key reset ("초기화", ARCHITECTURE.md §3.6 rule 5): a brand
-    //      new seed, so publicKeys + wrappedSeed both change together.
-    // Either way createdAt is immutable and the document shape stays valid.
-    // This only ever narrows what an authenticated uid can do to ITS OWN
-    // doc — the outer `request.auth.uid == uid` check is what actually
+    //      new seed, so publicKeys + wrappedSeed (+ recovery reset to
+    //      "none") change together.
+    //   3. Recovery method create/change/remove: only `recovery` changes.
+    // In every case createdAt is immutable and the document shape stays
+    // valid. This only ever narrows what an authenticated uid can do to ITS
+    // OWN doc — the outer `request.auth.uid == uid` check is what actually
     // prevents cross-user access, not this function.
     function isKeyRotationRequest() {
       return isValidUserDoc(request.resource.data)

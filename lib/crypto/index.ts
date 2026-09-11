@@ -16,9 +16,17 @@ export type { SubSeeds } from "./subSeeds";
 
 export { deriveHybridKeyPair } from "./keys";
 
-export { generateMnemonic, mnemonicToSeed } from "./mnemonic";
-
 export { wrapSeed, unwrapSeed, rewrapSeed } from "./passphrase";
+
+export {
+  RECOVERY_KEY_LENGTH,
+  generateRecoveryKey,
+  wrapSeedWithRecoveryKey,
+  unwrapSeedWithRecoveryKey,
+  splitSeedShamir,
+  combineSeedShamir,
+  seedMatchesPublicKeys,
+} from "./recovery";
 
 export { encapsulateContentKey, decapsulateContentKey } from "./hybridKem";
 export type { ContentKeyCapsule } from "./hybridKem";
@@ -30,13 +38,22 @@ export {
   publicKeysFromStorage,
   wrappedSeedToStorage,
   wrappedSeedFromStorage,
+  recoveryKeyWrappedSeedToStorage,
+  recoveryKeyWrappedSeedFromStorage,
+  recoverySecretToText,
+  textToRecoverySecret,
   entryToStorage,
   entryFromStorage,
 } from "./codec";
 
 export { wipeBytes } from "./memory";
 
-export { WrongPassphraseError, TamperedCiphertextError, InvalidMnemonicError } from "./errors";
+export {
+  WrongPassphraseError,
+  TamperedCiphertextError,
+  InvalidRecoveryKeyError,
+  InvalidShamirSharesError,
+} from "./errors";
 
 export type {
   HybridKeyPair,
@@ -45,6 +62,9 @@ export type {
   HybridPublicKeysStorage,
   WrappedSeed,
   WrappedSeedStorage,
+  RecoveryConfig,
+  RecoveryKeyWrappedSeed,
+  RecoveryKeyWrappedSeedStorage,
   EntryAAD,
   EncryptedEntryPayload,
   EncryptedEntryStorage,

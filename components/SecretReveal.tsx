@@ -1,0 +1,68 @@
+"use client";
+
+import { useEffect, useState, type ReactNode } from "react";
+
+/**
+ * Generic "show this secret exactly once" scaffold — used for the
+ * recovery-key and Shamir-share reveal screens (previously
+ * MnemonicReveal, generalized when the mnemonic was removed in favor of
+ * opt-in recovery methods). Never persists anything itself: the secret
+ * lives only in the caller's React state, so a refresh or back navigation
+ * destroys it by construction. The beforeunload prompt is a courtesy
+ * against losing it by accident before it's acknowledged.
+ */
+export function SecretReveal({
+  title,
+  description,
+  children,
+  onConfirm,
+  confirmLabel = "저장했습니다",
+  acknowledgeText = "안전한 곳에 보관했습니다. 이 화면은 다시 표시되지 않는다는 것을 이해했습니다.",
+}: {
+  title: string;
+  description: string;
+  children: ReactNode;
+  onConfirm: () => void;
+  confirmLabel?: string;
+  acknowledgeText?: string;
+}) {
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  useEffect(() => {
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, []);
+
+  return (
+    <div className="w-full max-w-lg space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold">{title}</h1>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{description}</p>
+      </div>
+
+      {children}
+
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          checked={acknowledged}
+          onChange={(e) => setAcknowledged(e.target.checked)}
+          className="mt-1"
+        />
+        <span>{acknowledgeText}</span>
+      </label>
+
+      <button
+        type="button"
+        disabled={!acknowledged}
+        onClick={onConfirm}
+        className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+      >
+        {confirmLabel}
+      </button>
+    </div>
+  );
+}

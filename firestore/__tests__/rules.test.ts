@@ -202,6 +202,92 @@ describe("users/{uid}", () => {
   });
 });
 
+describe("users/{uid}.recovery", () => {
+  it("allows creating with recovery: none", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        recovery: { type: "none" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("allows setting up recovery-key (only `recovery` changes)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        recovery: { type: "none" },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), {
+        recovery: { type: "recovery-key", wrappedSeed: { ciphertext: "ct", iv: "iv" } },
+      })
+    );
+  });
+
+  it("allows setting up Shamir recovery", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        recovery: { type: "none" },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { recovery: { type: "shamir", n: 5, k: 3 } })
+    );
+  });
+
+  it("rejects a recovery-key entry missing the wrapped seed", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        recovery: { type: "recovery-key" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("rejects a shamir entry with a non-integer k", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        recovery: { type: "shamir", n: 5, k: "three" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("rejects an unrecognized recovery type", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        recovery: { type: "sms" },
+        createdAt: new Date(),
+      })
+    );
+  });
+});
+
 describe("entries/{entryId}", () => {
   it("lets the owner create an entry with an integer entrySeq", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;

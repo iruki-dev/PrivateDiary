@@ -71,3 +71,25 @@ export interface EncryptedEntryStorage {
   ephemeralX25519PublicKey: string;
   aad: EntryAAD;
 }
+
+/**
+ * Optional secondary way to recover the master seed without the passphrase
+ * (opt-in, user's choice). The seed itself is never stored unwrapped —
+ * "recovery-key" wraps it with a random 256-bit key the user holds offline;
+ * "shamir" splits the seed directly into N shares (K needed to reconstruct)
+ * that are never stored anywhere at all, only shown once.
+ */
+export type RecoveryConfig =
+  | { type: "none" }
+  | { type: "recovery-key" }
+  | { type: "shamir"; n: number; k: number };
+
+export interface RecoveryKeyWrappedSeed {
+  ciphertext: Uint8Array;
+  iv: Uint8Array;
+}
+
+export interface RecoveryKeyWrappedSeedStorage {
+  ciphertext: string;
+  iv: string;
+}

@@ -24,7 +24,7 @@ lib/
                     # 모듈의 기능을 사용한다 (감사 용이성 확보를 위한 단일 진입점).
     index.ts       # 공개 API 배럴 — 이 파일 외부에서 개별 파일을 직접 import하지 않는다
     constants.ts   # 알고리즘 버전 태그, KDF 반복 횟수 등 상수
-    errors.ts      # WrongPassphraseError / TamperedCiphertextError / InvalidMnemonicError
+    errors.ts      # WrongPassphraseError / TamperedCiphertextError / InvalidRecoveryKeyError / InvalidShamirSharesError
     types.ts       # 바이트 기반 타입(HybridKeyPair 등) + Firestore 저장용 base64 타입
     encoding.ts    # 의존성 없는 base64/base64url 인코딩
     memory.ts       # wipeBytes() — 세션 종료 시 키 폐기용
@@ -32,12 +32,14 @@ lib/
     random.ts         # generateMasterSeed()
     subSeeds.ts        # HKDF로 X25519/ML-KEM 하위 시드 파생
     keys.ts             # deriveHybridKeyPair() — 시드로부터 결정론적 키 쌍 재구성
-    mnemonic.ts          # 32바이트 시드 ↔ BIP39 24단어 변환
-    passphrase.ts         # wrapSeed / unwrapSeed / rewrapSeed (PBKDF2 + AES-GCM)
-    hybridKem.ts           # encapsulateContentKey / decapsulateContentKey (X25519+ML-KEM-768)
-    entry.ts                # encryptEntry / decryptEntry (일기 항목 단위)
-    codec.ts                 # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
-    __tests__/                # Vitest 단위 테스트
+    passphrase.ts        # wrapSeed / unwrapSeed / rewrapSeed (PBKDF2 + AES-GCM)
+    recovery.ts            # 복구 키(랜덤 256비트 AES-GCM wrap) / Shamir 비밀 분산 — 니모닉 대체.
+                            # 둘 다 옵트인이며, 재구성된 시드가 진짜인지는 seedMatchesPublicKeys()로
+                            # 검증한다 (Firestore에 이미 저장된 publicKeys와 재파생 결과를 비교)
+    hybridKem.ts             # encapsulateContentKey / decapsulateContentKey (X25519+ML-KEM-768)
+    entry.ts                  # encryptEntry / decryptEntry (일기 항목 단위)
+    codec.ts                   # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
+    __tests__/                  # Vitest 단위 테스트
 
   firebase/          # Firebase Auth(이메일/비밀번호 + Google) / Firestore 클라이언트 연동.
                       # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
@@ -47,10 +49,15 @@ lib/
 
 contexts/
   AuthContext.tsx    # Firebase 로그인 상태만 추적
-  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) 추적, unlock/lock/changePassphrase/resetKeys
+  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + 복구 수단 상태 추적.
+                       # unlock/lock/changePassphrase/resetKeys 외에, 복구 수단
+                       # 생성/변경/제거를 위한 stage*/commit* 2단계 API 보유
+                       # (생성은 패스프레이즈로, 변경·제거는 현재 설정된 복구
+                       # 수단 자체로 증명해야 함)
 
 components/
-  MnemonicReveal.tsx           # 24단어 1회 노출 컴포넌트
+  SecretReveal.tsx              # "한 번만 보여주고 다시 못 봄" 공용 스캐폴드 (복구 키/Shamir 조각에 재사용)
+  SecretCard.tsx                 # 복구 비밀 하나를 QR + 텍스트 + 다운로드로 표시
   PassphraseStrengthMeter.tsx
 
 app/                  # Next.js App Router 페이지
@@ -70,6 +77,16 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 - 서버(Vercel Functions 포함) 코드에는 복호화 로직이 존재하지 않는다. (WebAuthn을 쓰지 않기로 하면서 서버 사이드 코드 자체가 사실상 없다 — `proxy.ts`는 보안 헤더만 설정하고 크립토/Firebase 코드를 일절 import하지 않는다.)
 - 모든 암호화 연산은 `lib/crypto/`를 통해서만 수행한다.
 
+## 시드 백업 / 복구 수단
+
+원래 설계(ARCHITECTURE.md §3.1)의 BIP39 24단어 니모닉은 제거했다. 대신 `/settings`에서 세 가지 중 선택할 수 있다.
+
+- **없음 (기본값)** — 패스프레이즈만이 유일한 열쇠. 훔칠 백업 아티팩트 자체가 없어 가장 안전하지만, 패스프레이즈를 잊으면 정말로 복구 불가능.
+- **복구 키** — 랜덤 256비트 키로 시드를 AES-GCM wrap해 Firestore에 저장(`recovery.wrappedSeed`). 키 자체는 한 번만 보여주고 어디에도 저장하지 않는다. QR/텍스트 파일로 내보낼 수 있다.
+- **Shamir 비밀 분산** — 시드 자체를 N개 조각으로 분할, K개 이상 모아야 복구(`shamir-secret-sharing`, Cure53·Zellic 감사 완료 라이브러리, WASM 없음). Firestore에는 `(n, k)` 형태만 저장되고 조각 자체는 서버에 전혀 남지 않는다.
+
+세 방식 모두 opt-in이며, 생성은 패스프레이즈로, **변경·제거는 현재 설정된 복구 수단 자체를 증명해야** 가능하다(2FA 설정 변경에 2FA를 요구하는 것과 같은 이유 — 패스프레이즈만 탈취당한 공격자가 복구 수단을 조용히 바꿔치기하지 못하게 함). 재구성된 시드가 진짜인지는 별도 저장 없이 `deriveHybridKeyPair(seed).publicKeys`를 Firestore에 이미 있는 공개키와 비교해서 검증한다(`seedMatchesPublicKeys`).
+
 ## Firestore 보안 규칙 배포
 
 이 세션에서는 `firebase login`(브라우저 OAuth 필요)을 실행할 수 없어 아래는 사람이 직접 해야 한다.
@@ -79,7 +96,7 @@ firebase login
 pnpm exec firebase deploy --only firestore:rules,firestore:indexes --project <project-id>
 ```
 
-`firestore.rules`는 로컬 에뮬레이터로 이미 검증되어 있다 (`pnpm test:rules`, 15개 테스트 통과).
+`firestore.rules`는 로컬 에뮬레이터로 이미 검증되어 있다 (`pnpm test:rules`).
 
 ## Vercel 배포
 

@@ -6,24 +6,20 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { signInWithGoogle, signUpWithEmail } from "@/lib/firebase/auth";
 import { createUserKeyRecord } from "@/lib/firebase/users";
-import {
-  deriveHybridKeyPair,
-  generateMasterSeed,
-  generateMnemonic,
-  wipeBytes,
-  wrapSeed,
-  type HybridPublicKeysRaw,
-  type WrappedSeed,
-} from "@/lib/crypto";
+import { deriveHybridKeyPair, generateMasterSeed, wipeBytes, wrapSeed } from "@/lib/crypto";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
-import { MnemonicReveal } from "@/components/MnemonicReveal";
 
 /**
- * Phase 4 onboarding (ARCHITECTURE.md §3.1 step 1-7): generate the master
+ * Phase 4 onboarding (ARCHITECTURE.md §3.1 step 1-5): generate the master
  * seed client-side, wrap it with a passphrase that must differ from the
- * login password and meet a minimum strength bar, then show the 24-word
- * mnemonic exactly once before writing the key-issuance document.
+ * login password and meet a minimum strength bar, then write the
+ * key-issuance document. There is no other backup of the seed at this
+ * point — the passphrase is the only thing that can unwrap it. Users who
+ * want a secondary recovery path (recovery key or Shamir split) opt into
+ * one later from /settings, which is a deliberate choice: it's the
+ * account owner's call whether an extra recoverable artifact is worth
+ * having versus keeping the smallest possible attack surface.
  *
  * The login password only ever lives in this component's state, only for
  * as long as it takes to compare it against the chosen passphrase — it's
@@ -33,15 +29,10 @@ import { MnemonicReveal } from "@/components/MnemonicReveal";
  * independently-chosen values to make sure they're NOT the same is the one
  * place they briefly need to be in the same scope).
  */
-
-type Step = "passphrase" | "mnemonic";
-
 export default function SignupPage() {
   const { user, status: authStatus } = useAuth();
   const { status: seedStatus, refresh } = useSeed();
   const router = useRouter();
-
-  const [step, setStep] = useState<Step>("passphrase");
 
   // --- account creation (only shown while signed out) ---
   const [email, setEmail] = useState("");
@@ -55,11 +46,6 @@ export default function SignupPage() {
   const [passphraseConfirm, setPassphraseConfirm] = useState("");
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
   const [deriving, setDeriving] = useState(false);
-
-  // --- derived key material, held only in memory for this wizard ---
-  const [mnemonic, setMnemonic] = useState("");
-  const publicKeysRef = useRef<HybridPublicKeysRaw | null>(null);
-  const wrappedSeedRef = useRef<WrappedSeed | null>(null);
 
   useEffect(() => {
     if (seedStatus === "locked" || seedStatus === "unlocked") {
@@ -100,11 +86,12 @@ export default function SignupPage() {
     event.preventDefault();
     setPassphraseError(null);
 
+    if (!user) return;
     if (passphrase !== passphraseConfirm) {
       setPassphraseError("패스프레이즈 확인이 일치하지 않습니다.");
       return;
     }
-    const userInputs = [email, user?.email ?? ""].filter(Boolean);
+    const userInputs = [email, user.email ?? ""].filter(Boolean);
     if (!checkPassphraseStrength(passphrase, userInputs).isStrongEnough) {
       setPassphraseError("패스프레이즈가 너무 약합니다. 관련 없는 단어 6개 이상을 조합해보세요.");
       return;
@@ -119,28 +106,19 @@ export default function SignupPage() {
       const seed = generateMasterSeed();
       const { publicKeys, privateKeys } = deriveHybridKeyPair(seed);
       const wrapped = await wrapSeed(seed, passphrase);
-      const words = generateMnemonic(seed);
-
       wipeBytes(seed, privateKeys.x25519SecretKey, privateKeys.mlkem768SecretKey);
 
-      publicKeysRef.current = publicKeys;
-      wrappedSeedRef.current = wrapped;
-      setMnemonic(words);
-      setStep("mnemonic");
+      await createUserKeyRecord(user.uid, publicKeys, wrapped);
+      await refresh();
+      router.replace("/");
+    } catch {
+      setPassphraseError("키를 저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
       loginPasswordRef.current = "";
       setPassphrase("");
       setPassphraseConfirm("");
       setDeriving(false);
     }
-  }
-
-  async function handleMnemonicConfirmed() {
-    if (!user || !publicKeysRef.current || !wrappedSeedRef.current) return;
-    await createUserKeyRecord(user.uid, publicKeysRef.current, wrappedSeedRef.current);
-    setMnemonic("");
-    await refresh();
-    router.replace("/");
   }
 
   if (authStatus === "loading") {
@@ -201,14 +179,6 @@ export default function SignupPage() {
     );
   }
 
-  if (step === "mnemonic") {
-    return (
-      <main className="flex flex-1 items-center justify-center px-6 py-24">
-        <MnemonicReveal mnemonic={mnemonic} onConfirm={() => void handleMnemonicConfirmed()} />
-      </main>
-    );
-  }
-
   return (
     <main className="flex flex-1 items-center justify-center px-6 py-24">
       <form onSubmit={handleSetPassphrase} className="w-full max-w-sm space-y-4">
@@ -216,7 +186,8 @@ export default function SignupPage() {
           <h1 className="text-xl font-semibold">일기 암호화 패스프레이즈</h1>
           <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
             로그인 비밀번호와는 완전히 다른 값이어야 합니다. 이 패스프레이즈는 서버에 전송되지
-            않으며, 잊어버리면 일기 내용을 복구할 방법이 없습니다.
+            않으며, <strong>잊어버리면 일기 내용을 복구할 방법이 없습니다.</strong> 가입 후
+            설정에서 원하면 별도의 복구 수단을 추가로 설정할 수 있습니다.
           </p>
         </div>
         <input
@@ -245,7 +216,7 @@ export default function SignupPage() {
           disabled={deriving}
           className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
         >
-          {deriving ? "키 생성 중..." : "다음"}
+          {deriving ? "키 생성 중..." : "시작하기"}
         </button>
       </form>
     </main>
