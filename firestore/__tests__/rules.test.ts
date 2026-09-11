@@ -415,13 +415,15 @@ describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simu
     await assertFails(getDoc(doc(alice, "entries/entry1")));
   });
 
-  it("allows entries reads when otpEnabled and otpVerified are both true with a fresh otpVerifiedAt", async () => {
+  it("allows entries reads when otpEnabled and otpVerified are both true with a fresh otpVerifiedAt from THIS session", async () => {
     await seedUserAndEntry();
+    const signedInAt = Date.now() - 5 * 60 * 1000; // signed in 5 minutes ago
     const alice = testEnv
       .authenticatedContext("alice", {
+        auth_time: Math.floor(signedInAt / 1000),
         otpEnabled: true,
         otpVerified: true,
-        otpVerifiedAt: Date.now(),
+        otpVerifiedAt: signedInAt + 60_000, // verified 1 minute after signing in, on THIS session
       })
       .firestore() as unknown as Firestore;
     await assertSucceeds(getDoc(doc(alice, "entries/entry1")));
@@ -429,14 +431,37 @@ describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simu
 
   it("denies entries reads once otpVerifiedAt is older than the 12h session window", async () => {
     await seedUserAndEntry();
+    const oldVerifiedAt = Date.now() - 13 * 60 * 60 * 1000;
     const alice = testEnv
       .authenticatedContext("alice", {
+        auth_time: Math.floor(oldVerifiedAt / 1000) - 60, // signed in just before verifying, both long ago
         otpEnabled: true,
         otpVerified: true,
-        otpVerifiedAt: Date.now() - 13 * 60 * 60 * 1000,
+        otpVerifiedAt: oldVerifiedAt,
       })
       .firestore() as unknown as Firestore;
     await assertFails(getDoc(doc(alice, "entries/entry1")));
+  });
+
+  it("denies entries reads when otpVerifiedAt predates THIS session's sign-in — the cross-device leak this check exists to close", async () => {
+    // Regression test: simulates verifying OTP on device A, then signing in
+    // fresh on device B (or the same device signing out and back in) within
+    // the same 12h window. Before this fix, device B's freshly-issued ID
+    // token would inherit the still-fresh otpVerifiedAt custom claim from
+    // device A's verification and be let straight through — device B never
+    // proved it has the authenticator app at all.
+    await seedUserAndEntry();
+    const verifiedOnDeviceAAt = Date.now() - 10 * 60 * 1000; // verified 10 min ago (device A)
+    const signedInOnDeviceBAt = Date.now() - 1 * 60 * 1000; // signed in 1 min ago (device B) — AFTER device A's verification
+    const aliceOnDeviceB = testEnv
+      .authenticatedContext("alice", {
+        auth_time: Math.floor(signedInOnDeviceBAt / 1000),
+        otpEnabled: true,
+        otpVerified: true,
+        otpVerifiedAt: verifiedOnDeviceAAt,
+      })
+      .firestore() as unknown as Firestore;
+    await assertFails(getDoc(doc(aliceOnDeviceB, "entries/entry1")));
   });
 
   it("users/{uid} reads are NEVER gated by OTP — needed to fetch publicKeys for writing regardless of unlock state", async () => {
