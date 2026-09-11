@@ -10,11 +10,15 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "./AuthContext";
-import { getUserKeyRecord } from "@/lib/firebase/users";
+import { getUserKeyRecord, resetUserKeyRecord, updateWrappedSeed } from "@/lib/firebase/users";
 import {
   deriveHybridKeyPair,
+  generateMasterSeed,
+  generateMnemonic,
+  rewrapSeed,
   unwrapSeed,
   wipeBytes,
+  wrapSeed,
   type HybridPrivateKeys,
   type HybridPublicKeysRaw,
   type WrappedSeed,
@@ -46,6 +50,20 @@ interface SeedContextValue {
   lock: () => void;
   /** Re-reads users/{uid} from Firestore (e.g. right after key issuance). */
   refresh: () => Promise<void>;
+  /**
+   * Passphrase change (ARCHITECTURE.md §3.6 rule 5): requires the correct
+   * current passphrase. Throws WrongPassphraseError otherwise, and changes
+   * nothing.
+   */
+  changePassphrase: (oldPassphrase: string, newPassphrase: string) => Promise<void>;
+  /**
+   * "초기화" (ARCHITECTURE.md §3.6 rule 5): issues a brand-new seed and
+   * discards the old one. Every previously written entry becomes
+   * permanently undecryptable — the caller (UI) is responsible for warning
+   * the user before calling this. Returns the new 24-word mnemonic, which
+   * the caller must show via MnemonicReveal exactly once.
+   */
+  resetKeys: (newPassphrase: string) => Promise<string>;
 }
 
 const SeedContext = createContext<SeedContextValue | undefined>(undefined);
@@ -116,8 +134,53 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     setStatus((prev) => (prev === "unlocked" ? "locked" : prev));
   }, [wipePrivateKeys]);
 
+  const changePassphrase = useCallback(
+    async (oldPassphrase: string, newPassphrase: string) => {
+      if (!user || !wrappedSeedRef.current) {
+        throw new Error("No wrapped seed available");
+      }
+      const rewrapped = await rewrapSeed(wrappedSeedRef.current, oldPassphrase, newPassphrase);
+      await updateWrappedSeed(user.uid, rewrapped);
+      wrappedSeedRef.current = rewrapped;
+    },
+    [user]
+  );
+
+  const resetKeys = useCallback(
+    async (newPassphrase: string) => {
+      if (!user) {
+        throw new Error("Not signed in");
+      }
+      const seed = generateMasterSeed();
+      const { publicKeys: newPublicKeys, privateKeys } = deriveHybridKeyPair(seed);
+      const wrapped = await wrapSeed(seed, newPassphrase);
+      const words = generateMnemonic(seed);
+      wipeBytes(seed, privateKeys.x25519SecretKey, privateKeys.mlkem768SecretKey);
+
+      await resetUserKeyRecord(user.uid, newPublicKeys, wrapped);
+
+      wrappedSeedRef.current = wrapped;
+      setPublicKeys(newPublicKeys);
+      wipePrivateKeys();
+      setStatus("locked");
+      return words;
+    },
+    [user, wipePrivateKeys]
+  );
+
   return (
-    <SeedContext.Provider value={{ status, publicKeys, privateKeys, unlock, lock, refresh }}>
+    <SeedContext.Provider
+      value={{
+        status,
+        publicKeys,
+        privateKeys,
+        unlock,
+        lock,
+        refresh,
+        changePassphrase,
+        resetKeys,
+      }}
+    >
       {children}
     </SeedContext.Provider>
   );

@@ -1,6 +1,8 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { signOut } from "@/lib/firebase/auth";
@@ -8,6 +10,13 @@ import { signOut } from "@/lib/firebase/auth";
 export default function Home() {
   const { user, status: authStatus } = useAuth();
   const { status: seedStatus } = useSeed();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (authStatus === "signed-in" && seedStatus === "not-issued") {
+      router.replace("/signup");
+    }
+  }, [authStatus, seedStatus, router]);
 
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-4 px-6 py-24 text-center">
@@ -26,23 +35,28 @@ export default function Home() {
         </Link>
       )}
 
-      {authStatus === "signed-in" && (
-        <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+      {authStatus === "signed-in" && seedStatus !== "not-issued" && (
+        <div className="space-y-3 text-sm text-zinc-600 dark:text-zinc-400">
           <p>{user?.email}로 로그인됨</p>
           <p>
             시드 상태:{" "}
             {
               {
                 unknown: "확인 중...",
-                "not-issued": "미발급 (온보딩 필요 — Phase 4)",
+                "not-issued": "미발급",
                 locked: "잠김",
                 unlocked: "잠금 해제됨",
               }[seedStatus]
             }
           </p>
-          <button onClick={() => signOut()} className="underline">
-            로그아웃
-          </button>
+          <div className="flex justify-center gap-4">
+            <Link href="/settings" className="underline">
+              설정
+            </Link>
+            <button onClick={() => signOut()} className="underline">
+              로그아웃
+            </button>
+          </div>
         </div>
       )}
     </main>
