@@ -50,6 +50,12 @@ export default function Home() {
             }
           </p>
           <div className="flex justify-center gap-4">
+            <Link href="/write" className="underline">
+              쓰기
+            </Link>
+            <Link href="/entries" className="underline">
+              읽기
+            </Link>
             <Link href="/settings" className="underline">
               설정
             </Link>
