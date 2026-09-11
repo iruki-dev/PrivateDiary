@@ -50,10 +50,22 @@ interface DecryptionMethodsDocData {
   };
 }
 
+/**
+ * Pure display preferences (ARCHITECTURE.md §3.9) — never read by
+ * lib/crypto or functions/, kept account-level (not localStorage) because
+ * that's what was actually asked for: these should follow the user across
+ * devices rather than being per-device.
+ */
+export interface UserPreferences {
+  privateWritingMode: boolean;
+  privateWritingPeekAllowed: boolean;
+}
+
 interface UserDocData {
   publicKeys: HybridPublicKeysStorage;
   wrappedSeed: WrappedSeedStorage;
   decryptionMethods?: DecryptionMethodsDocData;
+  preferences?: Partial<UserPreferences>;
   createdAt?: Timestamp;
 }
 
@@ -209,4 +221,24 @@ export async function disableShamirMethod(uid: string): Promise<void> {
     "decryptionMethods.shamir": deleteField(),
     ...legacyRecoveryKeyCleanup,
   });
+}
+
+const DEFAULT_PREFERENCES: UserPreferences = {
+  privateWritingMode: false,
+  privateWritingPeekAllowed: true,
+};
+
+/** Missing fields fall back to their default — covers accounts that never set a given preference yet. */
+export async function getUserPreferences(uid: string): Promise<UserPreferences> {
+  const snapshot = await getDoc(doc(db, "users", uid));
+  const stored = (snapshot.data() as UserDocData | undefined)?.preferences;
+  return { ...DEFAULT_PREFERENCES, ...stored };
+}
+
+/** Merges `patch` into `preferences` via dotted-path updates, leaving unrelated fields (and other preferences) untouched. */
+export async function setUserPreferences(uid: string, patch: Partial<UserPreferences>): Promise<void> {
+  const dottedPatch = Object.fromEntries(
+    Object.entries(patch).map(([key, value]) => [`preferences.${key}`, value])
+  );
+  await updateDoc(doc(db, "users", uid), dottedPatch);
 }

@@ -54,10 +54,11 @@ lib/
 
 hooks/
   usePageTitle.ts              # 탭 제목
-  usePrivateWritingMode.ts     # /write 블러 표시 여부 (localStorage, 계정에는 저장 안 함)
 
 contexts/
   AuthContext.tsx    # Firebase 로그인 상태만 추적
+  PreferencesContext.tsx  # 계정 단위 표시 설정(프라이빗 작성 모드 등) — users/{uid}.preferences.
+                           # AuthContext 바로 아래 위치 — 시드/OTP 상태와 무관
   OtpContext.tsx      # OTP 활성화 여부/이번 세션 인증 여부를 ID 토큰 커스텀 클레임에서 추적.
                        # AuthContext와 SeedContext 사이에 위치 (로그인 이후, 시드 상태 이전 게이트)
   SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + 백업 코드 설정 여부를 추적.
@@ -134,7 +135,7 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 
 - 작성자 본인의 확인은 그 아이콘을 **누르고 있는 동안만** 잠깐 보여주는 방식(hold-to-reveal, 토글 아님)이다. 마우스/터치(pointer 이벤트)와 키보드(스페이스/엔터) 모두 지원한다.
 - `/settings`에 두 번째 토글("확인 아이콘")이 있다 — 이걸 끄면 `/write`가 그 아이콘을 렌더링하지 않으므로, 프라이빗 모드가 켜진 동안은 **작성자 본인도** 어떤 방법으로도 흐림을 해제할 수 없다.
-- `hooks/usePrivateWritingMode.ts`가 두 설정 모두의 유일한 상태 보관 지점 — `localStorage` 기반이며 계정(Firestore)에는 전혀 저장되지 않는다. "지금 옆에 누가 있는가"는 계정이 아니라 기기/순간의 속성이라는 판단이고, 암호화와 무관한 순수 UI 설정에 Firestore 스키마/규칙 변경을 들일 이유가 없기 때문이다.
+- 두 설정 모두 `users/{uid}.preferences`(Firestore, `contexts/PreferencesContext.tsx`)에 저장되어 계정에 로그인한 모든 기기에 동일하게 적용된다 — 기기별로 다르게 켜둘 수 없다. lib/crypto가 다루는 어떤 것도 이 필드를 참조하지 않으므로(`firestore.rules`의 `isValidPreferences()`는 형태만 검증), Firestore에 저장한다고 해서 §1.1의 "서버는 평문/키를 절대 보지 않는다" 원칙이 흔들리지 않는다 — 여긴 애초에 지킬 비밀이 없다.
 - `/write`의 실제 `<textarea>` 값·`writeEntry` 호출 경로는 전혀 바뀌지 않는다 — CSS `filter: blur()`만 씌우는 순수 표시 계층이라, 암호화되어 나가는 내용과는 무관하다.
 - 알아둘 한계: CSS 블러는 DOM 안의 실제 글자를 가리는 게 아니라 시각적으로만 흐리게 만든다. 브라우저 개발자 도구로 DOM을 열어보거나 화면 낭독기를 쓰면 원문이 그대로 노출된다 — "곁눈질 방지" 용도이지 암호학적 보호가 아니다.
 

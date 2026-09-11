@@ -418,6 +418,90 @@ describe("users/{uid}.decryptionMethods", () => {
   });
 });
 
+describe("users/{uid}.preferences", () => {
+  it("allows setting preferences via a dotted-path update", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { "preferences.privateWritingMode": true })
+    );
+  });
+
+  it("allows setting both preference fields at once", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), {
+        preferences: { privateWritingMode: true, privateWritingPeekAllowed: false },
+      })
+    );
+  });
+
+  it("rejects a non-boolean preference value", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "preferences.privateWritingMode": "yes" })
+    );
+  });
+
+  it("rejects an unexpected key under preferences", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "preferences.somethingElse": true })
+    );
+  });
+
+  it("rejects another user setting this account's preferences", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const bob = testEnv.authenticatedContext("bob").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(bob, "users/alice"), { "preferences.privateWritingMode": true })
+    );
+  });
+});
+
 describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simulated here directly)", () => {
   async function seedUserAndEntry() {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {

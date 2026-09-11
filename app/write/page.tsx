@@ -8,7 +8,7 @@ import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
-import { usePrivateWritingMode, usePrivateWritingPeekAllowed } from "@/hooks/usePrivateWritingMode";
+import { usePreferences } from "@/contexts/PreferencesContext";
 
 /** Minimal outline eye glyph — no icon library in this codebase, and this is the only icon needed. */
 function EyeIcon({ className }: { className?: string }) {
@@ -47,8 +47,11 @@ export default function WritePage() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [privateMode] = usePrivateWritingMode();
-  const [peekAllowed] = usePrivateWritingPeekAllowed();
+  const {
+    loading: preferencesLoading,
+    privateWritingMode: privateMode,
+    privateWritingPeekAllowed: peekAllowed,
+  } = usePreferences();
   // Hold-to-reveal, not a toggle: true only while the icon below is
   // actively pressed. Resets to hidden on every mount/reload, which is
   // the safer default for a "someone might be next to me" feature. When
@@ -108,7 +111,11 @@ export default function WritePage() {
     }
   }
 
-  if (authStatus !== "signed-in" || !publicKeys) {
+  if (authStatus !== "signed-in" || !publicKeys || preferencesLoading) {
+    // Also waits on preferencesLoading — rendering before the account's
+    // privateWritingMode preference has loaded would default to "off" and
+    // briefly show the textarea unblurred, defeating the point of the
+    // feature for someone who has it enabled.
     return <LoadingScreen />;
   }
 
