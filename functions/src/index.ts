@@ -103,13 +103,19 @@ async function verifyStoredOtp(
 
 // `invoker: "public"` is explicit rather than relying on onCall's normal
 // default (which should already grant public invocation) because that
-// default silently failed to apply here: the deployed functions were
-// returning a 403 "Forbidden" straight from Google Frontend — before ever
+// default silently failed for these functions: they were returning a 403
+// "Forbidden" straight from Google Frontend on every request — before ever
 // reaching this code, hence no CORS headers on the OPTIONS preflight —
-// meaning the underlying Cloud Run service's IAM invoker binding was
-// missing allUsers. Callable functions still check request.auth internally
-// (see requireAuth below) — this only controls whether the HTTP request is
-// allowed to reach that check at all.
+// meaning the underlying Cloud Run services' IAM invoker binding was
+// missing allUsers. Deploying this config change alone did NOT fix it:
+// firebase-tools only runs the IAM-binding step when a function is
+// created, not on a code-only update to an existing one. Deleting and
+// recreating all four functions (`firebase functions:delete ... &&
+// firebase deploy --only functions`) re-ran that binding step and fixed
+// it — confirmed via curl against the deployed URLs. Callable functions
+// still check request.auth internally (see requireAuth below) regardless
+// of this setting — it only controls whether the HTTP request is allowed
+// to reach that check at all.
 
 /** Step 1 of setup: generates and stores a fresh (unconfirmed) secret, returns it + a QR URI. */
 export const startOtpSetup = onCall({ invoker: "public" }, async (request) => {
