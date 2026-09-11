@@ -1,7 +1,6 @@
 {
   "name": "privatediary-functions",
   "private": true,
-  "type": "module",
   "engines": {
     "node": "20"
   },
@@ -12,6 +11,7 @@
     "deploy": "firebase deploy --only functions"
   },
   "dependencies": {
+    "@google-cloud/firestore": "^9.1.0",
     "firebase-admin": "^14.4.0",
     "firebase-functions": "^7.3.2",
     "otplib": "^13.5.0"
