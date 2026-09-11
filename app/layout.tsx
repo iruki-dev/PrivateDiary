@@ -18,6 +18,20 @@ export const metadata: Metadata = {
   description: "Zero-knowledge encrypted diary",
 };
 
+/**
+ * Forces every route to render per-request instead of being statically
+ * prerendered at build time. This app has no per-request server data (it's
+ * entirely client-driven auth/Firestore calls), so the only reason for this
+ * is proxy.ts's CSP nonce: Next.js can only embed a matching nonce into a
+ * page's own inline hydration script when that page is actually rendered
+ * for the current request — a build-time-frozen static page has no request
+ * to derive a nonce from, so 'script-src' would need 'unsafe-inline' to
+ * avoid breaking hydration. Given ARCHITECTURE.md §7's "인라인 스크립트
+ * 차단" requirement, the (small, personal-app-scale) cost of dynamic
+ * rendering everywhere is worth it to keep script-src nonce-only.
+ */
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html

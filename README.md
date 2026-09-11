@@ -6,10 +6,13 @@
 
 ```bash
 pnpm install
-pnpm dev      # 개발 서버 (http://localhost:3000)
-pnpm test     # lib/crypto 단위 테스트 (Vitest)
-pnpm lint     # ESLint
+cp .env.example .env.local   # Firebase 콘솔의 웹 앱 설정값을 채워 넣는다
+pnpm dev          # 개발 서버 (http://localhost:3000)
+pnpm test         # lib/crypto 단위 테스트 (Vitest)
+pnpm test:rules   # Firestore 보안 규칙 테스트 (로컬 에뮬레이터, Java 필요)
+pnpm lint         # ESLint
 pnpm exec tsc --noEmit   # 타입 체크
+pnpm build        # 프로덕션 빌드
 ```
 
 ## 디렉터리 구조
@@ -36,9 +39,27 @@ lib/
     codec.ts                 # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
     __tests__/                # Vitest 단위 테스트
 
-  firebase/         # (예정) Firebase Auth / Firestore 클라이언트 연동. 평문·키를 다루지 않음.
+  firebase/          # Firebase Auth(이메일/비밀번호 + Google) / Firestore 클라이언트 연동.
+                      # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
+    config.ts, auth.ts, users.ts, entries.ts
 
-app/                 # Next.js App Router 페이지/컴포넌트
+  passphraseStrength.ts   # zxcvbn-ts 강도 추정 (lib/crypto 밖 — 암호화 연산이 아닌 UX 휴리스틱)
+
+contexts/
+  AuthContext.tsx    # Firebase 로그인 상태만 추적
+  SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) 추적, unlock/lock/changePassphrase/resetKeys
+
+components/
+  MnemonicReveal.tsx           # 24단어 1회 노출 컴포넌트
+  PassphraseStrengthMeter.tsx
+
+app/                  # Next.js App Router 페이지
+  login/, signup/, settings/, write/, entries/
+
+firestore.rules, firestore.indexes.json, firebase.json, .firebaserc
+  Firestore 보안 규칙 및 에뮬레이터 설정 (ARCHITECTURE.md §5)
+
+proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(옛 middleware)
 ```
 
 ## 절대 규칙
@@ -46,5 +67,27 @@ app/                 # Next.js App Router 페이지/컴포넌트
 이 저장소에서 작업할 때 지켜야 할 제약은 `ARCHITECTURE.md`에 정의되어 있다. 특히:
 
 - 마스터 시드·개인키는 어떤 네트워크 요청/로그에도 포함되지 않는다.
-- 서버(Vercel Functions 포함) 코드에는 복호화 로직이 존재하지 않는다.
+- 서버(Vercel Functions 포함) 코드에는 복호화 로직이 존재하지 않는다. (WebAuthn을 쓰지 않기로 하면서 서버 사이드 코드 자체가 사실상 없다 — `proxy.ts`는 보안 헤더만 설정하고 크립토/Firebase 코드를 일절 import하지 않는다.)
 - 모든 암호화 연산은 `lib/crypto/`를 통해서만 수행한다.
+
+## Firestore 보안 규칙 배포
+
+이 세션에서는 `firebase login`(브라우저 OAuth 필요)을 실행할 수 없어 아래는 사람이 직접 해야 한다.
+
+```bash
+firebase login
+pnpm exec firebase deploy --only firestore:rules,firestore:indexes --project <project-id>
+```
+
+`firestore.rules`는 로컬 에뮬레이터로 이미 검증되어 있다 (`pnpm test:rules`, 15개 테스트 통과).
+
+## Vercel 배포
+
+1. GitHub 저장소를 Vercel 프로젝트에 연결 (vercel.com에서 "Import Project").
+2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두).
+3. **Firebase 콘솔 > Authentication > Settings > Authorized domains에 Vercel 배포 도메인을 추가해야 로그인이 동작한다** (`*.vercel.app` 프리뷰 도메인 포함, 커스텀 도메인 사용 시 그것도 추가).
+4. 이 앱은 전부 클라이언트 사이드 Firebase SDK 호출만 하므로 (WebAuthn 미사용 → firebase-admin/서비스 계정 불필요) Vercel 쪽에는 시크릿 환경변수가 전혀 없다.
+
+## 보안 헤더 / CSP
+
+`next.config.ts`에 정적 헤더(HSTS, X-Frame-Options 등), `proxy.ts`에 요청마다 새로 발급하는 CSP nonce가 있다. Next.js App Router의 하이드레이션 스크립트에 nonce를 붙이려면 페이지가 요청마다 렌더링되어야 하므로 `app/layout.tsx`에 `export const dynamic = "force-dynamic"`을 설정했다 (이 앱은 서버 데이터 의존성이 없는 클라이언트 앱이라 정적 생성의 이점이 크지 않고, 개인용 규모에서 요청마다 렌더링하는 비용은 무시할 만하다).
