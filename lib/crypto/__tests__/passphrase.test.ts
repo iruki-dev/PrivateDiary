@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { generateMasterSeed } from "../random";
+import { deriveHybridKeyPair } from "../keys";
+import { decryptEntry, encryptEntry } from "../entry";
 import { rewrapSeed, unwrapSeed, wrapSeed } from "../passphrase";
 import { WrongPassphraseError } from "../errors";
 
@@ -45,6 +47,28 @@ describe("rewrapSeed", () => {
     await expect(unwrapSeed(rewrapped, "old passphrase")).rejects.toThrow(
       WrongPassphraseError
     );
+  });
+
+  it("Phase 8 checklist: entries written before a passphrase change still decrypt after it", async () => {
+    const seed = generateMasterSeed();
+    const { publicKeys } = deriveHybridKeyPair(seed);
+    const wrapped = await wrapSeed(seed, "old passphrase");
+
+    // Write an entry using the (unchanged-by-rewrap) public keys, as if
+    // written before the user ever changes their passphrase.
+    const entry = await encryptEntry(publicKeys, "일기 원문", {
+      uid: "alice",
+      entrySeq: 1,
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    const rewrapped = await rewrapSeed(wrapped, "old passphrase", "new passphrase");
+
+    const recoveredSeed = await unwrapSeed(rewrapped, "new passphrase");
+    const { privateKeys } = deriveHybridKeyPair(recoveredSeed);
+    const plaintext = await decryptEntry(privateKeys, entry);
+
+    expect(plaintext).toBe("일기 원문");
   });
 
   it("fails and changes nothing if the old passphrase is wrong", async () => {
