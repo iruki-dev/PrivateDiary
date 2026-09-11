@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
+import { LoadingScreen } from "@/components/LoadingState";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 /**
  * Phase 5 write path (ARCHITECTURE.md §3.2 rule 5): works from any
@@ -18,11 +20,13 @@ export default function WritePage() {
   const { user, status: authStatus } = useAuth();
   const { status: seedStatus, publicKeys } = useSeed();
   const router = useRouter();
+  usePageTitle("오늘의 일기");
 
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     if (authStatus === "signed-in" && seedStatus === "not-issued") {
@@ -30,9 +34,20 @@ export default function WritePage() {
     }
   }, [authStatus, seedStatus, router]);
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!user || !publicKeys) return;
+  // Warns before closing/refreshing the tab with unsaved text — losing a
+  // half-written diary entry to an accidental tab close is a real, common
+  // way to lose work that's worth a native confirm prompt for.
+  useEffect(() => {
+    if (!text.trim()) return;
+    function handleBeforeUnload(event: BeforeUnloadEvent) {
+      event.preventDefault();
+    }
+    window.addEventListener("beforeunload", handleBeforeUnload);
+    return () => window.removeEventListener("beforeunload", handleBeforeUnload);
+  }, [text]);
+
+  async function submit() {
+    if (!user || !publicKeys || !text.trim()) return;
     setSubmitting(true);
     setError(null);
     setSuccess(false);
@@ -40,6 +55,7 @@ export default function WritePage() {
       await writeEntry(user.uid, publicKeys, text);
       setText("");
       setSuccess(true);
+      textareaRef.current?.focus();
     } catch {
       setError("저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
@@ -47,40 +63,67 @@ export default function WritePage() {
     }
   }
 
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    await submit();
+  }
+
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Cmd/Ctrl+Enter to save without reaching for the mouse — the textarea
+    // itself swallows plain Enter (it's a newline), so this is the natural
+    // "I'm done" shortcut for a writing-focused page.
+    if ((event.metaKey || event.ctrlKey) && event.key === "Enter") {
+      event.preventDefault();
+      void submit();
+    }
+  }
+
   if (authStatus !== "signed-in" || !publicKeys) {
-    return (
-      <main className="flex flex-1 items-center justify-center px-6 py-24">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">확인 중...</p>
-      </main>
-    );
+    return <LoadingScreen />;
   }
 
   return (
-    <main className="flex flex-1 flex-col items-center px-6 py-16">
+    <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
       <form onSubmit={handleSubmit} className="w-full max-w-xl space-y-4">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">오늘의 일기</h1>
-          <Link href="/entries" className="text-sm underline">
+          <Link href="/entries" className="text-sm link">
             지난 일기 보기
           </Link>
         </div>
-        <textarea
-          required
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          rows={12}
-          placeholder="오늘 하루는 어땠나요?"
-          className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
-        />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-green-600">저장되었습니다.</p>}
-        <button
-          type="submit"
-          disabled={submitting || !text.trim()}
-          className="rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-        >
-          {submitting ? "저장 중..." : "저장"}
-        </button>
+        <div className="space-y-1">
+          <textarea
+            ref={textareaRef}
+            required
+            autoFocus
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={handleKeyDown}
+            rows={12}
+            placeholder="오늘 하루는 어땠나요?"
+            aria-label="오늘의 일기 내용"
+            className="field min-h-48 resize-y"
+          />
+          <p className="text-right text-xs text-zinc-400" aria-live="polite">
+            {text.length.toLocaleString("ko-KR")}자
+          </p>
+        </div>
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
+          </p>
+        )}
+        {success && (
+          <p role="status" className="success-text">
+            저장되었습니다.
+          </p>
+        )}
+        <div className="flex items-center gap-3">
+          <button type="submit" disabled={submitting || !text.trim()} className="btn-primary">
+            {submitting ? "저장 중..." : "저장"}
+          </button>
+          <span className="hidden text-xs text-zinc-400 sm:inline">⌘/Ctrl + Enter로도 저장할 수 있습니다</span>
+        </div>
       </form>
     </main>
   );

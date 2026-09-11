@@ -7,6 +7,8 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { OtpGate } from "@/components/OtpGate";
+import { LoadingScreen, LoadingState } from "@/components/LoadingState";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import { listEntries, type StoredEntry } from "@/lib/firebase/entries";
 import {
   decryptEntry,
@@ -39,6 +41,7 @@ export default function EntriesPage() {
   } = useSeed();
   const { loading: otpLoading, otpEnabled, otpVerified } = useOtp();
   const router = useRouter();
+  usePageTitle("지난 일기");
   const canReadEntries = !otpLoading && (!otpEnabled || otpVerified);
 
   const entriesRef = useRef<StoredEntry[]>([]);
@@ -141,11 +144,7 @@ export default function EntriesPage() {
   }
 
   if (authStatus !== "signed-in") {
-    return (
-      <main className="flex flex-1 items-center justify-center px-6 py-24">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">확인 중...</p>
-      </main>
-    );
+    return <LoadingScreen />;
   }
 
   const otherModes: { mode: UnlockMode; label: string }[] = [
@@ -156,55 +155,57 @@ export default function EntriesPage() {
   ].filter((m) => m.mode !== unlockMode);
 
   return (
-    <main className="flex flex-1 flex-col items-center px-6 py-16">
+    <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
       <div className="w-full max-w-xl space-y-6">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">지난 일기</h1>
-          <Link href="/write" className="text-sm underline">
+          <Link href="/write" className="text-sm link">
             오늘의 일기 쓰기
           </Link>
         </div>
 
         <OtpGate>
-          {!metadataLoaded && (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">불러오는 중...</p>
-          )}
+          {!metadataLoaded && <LoadingState label="불러오는 중..." />}
 
           {metadataLoaded && metadata.length === 0 && (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">아직 작성한 일기가 없습니다.</p>
+            <div className="card space-y-3 text-center">
+              <p className="muted">아직 작성한 일기가 없습니다.</p>
+              <Link href="/write" className="btn-primary">
+                첫 일기 쓰기
+              </Link>
+            </div>
           )}
 
           {metadataLoaded && metadata.length > 0 && seedStatus !== "unlocked" && (
-            <form
-              onSubmit={handleUnlock}
-              className="space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700"
-            >
+            <form onSubmit={handleUnlock} className="space-y-3 card">
               {unlockMode === "passphrase" && (
                 <>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  <p className="muted">
                     총 {metadata.length}개의 일기가 있습니다. 내용을 보려면 패스프레이즈를
                     입력하세요.
                   </p>
                   <input
                     type="password"
                     required
+                    autoFocus
+                    autoComplete="current-password"
+                    aria-label="패스프레이즈"
                     value={passphrase}
                     onChange={(e) => setPassphrase(e.target.value)}
                     placeholder="패스프레이즈"
-                    className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                    className="field"
                   />
                 </>
               )}
               {unlockMode === "shamir" && decryptionMethods?.shamir && (
                 <>
-                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                    {decryptionMethods.shamir.k}개의 조각을 입력하세요.
-                  </p>
+                  <p className="muted">{decryptionMethods.shamir.k}개의 조각을 입력하세요.</p>
                   {shareInputs.map((value, i) => (
                     <input
                       key={i}
                       type="text"
                       required
+                      aria-label={`Shamir 조각 ${i + 1}`}
                       value={value}
                       onChange={(e) =>
                         setShareInputs((prev) =>
@@ -212,17 +213,17 @@ export default function EntriesPage() {
                         )
                       }
                       placeholder={`조각 ${i + 1}`}
-                      className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                      className="field-mono"
                     />
                   ))}
                 </>
               )}
-              {unlockError && <p className="text-sm text-red-600">{unlockError}</p>}
-              <button
-                type="submit"
-                disabled={unlocking}
-                className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-              >
+              {unlockError && (
+                <p role="alert" className="error-text">
+                  {unlockError}
+                </p>
+              )}
+              <button type="submit" disabled={unlocking} className="btn-primary w-full">
                 {unlocking ? "확인 중..." : "잠금 해제"}
               </button>
               {otherModes.map(({ mode, label }) => (
@@ -230,7 +231,7 @@ export default function EntriesPage() {
                   key={mode}
                   type="button"
                   onClick={() => switchMode(mode)}
-                  className="w-full text-center text-xs underline"
+                  className="w-full text-center text-xs link"
                 >
                   {label}
                 </button>
@@ -238,22 +239,17 @@ export default function EntriesPage() {
             </form>
           )}
 
-          {seedStatus === "unlocked" && decrypting && (
-            <p className="text-sm text-zinc-600 dark:text-zinc-400">복호화하는 중...</p>
-          )}
+          {seedStatus === "unlocked" && decrypting && <LoadingState label="복호화하는 중..." />}
 
           {seedStatus === "unlocked" && !decrypting && (
             <ul className="space-y-4">
               {metadata.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="rounded border border-zinc-300 p-4 dark:border-zinc-700"
-                >
+                <li key={entry.id} className="card">
                   <p className="text-xs text-zinc-400">
                     {entry.createdAt?.toDate?.().toLocaleString("ko-KR") ?? "저장 중..."}
                   </p>
                   {decryptErrors[entry.id] ? (
-                    <p className="mt-2 text-sm text-red-600">{decryptErrors[entry.id]}</p>
+                    <p className="mt-2 error-text">{decryptErrors[entry.id]}</p>
                   ) : (
                     <p className="mt-2 whitespace-pre-wrap text-sm">{decrypted[entry.id]}</p>
                   )}

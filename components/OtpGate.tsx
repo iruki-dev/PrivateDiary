@@ -3,6 +3,7 @@
 import { useState, type FormEvent, type ReactNode } from "react";
 import { useOtp } from "@/contexts/OtpContext";
 import { IncorrectOtpCodeError, OtpLockedOutError } from "@/lib/firebase/otp";
+import { LoadingState } from "@/components/LoadingState";
 
 /**
  * Renders `children` only once OTP (if enabled on this account) has been
@@ -16,7 +17,7 @@ export function OtpGate({ children }: { children: ReactNode }) {
   const [verifying, setVerifying] = useState(false);
 
   if (loading) {
-    return <p className="text-sm text-zinc-600 dark:text-zinc-400">확인 중...</p>;
+    return <LoadingState />;
   }
 
   if (!otpEnabled || otpVerified) {
@@ -46,27 +47,29 @@ export function OtpGate({ children }: { children: ReactNode }) {
   return (
     <form
       onSubmit={handleSubmit}
-      className="w-full max-w-sm space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700"
+      className="w-full max-w-sm space-y-3 card"
     >
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="muted">
         이 계정은 OTP 인증이 활성화되어 있습니다. 인증 앱의 코드를 입력하세요.
       </p>
       <input
         type="text"
         required
+        autoFocus
         inputMode="numeric"
         pattern="[0-9]{6,8}"
+        aria-label="OTP 코드"
         value={code}
         onChange={(e) => setCode(e.target.value)}
         placeholder="123456"
-        className="w-full rounded border border-zinc-300 px-3 py-2 text-center font-mono text-lg tracking-widest dark:border-zinc-700 dark:bg-zinc-900"
+        className="field-code"
       />
-      {error && <p className="text-sm text-red-600">{error}</p>}
-      <button
-        type="submit"
-        disabled={verifying}
-        className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-      >
+      {error && (
+        <p role="alert" className="error-text">
+          {error}
+        </p>
+      )}
+      <button type="submit" disabled={verifying} className="btn-primary w-full">
         {verifying ? "확인 중..." : "인증"}
       </button>
     </form>

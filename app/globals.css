@@ -19,8 +19,109 @@
   }
 }
 
+html {
+  /* Avoids the iOS Safari "rubber-band" flash of the default white canvas
+     behind the page during overscroll, especially visible in dark mode. */
+  background: var(--background);
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  /* Prevents an accidental horizontal scrollbar on mobile if any child
+     briefly overflows (e.g. during a layout shift on load). */
+  overflow-x: hidden;
+}
+
+/* Reusable style primitives (design concept unchanged — these are exactly
+ * the utility combinations already used throughout app/, just centralized
+ * so every field/button/card looks and behaves consistently, including the
+ * mobile/accessibility fixes below that would otherwise need repeating at
+ * every call site). */
+@layer components {
+  /* Tailwind v4's @apply only composes real utilities, not other classes
+   * defined here — so instead of "field-mono extends field" via @apply
+   * chaining (which fails to build), each variant restates the shared base
+   * declaration directly. Keep them in sync by hand if the base changes. */
+
+  /* text-base (16px) below `sm` prevents iOS Safari from auto-zooming the
+   * page on focus — a real mobile bug the old flat `text-sm` inputs had. */
+  .field,
+  .field-mono,
+  .field-code {
+    @apply w-full rounded border border-zinc-300 bg-transparent px-3 py-2.5 text-base
+      text-foreground transition-colors placeholder:text-zinc-400
+      dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500
+      focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/30
+      dark:focus:border-zinc-400 dark:focus:ring-zinc-400/30
+      sm:text-sm;
+  }
+  .field-mono {
+    @apply font-mono text-base sm:text-xs;
+  }
+  .field-code {
+    @apply text-center font-mono text-lg tracking-widest;
+  }
+
+  .btn,
+  .btn-primary,
+  .btn-secondary,
+  .btn-danger,
+  .btn-danger-outline {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded px-4 py-2.5
+      text-sm font-medium transition-colors
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
+      focus-visible:ring-zinc-500/50 dark:focus-visible:ring-offset-zinc-950
+      disabled:pointer-events-none disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-foreground text-background hover:opacity-90;
+  }
+  .btn-secondary {
+    @apply border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900;
+  }
+  .btn-danger {
+    @apply bg-red-700 text-white hover:bg-red-800;
+  }
+  .btn-danger-outline {
+    @apply border border-red-600 text-red-700 hover:bg-red-50
+      dark:text-red-500 dark:hover:bg-red-950/30;
+  }
+  .btn-sm {
+    @apply min-h-9 px-3 py-1.5 text-xs;
+  }
+
+  .link {
+    @apply rounded-sm underline underline-offset-2 transition-opacity hover:opacity-70
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50;
+  }
+
+  .card {
+    @apply rounded border border-zinc-300 p-4 dark:border-zinc-700;
+  }
+  .card-danger {
+    @apply rounded border border-red-300 p-4 dark:border-red-900;
+  }
+
+  .muted {
+    @apply text-sm text-zinc-600 dark:text-zinc-400;
+  }
+  .error-text {
+    @apply text-sm text-red-600 dark:text-red-400;
+  }
+  .success-text {
+    @apply text-sm text-green-600 dark:text-green-500;
+  }
+
+  /* Shared shell for every full-page loading/gate state. */
+  .page-center {
+    @apply flex flex-1 items-center justify-center px-4 py-16 sm:px-6 sm:py-24;
+  }
+}
+
+@layer utilities {
+  .sr-only-focusable:not(:focus) {
+    @apply sr-only;
+  }
 }

@@ -29,7 +29,7 @@ export function OtpQrCard({ uri, secret }: { uri: string; secret: string }) {
   }, [uri]);
 
   return (
-    <div className="space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+    <div className="space-y-3 card">
       <p className="text-sm font-medium">인증 앱으로 QR 스캔</p>
       {qrDataUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- generated data: URL, not a static/remote asset next/image can optimize

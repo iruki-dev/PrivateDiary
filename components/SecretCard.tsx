@@ -19,6 +19,7 @@ export function SecretCard({
   filename: string;
 }) {
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -34,6 +35,14 @@ export function SecretCard({
     };
   }, [text]);
 
+  // Resets the "복사됨" confirmation a couple seconds after copying, rather
+  // than leaving it stuck until the next interaction.
+  useEffect(() => {
+    if (!copied) return;
+    const timer = setTimeout(() => setCopied(false), 2000);
+    return () => clearTimeout(timer);
+  }, [copied]);
+
   function handleDownload() {
     const blob = new Blob([text], { type: "text/plain" });
     const url = URL.createObjectURL(blob);
@@ -44,21 +53,33 @@ export function SecretCard({
     URL.revokeObjectURL(url);
   }
 
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+    } catch {
+      // Clipboard access can fail (permissions, insecure context, etc.) —
+      // the text is still selectable/visible below, so this is a soft
+      // failure, not worth surfacing as an error.
+    }
+  }
+
   return (
-    <div className="space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+    <div className="space-y-3 card">
       <p className="text-sm font-medium">{label}</p>
       {qrDataUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- generated data: URL, not a static/remote asset next/image can optimize
         <img src={qrDataUrl} alt={`${label} QR 코드`} className="mx-auto h-44 w-44" />
       )}
       <p className="break-all rounded bg-zinc-100 p-2 font-mono text-xs dark:bg-zinc-800">{text}</p>
-      <button
-        type="button"
-        onClick={handleDownload}
-        className="w-full rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium dark:border-zinc-700"
-      >
-        텍스트 파일로 다운로드
-      </button>
+      <div className="flex gap-2">
+        <button type="button" onClick={() => void handleCopy()} className="btn-secondary btn-sm flex-1">
+          {copied ? "복사됨" : "복사"}
+        </button>
+        <button type="button" onClick={handleDownload} className="btn-secondary btn-sm flex-1">
+          파일로 다운로드
+        </button>
+      </div>
     </div>
   );
 }

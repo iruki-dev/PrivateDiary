@@ -43,7 +43,7 @@ export function SecretReveal({
     <div className="w-full max-w-lg space-y-6">
       <div>
         <h1 className="text-xl font-semibold">{title}</h1>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{description}</p>
+        <p className="mt-2 muted">{description}</p>
       </div>
 
       {children}
@@ -53,7 +53,7 @@ export function SecretReveal({
           type="checkbox"
           checked={acknowledged}
           onChange={(e) => setAcknowledged(e.target.checked)}
-          className="mt-1"
+          className="mt-0.5 h-5 w-5 shrink-0 accent-foreground"
         />
         <span>{acknowledgeText}</span>
       </label>
@@ -62,7 +62,7 @@ export function SecretReveal({
         type="button"
         disabled={!acknowledged || confirming}
         onClick={onConfirm}
-        className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+        className="btn-primary w-full"
       >
         {confirmLabel}
       </button>

@@ -10,6 +10,8 @@ import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
 import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
+import { LoadingScreen } from "@/components/LoadingState";
+import { usePageTitle } from "@/hooks/usePageTitle";
 import { IncorrectOtpCodeError, OtpLockedOutError, type OtpSetupMaterial } from "@/lib/firebase/otp";
 import {
   InvalidShamirSharesError,
@@ -34,6 +36,7 @@ export default function SettingsPage() {
     disableShamir,
   } = useSeed();
   const router = useRouter();
+  usePageTitle("설정");
 
   useEffect(() => {
     if (authStatus === "signed-in" && seedStatus === "not-issued") {
@@ -42,17 +45,13 @@ export default function SettingsPage() {
   }, [authStatus, seedStatus, router]);
 
   if (authStatus !== "signed-in" || seedStatus === "unknown" || seedStatus === "not-issued") {
-    return (
-      <main className="flex flex-1 items-center justify-center px-6 py-24">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">확인 중...</p>
-      </main>
-    );
+    return <LoadingScreen />;
   }
 
   const shamirConfig = decryptionMethods?.shamir ?? null;
 
   return (
-    <main className="flex flex-1 flex-col items-center gap-12 px-6 py-24">
+    <main className="flex flex-1 flex-col items-center gap-10 px-4 py-10 sm:gap-12 sm:px-6 sm:py-20">
       <ChangePassphraseSection changePassphrase={changePassphrase} />
       {shamirConfig && (
         <ResetPassphraseSection
@@ -64,7 +63,7 @@ export default function SettingsPage() {
 
       <section className="w-full max-w-sm space-y-2">
         <h2 className="text-lg font-semibold">일기 복호화 방법</h2>
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="muted">
           패스프레이즈와 Shamir 분산은 서로 동등한 자격입니다. 둘 중 무엇을 갖고 있어도 일기를
           복호화하고, 패스프레이즈를 재설정하고, Shamir 분산을 새로 발급할 수 있습니다. 단, 어느
           한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없습니다. 평소에는 패스프레이즈를
@@ -137,35 +136,45 @@ function ChangePassphraseSection({
         <input
           type="password"
           required
+          autoComplete="current-password"
+          aria-label="기존 패스프레이즈"
           value={oldPassphrase}
           onChange={(e) => setOldPassphrase(e.target.value)}
           placeholder="기존 패스프레이즈"
-          className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="field"
         />
         <input
           type="password"
           required
+          autoComplete="new-password"
+          aria-label="새 패스프레이즈"
           value={newPassphrase}
           onChange={(e) => setNewPassphrase(e.target.value)}
           placeholder="새 패스프레이즈"
-          className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="field"
         />
         <PassphraseStrengthMeter passphrase={newPassphrase} />
         <input
           type="password"
           required
+          autoComplete="new-password"
+          aria-label="새 패스프레이즈 확인"
           value={confirmPassphrase}
           onChange={(e) => setConfirmPassphrase(e.target.value)}
           placeholder="새 패스프레이즈 확인"
-          className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="field"
         />
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-green-600">패스프레이즈가 변경되었습니다.</p>}
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-        >
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
+          </p>
+        )}
+        {success && (
+          <p role="status" className="success-text">
+            패스프레이즈가 변경되었습니다.
+          </p>
+        )}
+        <button type="submit" disabled={submitting} className="btn-primary w-full">
           {submitting ? "변경 중..." : "변경하기"}
         </button>
       </form>
@@ -240,21 +249,21 @@ function ResetPassphraseSection({
   }
 
   return (
-    <section className="w-full max-w-sm space-y-4 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+    <section className="w-full max-w-sm space-y-4 card">
       <div>
         <h2 className="text-lg font-semibold">패스프레이즈를 잊으셨나요?</h2>
-        <p className="mt-1 text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="mt-1 muted">
           Shamir 분산 {config.k}개를 모으면 기존 일기를 그대로 유지한 채 새 패스프레이즈를 설정할
           수 있습니다.
         </p>
       </div>
-      {success && <p className="text-sm text-green-600">패스프레이즈가 재설정되었습니다.</p>}
+      {success && (
+        <p role="status" className="success-text">
+          패스프레이즈가 재설정되었습니다.
+        </p>
+      )}
       {!open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="w-full rounded border border-zinc-400 px-4 py-2 text-sm font-medium dark:border-zinc-600"
-        >
+        <button type="button" onClick={() => setOpen(true)} className="btn-secondary w-full">
           Shamir 분산으로 재설정
         </button>
       ) : (
@@ -264,40 +273,45 @@ function ResetPassphraseSection({
               key={i}
               type="text"
               required
+              aria-label={`Shamir 조각 ${i + 1}`}
               value={value}
               onChange={(e) =>
                 setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
               }
               placeholder={`조각 ${i + 1}`}
-              className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+              className="field-mono"
             />
           ))}
           <input
             type="password"
             required
+            autoComplete="new-password"
+            aria-label="새 패스프레이즈"
             value={newPassphrase}
             onChange={(e) => setNewPassphrase(e.target.value)}
             placeholder="새 패스프레이즈"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
           <PassphraseStrengthMeter passphrase={newPassphrase} />
           <input
             type="password"
             required
+            autoComplete="new-password"
+            aria-label="새 패스프레이즈 확인"
             value={confirmPassphrase}
             onChange={(e) => setConfirmPassphrase(e.target.value)}
             placeholder="새 패스프레이즈 확인"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-primary w-full">
             {submitting ? "재설정 중..." : "재설정하기"}
           </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
             취소
           </button>
         </form>
@@ -395,27 +409,27 @@ function OtpSection() {
         <h2 className="text-lg font-semibold">OTP 활성화</h2>
         <OtpQrCard uri={setupMaterial.uri} secret={setupMaterial.secret} />
         <form onSubmit={handleConfirm} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            등록 후 앱에 표시된 코드를 입력해 확인하세요.
-          </p>
+          <p className="muted">등록 후 앱에 표시된 코드를 입력해 확인하세요.</p>
           <input
             type="text"
             required
+            autoFocus
             inputMode="numeric"
+            aria-label="OTP 코드"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="123456"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-center font-mono text-lg tracking-widest dark:border-zinc-700 dark:bg-zinc-900"
+            className="field-code"
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-primary w-full">
             {submitting ? "확인 중..." : "활성화 확인"}
           </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
             취소
           </button>
         </form>
@@ -428,27 +442,27 @@ function OtpSection() {
       <section className="w-full max-w-sm space-y-4">
         <h2 className="text-lg font-semibold">OTP 비활성화</h2>
         <form onSubmit={handleDisable} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
-            본인 확인을 위해 현재 인증 앱의 코드를 입력하세요.
-          </p>
+          <p className="muted">본인 확인을 위해 현재 인증 앱의 코드를 입력하세요.</p>
           <input
             type="text"
             required
+            autoFocus
             inputMode="numeric"
+            aria-label="OTP 코드"
             value={code}
             onChange={(e) => setCode(e.target.value)}
             placeholder="123456"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-center font-mono text-lg tracking-widest dark:border-zinc-700 dark:bg-zinc-900"
+            className="field-code"
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-danger w-full">
             {submitting ? "확인 중..." : "비활성화"}
           </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
             취소
           </button>
         </form>
@@ -459,18 +473,26 @@ function OtpSection() {
   return (
     <section className="w-full max-w-sm space-y-4">
       <h2 className="text-lg font-semibold">OTP 인증</h2>
-      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+      <p className="muted">
         구글 OTP 같은 인증 앱의 코드가 맞아야 저장된 일기를 불러올 수 있도록 하는 추가 접근
         게이트입니다. 암호화 자체와는 별개로 서버가 코드를 검증합니다. 현재:{" "}
         <strong>{otpEnabled ? "사용 중" : "사용 안 함"}</strong>
       </p>
-      {message && <p className="text-sm text-green-600">{message}</p>}
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {message && (
+        <p role="status" className="success-text">
+          {message}
+        </p>
+      )}
+      {error && (
+        <p role="alert" className="error-text">
+          {error}
+        </p>
+      )}
       {otpEnabled ? (
         <button
           type="button"
           onClick={() => setPhase("disable")}
-          className="w-full rounded border border-red-600 px-4 py-2 text-sm font-medium text-red-700 dark:text-red-500"
+          className="btn-danger-outline w-full"
         >
           OTP 비활성화
         </button>
@@ -479,7 +501,7 @@ function OtpSection() {
           type="button"
           onClick={() => void handleStart()}
           disabled={submitting}
-          className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+          className="btn-primary w-full"
         >
           {submitting ? "준비 중..." : "OTP 활성화"}
         </button>
@@ -614,27 +636,23 @@ function ShamirSection({
   }
 
   const proveModeToggle = (
-    <div className="flex gap-2 text-xs">
+    <div className="flex gap-2" role="radiogroup" aria-label="본인 확인 방법">
       <button
         type="button"
+        role="radio"
+        aria-checked={proveMode === "passphrase"}
         onClick={() => setProveMode("passphrase")}
-        className={
-          proveMode === "passphrase"
-            ? "flex-1 rounded bg-foreground px-2 py-1 font-medium text-background"
-            : "flex-1 rounded border border-zinc-300 px-2 py-1 dark:border-zinc-700"
-        }
+        className={`btn-sm flex-1 ${proveMode === "passphrase" ? "btn-primary" : "btn-secondary"}`}
       >
         패스프레이즈로 인증
       </button>
       <button
         type="button"
+        role="radio"
+        aria-checked={proveMode === "shamir"}
         disabled={!config}
         onClick={() => setProveMode("shamir")}
-        className={
-          proveMode === "shamir"
-            ? "flex-1 rounded bg-foreground px-2 py-1 font-medium text-background disabled:opacity-50"
-            : "flex-1 rounded border border-zinc-300 px-2 py-1 disabled:opacity-50 dark:border-zinc-700"
-        }
+        className={`btn-sm flex-1 ${proveMode === "shamir" ? "btn-primary" : "btn-secondary"}`}
       >
         기존 조각으로 인증
       </button>
@@ -662,8 +680,12 @@ function ShamirSection({
             ))}
           </div>
         </SecretReveal>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
+          </p>
+        )}
+        <button type="button" onClick={cancel} className="w-full text-center text-xs link">
           취소 (활성화하지 않음)
         </button>
       </section>
@@ -680,10 +702,12 @@ function ShamirSection({
             <input
               type="password"
               required
+              autoComplete="current-password"
+              aria-label="패스프레이즈"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               placeholder="패스프레이즈"
-              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="field"
             />
           ) : (
             <div className="space-y-2">
@@ -692,12 +716,13 @@ function ShamirSection({
                   key={i}
                   type="text"
                   required
+                  aria-label={`Shamir 조각 ${i + 1}`}
                   value={value}
                   onChange={(e) =>
                     setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
                   }
                   placeholder={`조각 ${i + 1}`}
-                  className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  className="field-mono"
                 />
               ))}
             </div>
@@ -711,7 +736,7 @@ function ShamirSection({
                 max={10}
                 value={newN}
                 onChange={(e) => setNewN(Number(e.target.value))}
-                className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                className="field mt-1"
               />
             </label>
             <label className="flex-1 text-xs">
@@ -722,19 +747,19 @@ function ShamirSection({
                 max={newN}
                 value={newK}
                 onChange={(e) => setNewK(Number(e.target.value))}
-                className="mt-1 w-full rounded border border-zinc-300 px-2 py-1 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+                className="field mt-1"
               />
             </label>
           </div>
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-primary w-full">
             {submitting ? "확인 중..." : "다음"}
           </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
             취소
           </button>
         </form>
@@ -752,10 +777,12 @@ function ShamirSection({
             <input
               type="password"
               required
+              autoComplete="current-password"
+              aria-label="패스프레이즈"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
               placeholder="패스프레이즈"
-              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="field"
             />
           ) : (
             <div className="space-y-2">
@@ -764,25 +791,26 @@ function ShamirSection({
                   key={i}
                   type="text"
                   required
+                  aria-label={`Shamir 조각 ${i + 1}`}
                   value={value}
                   onChange={(e) =>
                     setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
                   }
                   placeholder={`조각 ${i + 1}`}
-                  className="w-full rounded border border-zinc-300 px-3 py-2 font-mono text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                  className="field-mono"
                 />
               ))}
             </div>
           )}
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-danger w-full">
             {submitting ? "확인 중..." : "비활성화"}
           </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
             취소
           </button>
         </form>
@@ -791,7 +819,7 @@ function ShamirSection({
   }
 
   return (
-    <section className="w-full max-w-sm space-y-3 rounded border border-zinc-300 p-4 dark:border-zinc-700">
+    <section className="w-full max-w-sm space-y-3 card">
       <p className="text-sm font-medium">
         Shamir 분산:{" "}
         <strong>{config ? `사용 중 (${config.n}개 중 ${config.k}개 필요)` : "사용 안 함"}</strong>
@@ -799,12 +827,16 @@ function ShamirSection({
       <p className="text-xs text-zinc-500">
         N개 조각으로 나눠, K개를 모아야 잠금 해제. 조각 하나만 유출되면 무의미해 더 안전합니다.
       </p>
-      {message && <p className="text-sm text-green-600">{message}</p>}
+      {message && (
+        <p role="status" className="success-text">
+          {message}
+        </p>
+      )}
       <div className="flex gap-2">
         <button
           type="button"
           onClick={() => startProve("prove")}
-          className="flex-1 rounded bg-foreground px-3 py-1.5 text-xs font-medium text-background"
+          className="btn-primary btn-sm flex-1"
         >
           {config ? "재발급" : "활성화"}
         </button>
@@ -812,7 +844,7 @@ function ShamirSection({
           <button
             type="button"
             onClick={() => startProve("disable")}
-            className="flex-1 rounded border border-red-600 px-3 py-1.5 text-xs font-medium text-red-700 dark:text-red-500"
+            className="btn-danger-outline btn-sm flex-1"
           >
             비활성화
           </button>
@@ -870,17 +902,21 @@ function ResetKeysSection({
   }
 
   return (
-    <section className="w-full max-w-sm space-y-4 rounded border border-red-300 p-4 dark:border-red-900">
+    <section className="w-full max-w-sm space-y-4 card-danger">
       <div>
         <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">초기화</h2>
-        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+        <p className="mt-2 muted">
           패스프레이즈와 Shamir 분산을 모두 잃어버렸다면 새 시드를 발급하는 방법뿐입니다.{" "}
           <strong>지금까지 작성한 모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 설정해둔
           Shamir 분산도 함께 꺼집니다. 이 작업은 되돌릴 수 없습니다.
         </p>
       </div>
 
-      {done && <p className="text-sm text-green-600">초기화되었습니다. 새 패스프레이즈로 로그인하세요.</p>}
+      {done && (
+        <p role="status" className="success-text">
+          초기화되었습니다. 새 패스프레이즈로 로그인하세요.
+        </p>
+      )}
 
       {!open ? (
         <button
@@ -889,47 +925,52 @@ function ResetKeysSection({
             setOpen(true);
             setDone(false);
           }}
-          className="w-full rounded border border-red-600 px-4 py-2 text-sm font-medium text-red-700 dark:text-red-500"
+          className="btn-danger-outline w-full"
         >
           초기화 시작
         </button>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-3">
-          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="muted">
             계속하려면 아래에 <code className="font-mono">{RESET_CONFIRM_PHRASE}</code>를
             입력하세요.
           </p>
           <input
             type="text"
             required
+            aria-label="확인 문구"
             value={confirmPhrase}
             onChange={(e) => setConfirmPhrase(e.target.value)}
             placeholder={RESET_CONFIRM_PHRASE}
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
           <input
             type="password"
             required
+            autoComplete="new-password"
+            aria-label="새 패스프레이즈"
             value={newPassphrase}
             onChange={(e) => setNewPassphrase(e.target.value)}
             placeholder="새 패스프레이즈"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
           <PassphraseStrengthMeter passphrase={newPassphrase} userInputs={[userEmail]} />
           <input
             type="password"
             required
+            autoComplete="new-password"
+            aria-label="새 패스프레이즈 확인"
             value={confirmPassphrase}
             onChange={(e) => setConfirmPassphrase(e.target.value)}
             placeholder="새 패스프레이즈 확인"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-danger w-full">
             {submitting ? "초기화 중..." : "영구적으로 초기화"}
           </button>
         </form>

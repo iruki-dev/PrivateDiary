@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/contexts/Providers";
+import { NavBar } from "@/components/NavBar";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,6 +17,20 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "PrivateDiary",
   description: "Zero-knowledge encrypted diary",
+};
+
+export const viewport: Viewport = {
+  // Matches app/globals.css's light/dark --background exactly, so the
+  // mobile browser chrome (status bar / address bar) never mismatches the
+  // page itself when switching themes.
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+  // Next.js sets width=device-width/initial-scale=1 by default; this only
+  // adds viewport-fit=cover so safe-area-inset-* below actually has
+  // something to measure on notched/home-indicator devices.
+  viewportFit: "cover",
 };
 
 /**
@@ -38,8 +53,14 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <Providers>{children}</Providers>
+      <body
+        className="flex min-h-full flex-col"
+        style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+      >
+        <Providers>
+          <NavBar />
+          {children}
+        </Providers>
       </body>
     </html>
   );

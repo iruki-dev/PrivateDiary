@@ -9,6 +9,8 @@ import { createUserKeyRecord } from "@/lib/firebase/users";
 import { deriveHybridKeyPair, generateMasterSeed, wipeBytes, wrapSeed } from "@/lib/crypto";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
+import { LoadingScreen } from "@/components/LoadingState";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 /**
  * Phase 4 onboarding (ARCHITECTURE.md §3.1 step 1-5): generate the master
@@ -33,6 +35,7 @@ export default function SignupPage() {
   const { user, status: authStatus } = useAuth();
   const { status: seedStatus, refresh } = useSeed();
   const router = useRouter();
+  usePageTitle("가입");
 
   // --- account creation (only shown while signed out) ---
   const [email, setEmail] = useState("");
@@ -122,42 +125,42 @@ export default function SignupPage() {
   }
 
   if (authStatus === "loading") {
-    return (
-      <main className="flex flex-1 items-center justify-center px-6 py-24">
-        <p className="text-sm text-zinc-600 dark:text-zinc-400">확인 중...</p>
-      </main>
-    );
+    return <LoadingScreen />;
   }
 
   if (authStatus === "signed-out") {
     return (
-      <main className="flex flex-1 items-center justify-center px-6 py-24">
+      <main className="page-center">
         <div className="w-full max-w-sm space-y-4">
           <h1 className="text-xl font-semibold">계정 만들기</h1>
           <form onSubmit={handleCreateAccount} className="space-y-4">
             <input
               type="email"
               required
+              autoComplete="email"
+              aria-label="이메일"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
-              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="field"
             />
             <input
               type="password"
               required
               minLength={6}
+              autoComplete="new-password"
+              aria-label="로그인 비밀번호"
               value={accountPassword}
               onChange={(e) => setAccountPassword(e.target.value)}
               placeholder="로그인 비밀번호"
-              className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+              className="field"
             />
-            {accountError && <p className="text-sm text-red-600">{accountError}</p>}
-            <button
-              type="submit"
-              disabled={accountSubmitting}
-              className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-            >
+            {accountError && (
+              <p role="alert" className="error-text">
+                {accountError}
+              </p>
+            )}
+            <button type="submit" disabled={accountSubmitting} className="btn-primary w-full">
               {accountSubmitting ? "처리 중..." : "가입하기"}
             </button>
           </form>
@@ -168,9 +171,9 @@ export default function SignupPage() {
           </div>
           <button
             type="button"
-            onClick={handleGoogleSignUp}
+            onClick={() => void handleGoogleSignUp()}
             disabled={accountSubmitting}
-            className="w-full rounded border border-zinc-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-zinc-700"
+            className="btn-secondary w-full"
           >
             Google로 계속하기
           </button>
@@ -180,11 +183,11 @@ export default function SignupPage() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center px-6 py-24">
+    <main className="page-center">
       <form onSubmit={handleSetPassphrase} className="w-full max-w-sm space-y-4">
         <div>
           <h1 className="text-xl font-semibold">일기 암호화 패스프레이즈</h1>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          <p className="mt-2 muted">
             로그인 비밀번호와는 완전히 다른 값이어야 합니다. 이 패스프레이즈는 서버에 전송되지
             않으며, <strong>잊어버리면 일기 내용을 복구할 방법이 없습니다.</strong> 가입 후
             설정에서 원하면 별도의 복구 수단을 추가로 설정할 수 있습니다.
@@ -193,10 +196,12 @@ export default function SignupPage() {
         <input
           type="password"
           required
+          autoComplete="new-password"
+          aria-label="패스프레이즈"
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
           placeholder="패스프레이즈 (예: 관련 없는 단어 6개 이상)"
-          className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="field"
         />
         <PassphraseStrengthMeter
           passphrase={passphrase}
@@ -205,17 +210,19 @@ export default function SignupPage() {
         <input
           type="password"
           required
+          autoComplete="new-password"
+          aria-label="패스프레이즈 확인"
           value={passphraseConfirm}
           onChange={(e) => setPassphraseConfirm(e.target.value)}
           placeholder="패스프레이즈 확인"
-          className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+          className="field"
         />
-        {passphraseError && <p className="text-sm text-red-600">{passphraseError}</p>}
-        <button
-          type="submit"
-          disabled={deriving}
-          className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-        >
+        {passphraseError && (
+          <p role="alert" className="error-text">
+            {passphraseError}
+          </p>
+        )}
+        <button type="submit" disabled={deriving} className="btn-primary w-full">
           {deriving ? "키 생성 중..." : "시작하기"}
         </button>
       </form>

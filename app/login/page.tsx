@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { signInWithEmail, signInWithGoogle } from "@/lib/firebase/auth";
+import { usePageTitle } from "@/hooks/usePageTitle";
 
 function friendlyAuthError(err: unknown): string {
   const code = err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "";
@@ -21,14 +22,17 @@ function friendlyAuthError(err: unknown): string {
 export default function LoginPage() {
   const { status } = useAuth();
   const router = useRouter();
+  usePageTitle("로그인");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  if (status === "signed-in") {
-    router.replace("/");
-  }
+  useEffect(() => {
+    if (status === "signed-in") {
+      router.replace("/");
+    }
+  }, [status, router]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -58,7 +62,7 @@ export default function LoginPage() {
   }
 
   return (
-    <main className="flex flex-1 items-center justify-center px-6 py-24">
+    <main className="page-center">
       <div className="w-full max-w-sm space-y-6">
         <h1 className="text-xl font-semibold">로그인</h1>
 
@@ -66,30 +70,34 @@ export default function LoginPage() {
           <input
             type="email"
             required
+            autoComplete="email"
+            aria-label="이메일"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder="you@example.com"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
           <input
             type="password"
             required
+            autoComplete="current-password"
+            aria-label="비밀번호"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             placeholder="비밀번호"
-            className="w-full rounded border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-900"
+            className="field"
           />
-          {error && <p className="text-sm text-red-600">{error}</p>}
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
-          >
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-primary w-full">
             {submitting ? "로그인 중..." : "로그인"}
           </button>
         </form>
 
-        <Link href="/signup" className="block text-center text-sm underline">
+        <Link href="/signup" className="block text-center text-sm link">
           계정이 없으신가요? 회원가입
         </Link>
 
@@ -101,9 +109,9 @@ export default function LoginPage() {
 
         <button
           type="button"
-          onClick={handleGoogle}
+          onClick={() => void handleGoogle()}
           disabled={submitting}
-          className="w-full rounded border border-zinc-300 px-4 py-2 text-sm font-medium disabled:opacity-50 dark:border-zinc-700"
+          className="btn-secondary w-full"
         >
           Google로 계속하기
         </button>
