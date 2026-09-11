@@ -40,6 +40,30 @@ service cloud.firestore {
           && request.resource.data.createdAt == resource.data.createdAt;
     }
 
+    // OTP (TOTP authenticator app) as a server-enforced ACCESS GATE, not a
+    // cryptographic factor — see functions/src/index.ts's module doc for
+    // why that distinction matters. `otpEnabled` / `otpVerified` /
+    // `otpVerifiedAt` are custom claims that only Cloud Functions
+    // (functions/src/index.ts, via the Admin SDK) can set — never
+    // client-writable, so a client can't forge its way past this by
+    // setting its own claims. An account without OTP enabled is
+    // unaffected (otpEnabled != true short-circuits to allowed).
+    //
+    // Only applied to `entries` reads, deliberately NOT to `users/{uid}`:
+    // that doc holds `publicKeys` (needed to WRITE — ARCHITECTURE.md §3.2
+    // rule 5 says writing must work without any unlock step at all) and
+    // `wrappedSeed` (ciphertext that's safe to read without the passphrase
+    // per §3.1 step 7). Nothing in `users/{uid}` is plaintext or requires
+    // OTP to be harmless; `entries` is where actual diary content lives.
+    function otpSatisfied() {
+      // request.auth.token.get(key, default) — a bare `.otpEnabled` throws
+      // an evaluation error (not just falsy) for accounts that never set
+      // the claim, since Firestore rules maps raise on missing keys.
+      return request.auth.token.get('otpEnabled', false) != true
+          || (request.auth.token.get('otpVerified', false) == true
+              && request.auth.token.get('otpVerifiedAt', 0) > request.time.toMillis() - 43200000); // 12h session
+    }
+
     match /users/{uid} {
       allow read: if request.auth.uid == uid;
       allow create: if request.auth.uid == uid
@@ -48,10 +72,16 @@ service cloud.firestore {
       allow delete: if false;
     }
     match /entries/{entryId} {
-      allow read: if request.auth.uid == resource.data.uid;
+      allow read: if request.auth.uid == resource.data.uid && otpSatisfied();
       allow create: if request.auth.uid == request.resource.data.uid
                     && request.resource.data.entrySeq is int;
       allow update, delete: if false; // append-only: 수정/삭제 자체를 원천 차단
+    }
+    // The actual TOTP secret. Only functions/src/index.ts (Admin SDK, which
+    // bypasses these rules entirely) ever reads or writes this — explicit
+    // deny-all here is defense in depth, not the only thing stopping clients.
+    match /otpSecrets/{uid} {
+      allow read, write: if false;
     }
   }
 }

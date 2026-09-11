@@ -4,7 +4,9 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
+import { OtpGate } from "@/components/OtpGate";
 import { listEntries, type StoredEntry } from "@/lib/firebase/entries";
 import {
   decryptEntry,
@@ -36,7 +38,9 @@ export default function EntriesPage() {
     unlockWithShamirShares,
     recoveryConfig,
   } = useSeed();
+  const { loading: otpLoading, otpEnabled, otpVerified } = useOtp();
   const router = useRouter();
+  const canReadEntries = !otpLoading && (!otpEnabled || otpVerified);
 
   const entriesRef = useRef<StoredEntry[]>([]);
   const [metadataLoaded, setMetadataLoaded] = useState(false);
@@ -60,18 +64,25 @@ export default function EntriesPage() {
   }, [authStatus, seedStatus, router]);
 
   useEffect(() => {
-    if (!user) return;
+    // firestore.rules denies `entries` reads until OTP (if enabled on this
+    // account) is verified — wait for that instead of letting the query
+    // fail with permission-denied.
+    if (!user || !canReadEntries) return;
     let cancelled = false;
-    listEntries(user.uid).then((entries) => {
-      if (cancelled) return;
-      entriesRef.current = entries;
-      setMetadata(entries);
-      setMetadataLoaded(true);
-    });
+    listEntries(user.uid)
+      .then((entries) => {
+        if (cancelled) return;
+        entriesRef.current = entries;
+        setMetadata(entries);
+        setMetadataLoaded(true);
+      })
+      .catch(() => {
+        if (!cancelled) setMetadataLoaded(true);
+      });
     return () => {
       cancelled = true;
     };
-  }, [user]);
+  }, [user, canReadEntries]);
 
   useEffect(() => {
     if (!privateKeys || entriesRef.current.length === 0) return;
@@ -167,6 +178,7 @@ export default function EntriesPage() {
           </Link>
         </div>
 
+        <OtpGate>
         {!metadataLoaded && <p className="text-sm text-zinc-600 dark:text-zinc-400">불러오는 중...</p>}
 
         {metadataLoaded && metadata.length === 0 && (
@@ -291,6 +303,7 @@ export default function EntriesPage() {
             ))}
           </ul>
         )}
+        </OtpGate>
       </div>
     </main>
   );

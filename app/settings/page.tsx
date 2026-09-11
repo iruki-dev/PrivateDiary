@@ -3,11 +3,14 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
 import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
+import { OtpQrCard } from "@/components/OtpQrCard";
+import { IncorrectOtpCodeError, OtpLockedOutError, type OtpSetupMaterial } from "@/lib/firebase/otp";
 import {
   InvalidRecoveryKeyError,
   InvalidShamirSharesError,
@@ -52,6 +55,7 @@ export default function SettingsPage() {
   return (
     <main className="flex flex-1 flex-col items-center gap-12 px-6 py-24">
       <ChangePassphraseSection changePassphrase={changePassphrase} />
+      <OtpSection />
       <RecoverySection
         recoveryConfig={recoveryConfig}
         stageSeedFromPassphrase={stageSeedFromPassphrase}
@@ -151,6 +155,189 @@ function ChangePassphraseSection({
           {submitting ? "변경 중..." : "변경하기"}
         </button>
       </form>
+    </section>
+  );
+}
+
+/**
+ * OTP (TOTP authenticator app) as an access gate — see
+ * functions/src/index.ts and contexts/OtpContext.tsx for why this is a
+ * server-verified gate rather than a cryptographic factor combined into
+ * the diary's encryption. Enabling requires scanning a QR and confirming
+ * one live code; disabling requires a currently-valid code (same "prove
+ * the current method" rule used for changing/removing a recovery method).
+ */
+type OtpPhase = "status" | "setup" | "disable";
+
+function OtpSection() {
+  const { loading, otpEnabled, startSetup, confirmSetup, disable } = useOtp();
+  const [phase, setPhase] = useState<OtpPhase>("status");
+  const [setupMaterial, setSetupMaterial] = useState<OtpSetupMaterial | null>(null);
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  function otpErrorMessage(err: unknown, fallback: string): string {
+    if (err instanceof IncorrectOtpCodeError) return "코드가 올바르지 않습니다.";
+    if (err instanceof OtpLockedOutError) return "시도 횟수를 초과했습니다. 잠시 후 다시 시도하세요.";
+    return fallback;
+  }
+
+  async function handleStart() {
+    setError(null);
+    setMessage(null);
+    setSubmitting(true);
+    try {
+      const material = await startSetup();
+      setSetupMaterial(material);
+      setPhase("setup");
+    } catch {
+      setError("OTP 설정을 시작하지 못했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleConfirm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await confirmSetup(code);
+      setCode("");
+      setSetupMaterial(null);
+      setPhase("status");
+      setMessage("OTP가 활성화되었습니다.");
+    } catch (err) {
+      setError(otpErrorMessage(err, "확인하지 못했습니다."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleDisable(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      await disable(code);
+      setCode("");
+      setPhase("status");
+      setMessage("OTP가 비활성화되었습니다.");
+    } catch (err) {
+      setError(otpErrorMessage(err, "비활성화하지 못했습니다."));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function cancel() {
+    setPhase("status");
+    setSetupMaterial(null);
+    setCode("");
+    setError(null);
+  }
+
+  if (loading) {
+    return null;
+  }
+
+  if (phase === "setup" && setupMaterial) {
+    return (
+      <section className="w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold">OTP 활성화</h2>
+        <OtpQrCard uri={setupMaterial.uri} secret={setupMaterial.secret} />
+        <form onSubmit={handleConfirm} className="space-y-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            등록 후 앱에 표시된 코드를 입력해 확인하세요.
+          </p>
+          <input
+            type="text"
+            required
+            inputMode="numeric"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="123456"
+            className="w-full rounded border border-zinc-300 px-3 py-2 text-center font-mono text-lg tracking-widest dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+          >
+            {submitting ? "확인 중..." : "활성화 확인"}
+          </button>
+          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+            취소
+          </button>
+        </form>
+      </section>
+    );
+  }
+
+  if (phase === "disable") {
+    return (
+      <section className="w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold">OTP 비활성화</h2>
+        <form onSubmit={handleDisable} className="space-y-3">
+          <p className="text-sm text-zinc-600 dark:text-zinc-400">
+            본인 확인을 위해 현재 인증 앱의 코드를 입력하세요.
+          </p>
+          <input
+            type="text"
+            required
+            inputMode="numeric"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="123456"
+            className="w-full rounded border border-zinc-300 px-3 py-2 text-center font-mono text-lg tracking-widest dark:border-zinc-700 dark:bg-zinc-900"
+          />
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded bg-red-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {submitting ? "확인 중..." : "비활성화"}
+          </button>
+          <button type="button" onClick={cancel} className="w-full text-center text-xs underline">
+            취소
+          </button>
+        </form>
+      </section>
+    );
+  }
+
+  return (
+    <section className="w-full max-w-sm space-y-4">
+      <h2 className="text-lg font-semibold">OTP 인증</h2>
+      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+        구글 OTP 같은 인증 앱의 코드가 맞아야 저장된 일기를 불러올 수 있도록 하는 추가 접근
+        게이트입니다. 암호화 자체와는 별개로 서버가 코드를 검증합니다 — 자세한 내용은 앱 코드의
+        설명을 참고하세요. 현재: <strong>{otpEnabled ? "사용 중" : "사용 안 함"}</strong>
+      </p>
+      {message && <p className="text-sm text-green-600">{message}</p>}
+      {error && <p className="text-sm text-red-600">{error}</p>}
+      {otpEnabled ? (
+        <button
+          type="button"
+          onClick={() => setPhase("disable")}
+          className="w-full rounded border border-red-600 px-4 py-2 text-sm font-medium text-red-700 dark:text-red-500"
+        >
+          OTP 비활성화
+        </button>
+      ) : (
+        <button
+          type="button"
+          onClick={() => void handleStart()}
+          disabled={submitting}
+          className="w-full rounded bg-foreground px-4 py-2 text-sm font-medium text-background disabled:opacity-50"
+        >
+          {submitting ? "준비 중..." : "OTP 활성화"}
+        </button>
+      )}
     </section>
   );
 }

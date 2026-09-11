@@ -1,6 +1,7 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
 import { getFirestore, type Firestore } from "firebase/firestore";
+import { getFunctions, type Functions } from "firebase/functions";
 
 /**
  * These NEXT_PUBLIC_* values are not secrets — Firebase's client config is
@@ -23,3 +24,5 @@ export const firebaseApp: FirebaseApp = getApps().length
 
 export const auth: Auth = getAuth(firebaseApp);
 export const db: Firestore = getFirestore(firebaseApp);
+/** Backs the OTP callable functions (functions/src/index.ts) — an access gate, not part of the crypto surface. */
+export const functions: Functions = getFunctions(firebaseApp);

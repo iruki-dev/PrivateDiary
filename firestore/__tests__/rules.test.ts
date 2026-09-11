@@ -288,6 +288,81 @@ describe("users/{uid}.recovery", () => {
   });
 });
 
+describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simulated here directly)", () => {
+  async function seedUserAndEntry() {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(),
+      });
+      await setDoc(doc(db, "entries/entry1"), {
+        uid: "alice",
+        entrySeq: 1,
+        ciphertext: "ct",
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        createdAt: new Date(),
+      });
+    });
+  }
+
+  it("allows entries reads when the account has no otpEnabled claim at all", async () => {
+    await seedUserAndEntry();
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(getDoc(doc(alice, "entries/entry1")));
+  });
+
+  it("denies entries reads when otpEnabled is true but otpVerified is missing/false", async () => {
+    await seedUserAndEntry();
+    const alice = testEnv
+      .authenticatedContext("alice", { otpEnabled: true })
+      .firestore() as unknown as Firestore;
+    await assertFails(getDoc(doc(alice, "entries/entry1")));
+  });
+
+  it("allows entries reads when otpEnabled and otpVerified are both true with a fresh otpVerifiedAt", async () => {
+    await seedUserAndEntry();
+    const alice = testEnv
+      .authenticatedContext("alice", {
+        otpEnabled: true,
+        otpVerified: true,
+        otpVerifiedAt: Date.now(),
+      })
+      .firestore() as unknown as Firestore;
+    await assertSucceeds(getDoc(doc(alice, "entries/entry1")));
+  });
+
+  it("denies entries reads once otpVerifiedAt is older than the 12h session window", async () => {
+    await seedUserAndEntry();
+    const alice = testEnv
+      .authenticatedContext("alice", {
+        otpEnabled: true,
+        otpVerified: true,
+        otpVerifiedAt: Date.now() - 13 * 60 * 60 * 1000,
+      })
+      .firestore() as unknown as Firestore;
+    await assertFails(getDoc(doc(alice, "entries/entry1")));
+  });
+
+  it("users/{uid} reads are NEVER gated by OTP — needed to fetch publicKeys for writing regardless of unlock state", async () => {
+    await seedUserAndEntry();
+    const alice = testEnv
+      .authenticatedContext("alice", { otpEnabled: true })
+      .firestore() as unknown as Firestore;
+    await assertSucceeds(getDoc(doc(alice, "users/alice")));
+  });
+
+  it("never allows any client to read otpSecrets, even the account owner", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "otpSecrets/alice"), { secret: "JBSWY3DPEHPK3PXP", confirmed: true });
+    });
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(getDoc(doc(alice, "otpSecrets/alice")));
+  });
+});
+
 describe("entries/{entryId}", () => {
   it("lets the owner create an entry with an integer entrySeq", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
