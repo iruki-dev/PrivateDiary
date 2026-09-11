@@ -228,6 +228,7 @@ function ResetPassphraseSection({
       setNewPassphrase("");
       setConfirmPassphrase("");
     } catch (err) {
+      if (!(err instanceof InvalidShamirSharesError)) console.error("resetPassphraseWithShamirShares failed", err);
       setError(
         err instanceof InvalidShamirSharesError
           ? "조각들이 올바른 시드로 복원되지 않습니다."
@@ -588,7 +589,8 @@ function ShamirSection({
       setRevealedShares([]);
       setPhase("status");
       setMessage(config ? "Shamir 분산이 재발급되었습니다." : "Shamir 분산이 활성화되었습니다.");
-    } catch {
+    } catch (err) {
+      console.error("confirmPendingShamir failed", err);
       setError("저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);
@@ -859,7 +861,8 @@ function ResetKeysSection({
       await resetKeys(newPassphrase);
       setDone(true);
       setOpen(false);
-    } catch {
+    } catch (err) {
+      console.error("resetKeys failed", err);
       setError("초기화하지 못했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);

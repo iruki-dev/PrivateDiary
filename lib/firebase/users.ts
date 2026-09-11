@@ -44,6 +44,20 @@ export interface UserKeyRecord {
   decryptionMethods: DecryptionMethodsConfig;
 }
 
+/**
+ * Migration shim (ARCHITECTURE.md §3.7 rev. 3): accounts that enabled the
+ * now-removed recovery key before this round would still have a
+ * `decryptionMethods.recoveryKey` field sitting in Firestore. Rules
+ * validate the FULL merged document on every write, and the current rules
+ * only allow `decryptionMethods.keys().hasOnly(['shamir'])` — so leaving
+ * that field in place would make every subsequent write to the doc
+ * (passphrase change, Shamir setup, etc.) fail with permission-denied.
+ * Spreading this into every users/{uid} update that doesn't already
+ * overwrite `decryptionMethods` wholesale clears it out opportunistically;
+ * deleteField() on an absent key is a harmless no-op.
+ */
+const legacyRecoveryKeyCleanup = { "decryptionMethods.recoveryKey": deleteField() };
+
 function parseDecryptionMethods(
   data: DecryptionMethodsDocData | undefined
 ): DecryptionMethodsConfig {
@@ -91,6 +105,7 @@ export async function createUserKeyRecord(
 export async function updateWrappedSeed(uid: string, wrappedSeed: WrappedSeed): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
     wrappedSeed: wrappedSeedToStorage(wrappedSeed),
+    ...legacyRecoveryKeyCleanup,
   });
 }
 
@@ -123,6 +138,7 @@ export async function resetUserKeyRecord(
 export async function setShamirMethod(uid: string, n: number, k: number): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
     "decryptionMethods.shamir": { n, k },
+    ...legacyRecoveryKeyCleanup,
   });
 }
 
@@ -130,5 +146,6 @@ export async function setShamirMethod(uid: string, n: number, k: number): Promis
 export async function disableShamirMethod(uid: string): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
     "decryptionMethods.shamir": deleteField(),
+    ...legacyRecoveryKeyCleanup,
   });
 }

@@ -236,6 +236,50 @@ describe("users/{uid}.decryptionMethods", () => {
     expect(snapshot.data()?.decryptionMethods).toEqual({ shamir: { n: 5, k: 3 } });
   });
 
+  it("rejects any update that leaves a legacy recoveryKey field in the merged document", async () => {
+    // Regression: accounts that enabled the now-removed recovery key
+    // before ARCHITECTURE.md §3.7 rev. 3 still have this field sitting in
+    // Firestore. Rules validate the FULL merged document on every write, so
+    // a plain wrappedSeed-only update (mimicking a passphrase change) would
+    // fail as long as that legacy field is present — this is exactly what
+    // lib/firebase/users.ts's legacyRecoveryKeyCleanup exists to prevent.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("old"),
+        decryptionMethods: { recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } } },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(updateDoc(doc(alice, "users/alice"), { wrappedSeed: validWrappedSeed("new") }));
+  });
+
+  it("clearing the legacy recoveryKey field alongside another update succeeds", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("old"),
+        decryptionMethods: { recoveryKey: { wrappedSeed: { ciphertext: "ct", iv: "iv" } } },
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), {
+        wrappedSeed: validWrappedSeed("new"),
+        "decryptionMethods.recoveryKey": deleteField(),
+      })
+    );
+
+    const snapshot = await getDoc(doc(alice, "users/alice"));
+    expect(snapshot.data()?.decryptionMethods).toEqual({});
+  });
+
   it("allows reissuing Shamir (overwriting the existing n/k shape)", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
