@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
-import { usePrivateWritingMode } from "@/hooks/usePrivateWritingMode";
+import { usePrivateWritingMode, usePrivateWritingPeekAllowed } from "@/hooks/usePrivateWritingMode";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
 import { SecretReveal } from "@/components/SecretReveal";
@@ -94,38 +94,36 @@ export default function SettingsPage() {
  * Toggles the /write textarea's blur-while-typing display (this page never
  * touches the diary's actual encryption — hooks/usePrivateWritingMode.ts's
  * doc comment explains why it's a plain local preference, not something
- * proven with the passphrase/OTP the way the sections below are).
+ * proven with the passphrase/OTP the way the sections below are). Styled
+ * like OtpSection's status text + button rather than a boxed switch —
+ * consistent with the rest of this page instead of a one-off widget.
  */
 function PrivateWritingSection() {
   const [enabled, setEnabled] = usePrivateWritingMode();
+  const [peekAllowed, setPeekAllowed] = usePrivateWritingPeekAllowed();
 
   return (
-    <section className="w-full max-w-sm space-y-3 card">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h2 className="text-lg font-semibold">프라이빗 작성 모드</h2>
-          <p className="mt-1 muted">
-            일기를 쓰는 동안 화면의 글자를 흐리게 가려, 옆에서 보더라도 내용을 읽을 수 없게
-            합니다.
-          </p>
-        </div>
-        <button
-          type="button"
-          role="switch"
-          aria-checked={enabled}
-          aria-label="프라이빗 작성 모드"
-          onClick={() => setEnabled(!enabled)}
-          className={`relative h-7 w-12 shrink-0 rounded-full transition-colors ${
-            enabled ? "bg-foreground" : "bg-zinc-300 dark:bg-zinc-700"
-          }`}
-        >
-          <span
-            className={`absolute top-1 h-5 w-5 rounded-full bg-background shadow transition-transform ${
-              enabled ? "translate-x-6" : "translate-x-1"
-            }`}
-          />
-        </button>
-      </div>
+    <section className="w-full max-w-sm space-y-4">
+      <h2 className="text-lg font-semibold">프라이빗 작성 모드</h2>
+      <p className="muted">
+        켜두면 오늘의 일기를 쓰는 동안 글자를 흐리게 표시해, 화면을 옆에서 보더라도 내용을
+        읽을 수 없게 합니다. 현재: <strong>{enabled ? "사용 중" : "사용 안 함"}</strong>
+      </p>
+      <button
+        type="button"
+        onClick={() => setEnabled(!enabled)}
+        className={enabled ? "btn-danger-outline w-full" : "btn-primary w-full"}
+      >
+        {enabled ? "프라이빗 작성 모드 끄기" : "프라이빗 작성 모드 켜기"}
+      </button>
+      <p className="muted">
+        일기 작성 화면에 누르고 있는 동안 잠시 확인할 수 있는 아이콘을 표시할지 정합니다.
+        끄면 프라이빗 작성 모드 중에는 어떤 방법으로도 내용을 다시 확인할 수 없습니다. 현재:{" "}
+        <strong>{peekAllowed ? "표시함" : "표시 안 함"}</strong>
+      </p>
+      <button type="button" onClick={() => setPeekAllowed(!peekAllowed)} className="btn-secondary w-full">
+        {peekAllowed ? "확인 아이콘 숨기기" : "확인 아이콘 보이기"}
+      </button>
     </section>
   );
 }

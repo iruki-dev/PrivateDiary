@@ -8,7 +8,26 @@ import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
-import { usePrivateWritingMode } from "@/hooks/usePrivateWritingMode";
+import { usePrivateWritingMode, usePrivateWritingPeekAllowed } from "@/hooks/usePrivateWritingMode";
+
+/** Minimal outline eye glyph — no icon library in this codebase, and this is the only icon needed. */
+function EyeIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.75}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden
+    >
+      <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
 
 /**
  * Phase 5 write path (ARCHITECTURE.md §3.2 rule 5): works from any
@@ -29,10 +48,13 @@ export default function WritePage() {
   const [success, setSuccess] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [privateMode] = usePrivateWritingMode();
-  // Per-moment override of the (persistent, cross-page) private-mode
-  // setting — lets the writer glance at their own text without walking
-  // over to /settings and back. Resets to hidden on every mount/reload,
-  // which is the safer default for a "someone might be next to me" feature.
+  const [peekAllowed] = usePrivateWritingPeekAllowed();
+  // Hold-to-reveal, not a toggle: true only while the icon below is
+  // actively pressed. Resets to hidden on every mount/reload, which is
+  // the safer default for a "someone might be next to me" feature. When
+  // peekAllowed is false the icon isn't rendered at all (see below), so
+  // this can never become true — there is then no way to un-blur the
+  // text by any means, per /settings' "확인 아이콘" toggle.
   const [revealing, setRevealing] = useState(false);
   const obscured = privateMode && !revealing;
 
@@ -100,24 +122,7 @@ export default function WritePage() {
           </Link>
         </div>
         <div className="space-y-1">
-          {privateMode && (
-            <div className="flex items-center justify-between gap-3 rounded-t bg-gradient-to-r from-violet-500/10 via-fuchsia-500/10 to-violet-500/10 px-3 py-2 text-xs">
-              <span className="flex items-center gap-1.5 text-zinc-600 dark:text-zinc-400">
-                🔒 프라이빗 모드 — 글자를 흐리게 표시합니다
-              </span>
-              <button
-                type="button"
-                onClick={() => setRevealing((prev) => !prev)}
-                aria-pressed={revealing}
-                className="link shrink-0"
-              >
-                {revealing ? "다시 가리기" : "잠깐 보기"}
-              </button>
-            </div>
-          )}
-          <div
-            className={`relative overflow-hidden rounded ${privateMode ? "rounded-t-none" : ""}`}
-          >
+          <div className="relative">
             <textarea
               ref={textareaRef}
               required
@@ -129,18 +134,32 @@ export default function WritePage() {
               placeholder="오늘 하루는 어땠나요?"
               aria-label="오늘의 일기 내용"
               className={`field min-h-48 resize-y transition-[filter] duration-300 ${
-                obscured ? "blur-md" : ""
+                obscured ? "blur-[3px]" : ""
               }`}
               style={obscured ? { caretColor: "transparent" } : undefined}
             />
-            {/* Decorative only (aria-hidden) — a soft glow that reads as
-               "intentionally private" rather than a rendering glitch,
-               without adding anything a screen reader would announce. */}
-            {obscured && (
-              <div
-                aria-hidden
-                className="pointer-events-none absolute inset-0 bg-gradient-to-br from-violet-400/5 via-transparent to-fuchsia-400/5"
-              />
+            {privateMode && peekAllowed && (
+              <button
+                type="button"
+                aria-label="누르고 있는 동안 잠시 보기"
+                aria-pressed={revealing}
+                onPointerDown={() => setRevealing(true)}
+                onPointerUp={() => setRevealing(false)}
+                onPointerLeave={() => setRevealing(false)}
+                onPointerCancel={() => setRevealing(false)}
+                onKeyDown={(e) => {
+                  if (e.key === " " || e.key === "Enter") {
+                    e.preventDefault();
+                    setRevealing(true);
+                  }
+                }}
+                onKeyUp={(e) => {
+                  if (e.key === " " || e.key === "Enter") setRevealing(false);
+                }}
+                className="absolute right-2 top-2 rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+              >
+                <EyeIcon className="h-4 w-4" />
+              </button>
             )}
           </div>
           <p className="text-right text-xs text-zinc-400" aria-live="polite">
