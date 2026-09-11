@@ -35,3 +35,10 @@ export const PBKDF2_HASH = "SHA-256" as const;
 // Shamir path (ARCHITECTURE.md §3.7): shares split a random AES-256 key, not
 // the master seed itself, so reissuing can actually invalidate old shares.
 export const SHAMIR_WRAP_KEY_LENGTH = 32;
+
+// HKDF info string domain-separating the OTP-bypass verifier derived from
+// the Shamir wrap key (ARCHITECTURE.md §3.8) from every other use of that
+// key (wrapping the seed). Structurally distinct from anything the
+// passphrase path could produce, since the passphrase never touches this key.
+export const SHAMIR_OTP_BYPASS_INFO = "diary-shamir-otp-bypass-v1";
+export const SHAMIR_OTP_BYPASS_VERIFIER_LENGTH = 32;

@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
@@ -14,15 +15,18 @@ import { generateSecret, generateURI, verify } from "otplib";
  *
  * Instead: the TOTP secret lives ONLY here (Cloud Functions + Firestore's
  * otpSecrets/{uid}, which firestore.rules denies all client access to —
- * never sent to nor readable by the browser after setup). This function
- * verifies a code and, on success, stamps the caller's Firebase Auth ID
- * token with custom claims (otpEnabled, otpVerified, otpVerifiedAt) that
- * firestore.rules then require before releasing `users/{uid}` or
- * `entries/{entryId}` reads. The diary's zero-knowledge encryption
- * (ARCHITECTURE.md rule 1-2) is untouched by any of this: this whole
- * module never sees the master seed, a passphrase, or plaintext — it only
- * gates WHETHER the (still fully client-side-decrypted) ciphertext can be
- * fetched at all.
+ * never sent to nor readable by the browser after setup). startOtpSetup/
+ * confirmOtpSetup/verifyOtp/disableOtp verify a code and, on success,
+ * stamp the caller's Firebase Auth ID token with custom claims
+ * (otpEnabled, otpVerified, otpVerifiedAt) that firestore.rules then
+ * require before releasing `entries/{entryId}` reads (see
+ * firestore.rules' otpSatisfied()). verifyShamirOtpBypass sets the same
+ * claims via a structurally different proof — see its own doc comment —
+ * so the Shamir recovery path never depends on OTP device availability.
+ * The diary's zero-knowledge encryption (ARCHITECTURE.md rule 1-2) is
+ * untouched by any of this: this whole module never sees the master
+ * seed, a passphrase, Shamir shares, or plaintext — it only gates WHETHER
+ * the (still fully client-side-decrypted) ciphertext can be fetched at all.
  */
 
 initializeApp();
@@ -53,6 +57,14 @@ function requireCode(data: unknown): string {
     throw new HttpsError("invalid-argument", "A numeric OTP code is required.");
   }
   return code;
+}
+
+function requireProof(data: unknown): string {
+  const proof = (data as { proof?: unknown } | null)?.proof;
+  if (typeof proof !== "string" || proof.length === 0) {
+    throw new HttpsError("invalid-argument", "A proof string is required.");
+  }
+  return proof;
 }
 
 async function mergeClaims(uid: string, patch: Record<string, unknown>): Promise<void> {
@@ -163,6 +175,52 @@ export const verifyOtp = onCall({ invoker: "public" }, async (request) => {
     throw new HttpsError("failed-precondition", "OTP setup was never confirmed.");
   }
   await mergeClaims(uid, { otpEnabled: true, otpVerified: true, otpVerifiedAt: Date.now() });
+  return { success: true, validForMs: OTP_SESSION_MS };
+});
+
+/**
+ * Lets K-of-N Shamir shares satisfy the OTP gate without ever proving a
+ * TOTP code (ARCHITECTURE.md §3.8). Forcing OTP on top of the Shamir
+ * recovery path would mean losing the OTP device (or just not having it
+ * on hand) could permanently block the one credential specifically meant
+ * to survive losing everything else.
+ *
+ * `proof` is HKDF-SHA256(shamirWrapKey, "diary-shamir-otp-bypass-v1")
+ * (lib/crypto/recovery.ts's computeShamirOtpBypassProof) — a one-way
+ * value computed entirely client-side from shares combined locally. This
+ * function never sees the shares, the wrap key, or the master seed; it
+ * only compares `proof` against the matching verifier stored at Shamir
+ * setup/reissue time (decryptionMethods.shamir.otpBypassVerifier). A
+ * match is only reproducible by someone who actually combined ≥K real
+ * shares: the wrap key is an independent random value the passphrase
+ * path never touches, so knowing the passphrase alone cannot produce a
+ * matching proof.
+ *
+ * On success this sets the exact same otpVerified/otpVerifiedAt claims
+ * verifyOtp does, reusing firestore.rules' otpSatisfied() as-is — no
+ * separate rule path needed for the bypass.
+ */
+export const verifyShamirOtpBypass = onCall({ invoker: "public" }, async (request) => {
+  requireAuth(request.auth?.uid);
+  const uid = request.auth.uid;
+  const proof = requireProof(request.data);
+
+  const snapshot = await getFirestore().collection("users").doc(uid).get();
+  const stored = (
+    snapshot.data() as { decryptionMethods?: { shamir?: { otpBypassVerifier?: string } } } | undefined
+  )?.decryptionMethods?.shamir?.otpBypassVerifier;
+  if (!stored) {
+    throw new HttpsError("failed-precondition", "Shamir is not set up for this account.");
+  }
+
+  const storedBuf = Buffer.from(stored, "base64");
+  const proofBuf = Buffer.from(proof, "base64");
+  const matches = storedBuf.length === proofBuf.length && timingSafeEqual(storedBuf, proofBuf);
+  if (!matches) {
+    throw new HttpsError("permission-denied", "Proof did not match.");
+  }
+
+  await mergeClaims(uid, { otpVerified: true, otpVerifiedAt: Date.now() });
   return { success: true, validForMs: OTP_SESSION_MS };
 });
 

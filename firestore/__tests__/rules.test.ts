@@ -48,7 +48,12 @@ function validWrappedSeed(tag = "a") {
 }
 
 function validShamir(n: number, k: number, tag = "a") {
-  return { n, k, wrappedSeed: { ciphertext: `shamir-ct-${tag}`, iv: `shamir-iv-${tag}` } };
+  return {
+    n,
+    k,
+    wrappedSeed: { ciphertext: `shamir-ct-${tag}`, iv: `shamir-iv-${tag}` },
+    otpBypassVerifier: `shamir-otp-bypass-${tag}`,
+  };
 }
 
 beforeAll(async () => {
@@ -376,6 +381,37 @@ describe("users/{uid}.decryptionMethods", () => {
         publicKeys: validPublicKeys(),
         wrappedSeed: validWrappedSeed(),
         decryptionMethods: { sms: true },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("allows a shamir entry without otpBypassVerifier — accounts that reissued before it existed", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        decryptionMethods: { shamir: { n: 5, k: 3, wrappedSeed: { ciphertext: "ct", iv: "iv" } } },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("rejects a shamir entry with a non-string otpBypassVerifier", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        decryptionMethods: {
+          shamir: {
+            n: 5,
+            k: 3,
+            wrappedSeed: { ciphertext: "ct", iv: "iv" },
+            otpBypassVerifier: 12345,
+          },
+        },
         createdAt: new Date(),
       })
     );

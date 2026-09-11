@@ -91,16 +91,16 @@ export default function SignupPage() {
 
     if (!user) return;
     if (passphrase !== passphraseConfirm) {
-      setPassphraseError("패스프레이즈 확인이 일치하지 않습니다.");
+      setPassphraseError("암호 확인이 일치하지 않습니다.");
       return;
     }
     const userInputs = [email, user.email ?? ""].filter(Boolean);
     if (!checkPassphraseStrength(passphrase, userInputs).isStrongEnough) {
-      setPassphraseError("패스프레이즈가 너무 약합니다. 관련 없는 단어 6개 이상을 조합해보세요.");
+      setPassphraseError("암호가 너무 약합니다. 관련 없는 단어 6개 이상을 조합해보세요.");
       return;
     }
     if (loginPasswordRef.current && passphrase === loginPasswordRef.current) {
-      setPassphraseError("로그인 비밀번호와 다른 패스프레이즈를 사용해야 합니다.");
+      setPassphraseError("로그인 비밀번호와 다른 암호를 사용해야 합니다.");
       return;
     }
 
@@ -195,9 +195,9 @@ export default function SignupPage() {
     <main className="page-center">
       <form onSubmit={handleSetPassphrase} className="w-full max-w-sm space-y-4">
         <div>
-          <h1 className="text-xl font-semibold">일기 암호화 패스프레이즈</h1>
+          <h1 className="text-xl font-semibold">일기 암호 설정</h1>
           <p className="mt-2 muted">
-            로그인 비밀번호와는 완전히 다른 값이어야 합니다. 이 패스프레이즈는 서버에 전송되지
+            로그인 비밀번호와는 완전히 다른 값이어야 합니다. 이 암호는 서버에 전송되지
             않으며, <strong>잊어버리면 일기 내용을 복구할 방법이 없습니다.</strong> 가입 후
             설정에서 원하면 별도의 복구 수단을 추가로 설정할 수 있습니다.
           </p>
@@ -206,10 +206,10 @@ export default function SignupPage() {
           type="password"
           required
           autoComplete="new-password"
-          aria-label="패스프레이즈"
+          aria-label="암호"
           value={passphrase}
           onChange={(e) => setPassphrase(e.target.value)}
-          placeholder="패스프레이즈 (예: 관련 없는 단어 6개 이상)"
+          placeholder="암호 (예: 관련 없는 단어 6개 이상)"
           className="field"
         />
         <PassphraseStrengthMeter
@@ -220,10 +220,10 @@ export default function SignupPage() {
           type="password"
           required
           autoComplete="new-password"
-          aria-label="패스프레이즈 확인"
+          aria-label="암호 확인"
           value={passphraseConfirm}
           onChange={(e) => setPassphraseConfirm(e.target.value)}
-          placeholder="패스프레이즈 확인"
+          placeholder="암호 확인"
           className="field"
         />
         {passphraseError && (

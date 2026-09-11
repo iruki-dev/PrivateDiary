@@ -59,15 +59,18 @@ export default function SettingsPage() {
           resetPassphraseWithShamirShares={resetPassphraseWithShamirShares}
         />
       )}
-      <OtpSection />
+      <OtpSection
+        stageSeedFromPassphrase={stageSeedFromPassphrase}
+        discardStagedSeed={discardStagedSeed}
+      />
 
       <section className="w-full max-w-sm space-y-2">
         <h2 className="text-lg font-semibold">일기 복호화 방법</h2>
         <p className="muted">
-          패스프레이즈와 Shamir 분산은 서로 동등한 자격입니다. 둘 중 무엇을 갖고 있어도 일기를
-          복호화하고, 패스프레이즈를 재설정하고, Shamir 분산을 새로 발급할 수 있습니다. 단, 어느
-          한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없습니다. 평소에는 패스프레이즈를
-          쓰고, 그마저 잃어버렸을 때를 위한 비상 수단이 Shamir 분산입니다.
+          암호와 백업 코드는 서로 동등한 자격입니다. 둘 중 무엇을 갖고 있어도 일기를
+          복호화하고, 암호를 재설정하고, 백업 코드를 새로 발급할 수 있습니다. 단, 어느
+          한쪽을 안다고 해서 다른 쪽의 실제 값을 알아낼 수는 없습니다. 평소에는 암호를
+          쓰고, 그마저 잃어버렸을 때를 위한 비상 수단이 백업 코드입니다.
         </p>
       </section>
       <ShamirSection
@@ -103,11 +106,11 @@ function ChangePassphraseSection({
     setSuccess(false);
 
     if (newPassphrase !== confirmPassphrase) {
-      setError("새 패스프레이즈 확인이 일치하지 않습니다.");
+      setError("새 암호 확인이 일치하지 않습니다.");
       return;
     }
     if (!checkPassphraseStrength(newPassphrase).isStrongEnough) {
-      setError("새 패스프레이즈가 너무 약합니다.");
+      setError("새 암호가 너무 약합니다.");
       return;
     }
 
@@ -121,8 +124,8 @@ function ChangePassphraseSection({
     } catch (err) {
       setError(
         err instanceof WrongPassphraseError
-          ? "기존 패스프레이즈가 올바르지 않습니다."
-          : "패스프레이즈를 변경하지 못했습니다."
+          ? "기존 암호가 올바르지 않습니다."
+          : "암호를 변경하지 못했습니다."
       );
     } finally {
       setSubmitting(false);
@@ -131,26 +134,26 @@ function ChangePassphraseSection({
 
   return (
     <section className="w-full max-w-sm space-y-4">
-      <h2 className="text-lg font-semibold">패스프레이즈 변경</h2>
+      <h2 className="text-lg font-semibold">암호 변경</h2>
       <form onSubmit={handleSubmit} className="space-y-3">
         <input
           type="password"
           required
           autoComplete="current-password"
-          aria-label="기존 패스프레이즈"
+          aria-label="기존 암호"
           value={oldPassphrase}
           onChange={(e) => setOldPassphrase(e.target.value)}
-          placeholder="기존 패스프레이즈"
+          placeholder="기존 암호"
           className="field"
         />
         <input
           type="password"
           required
           autoComplete="new-password"
-          aria-label="새 패스프레이즈"
+          aria-label="새 암호"
           value={newPassphrase}
           onChange={(e) => setNewPassphrase(e.target.value)}
-          placeholder="새 패스프레이즈"
+          placeholder="새 암호"
           className="field"
         />
         <PassphraseStrengthMeter passphrase={newPassphrase} />
@@ -158,10 +161,10 @@ function ChangePassphraseSection({
           type="password"
           required
           autoComplete="new-password"
-          aria-label="새 패스프레이즈 확인"
+          aria-label="새 암호 확인"
           value={confirmPassphrase}
           onChange={(e) => setConfirmPassphrase(e.target.value)}
-          placeholder="새 패스프레이즈 확인"
+          placeholder="새 암호 확인"
           className="field"
         />
         {error && (
@@ -171,7 +174,7 @@ function ChangePassphraseSection({
         )}
         {success && (
           <p role="status" className="success-text">
-            패스프레이즈가 변경되었습니다.
+            암호가 변경되었습니다.
           </p>
         )}
         <button type="submit" disabled={submitting} className="btn-primary w-full">
@@ -183,10 +186,11 @@ function ChangePassphraseSection({
 }
 
 /**
- * Passphrase reset via Shamir shares — for when the passphrase itself is
- * forgotten, not just being routinely changed. No old passphrase is needed;
- * K shares prove the same underlying master credential (contexts/
- * SeedContext.tsx's doc comment). Only shown once Shamir is configured.
+ * Passphrase reset via Shamir shares ("백업 코드" in the UI) — for when the
+ * passphrase itself is forgotten, not just being routinely changed. No old
+ * passphrase is needed; K shares prove the same underlying master
+ * credential (contexts/SeedContext.tsx's doc comment). Only shown once
+ * Shamir is configured.
  */
 function ResetPassphraseSection({
   config,
@@ -217,11 +221,11 @@ function ResetPassphraseSection({
     setSuccess(false);
 
     if (newPassphrase !== confirmPassphrase) {
-      setError("새 패스프레이즈 확인이 일치하지 않습니다.");
+      setError("새 암호 확인이 일치하지 않습니다.");
       return;
     }
     if (!checkPassphraseStrength(newPassphrase).isStrongEnough) {
-      setError("새 패스프레이즈가 너무 약합니다.");
+      setError("새 암호가 너무 약합니다.");
       return;
     }
 
@@ -240,7 +244,7 @@ function ResetPassphraseSection({
       if (!(err instanceof InvalidShamirSharesError)) console.error("resetPassphraseWithShamirShares failed", err);
       setError(
         err instanceof InvalidShamirSharesError
-          ? "조각들이 올바른 시드로 복원되지 않습니다."
+          ? "백업 코드가 올바른 시드로 복원되지 않습니다."
           : "재설정하지 못했습니다."
       );
     } finally {
@@ -251,20 +255,20 @@ function ResetPassphraseSection({
   return (
     <section className="w-full max-w-sm space-y-4 card">
       <div>
-        <h2 className="text-lg font-semibold">패스프레이즈를 잊으셨나요?</h2>
+        <h2 className="text-lg font-semibold">암호를 잊으셨나요?</h2>
         <p className="mt-1 muted">
-          Shamir 분산 {config.k}개를 모으면 기존 일기를 그대로 유지한 채 새 패스프레이즈를 설정할
+          백업 코드 {config.k}개를 모으면 기존 일기를 그대로 유지한 채 새 암호를 설정할
           수 있습니다.
         </p>
       </div>
       {success && (
         <p role="status" className="success-text">
-          패스프레이즈가 재설정되었습니다.
+          암호가 재설정되었습니다.
         </p>
       )}
       {!open ? (
         <button type="button" onClick={() => setOpen(true)} className="btn-secondary w-full">
-          Shamir 분산으로 재설정
+          백업 코드로 재설정
         </button>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-3">
@@ -273,12 +277,12 @@ function ResetPassphraseSection({
               key={i}
               type="text"
               required
-              aria-label={`Shamir 조각 ${i + 1}`}
+              aria-label={`백업 코드 ${i + 1}`}
               value={value}
               onChange={(e) =>
                 setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
               }
-              placeholder={`조각 ${i + 1}`}
+              placeholder={`코드 ${i + 1}`}
               className="field-mono"
             />
           ))}
@@ -286,10 +290,10 @@ function ResetPassphraseSection({
             type="password"
             required
             autoComplete="new-password"
-            aria-label="새 패스프레이즈"
+            aria-label="새 암호"
             value={newPassphrase}
             onChange={(e) => setNewPassphrase(e.target.value)}
-            placeholder="새 패스프레이즈"
+            placeholder="새 암호"
             className="field"
           />
           <PassphraseStrengthMeter passphrase={newPassphrase} />
@@ -297,10 +301,10 @@ function ResetPassphraseSection({
             type="password"
             required
             autoComplete="new-password"
-            aria-label="새 패스프레이즈 확인"
+            aria-label="새 암호 확인"
             value={confirmPassphrase}
             onChange={(e) => setConfirmPassphrase(e.target.value)}
-            placeholder="새 패스프레이즈 확인"
+            placeholder="새 암호 확인"
             className="field"
           />
           {error && (
@@ -324,14 +328,24 @@ function ResetPassphraseSection({
  * OTP (TOTP authenticator app) as an access gate — see
  * functions/src/index.ts and contexts/OtpContext.tsx for why this is a
  * server-verified gate rather than a cryptographic factor combined into
- * the diary's encryption. Enabling requires scanning a QR and confirming
- * one live code; disabling requires a currently-valid code.
+ * the diary's encryption. Enabling requires proving the passphrase first
+ * (the same "prove a master credential before changing account security
+ * settings" rule the Shamir setup/disable flows already follow — see
+ * ChangePassphraseSection's doc comment further up), then scanning a QR
+ * and confirming one live code; disabling requires a currently-valid code.
  */
-type OtpPhase = "status" | "setup" | "disable";
+type OtpPhase = "status" | "confirm-passphrase" | "setup" | "disable";
 
-function OtpSection() {
+function OtpSection({
+  stageSeedFromPassphrase,
+  discardStagedSeed,
+}: {
+  stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
+  discardStagedSeed: () => void;
+}) {
   const { loading, otpEnabled, startSetup, confirmSetup, disable } = useOtp();
   const [phase, setPhase] = useState<OtpPhase>("status");
+  const [passphrase, setPassphrase] = useState("");
   const [setupMaterial, setSetupMaterial] = useState<OtpSetupMaterial | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -344,16 +358,22 @@ function OtpSection() {
     return fallback;
   }
 
-  async function handleStart() {
+  async function handleConfirmPassphrase(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setError(null);
-    setMessage(null);
     setSubmitting(true);
     try {
+      // Only proving identity here — OTP setup doesn't need the seed
+      // itself, unlike Shamir setup/reissue, so it's discarded right away
+      // rather than left staged.
+      await stageSeedFromPassphrase(passphrase);
+      discardStagedSeed();
+      setPassphrase("");
       const material = await startSetup();
       setSetupMaterial(material);
       setPhase("setup");
-    } catch {
-      setError("OTP 설정을 시작하지 못했습니다.");
+    } catch (err) {
+      setError(err instanceof WrongPassphraseError ? "암호가 올바르지 않습니다." : "OTP 설정을 시작하지 못했습니다.");
     } finally {
       setSubmitting(false);
     }
@@ -393,14 +413,49 @@ function OtpSection() {
   }
 
   function cancel() {
+    discardStagedSeed();
     setPhase("status");
     setSetupMaterial(null);
+    setPassphrase("");
     setCode("");
     setError(null);
   }
 
   if (loading) {
     return null;
+  }
+
+  if (phase === "confirm-passphrase") {
+    return (
+      <section className="w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold">OTP 활성화</h2>
+        <form onSubmit={handleConfirmPassphrase} className="space-y-3">
+          <p className="muted">본인 확인을 위해 암호를 입력하세요.</p>
+          <input
+            type="password"
+            required
+            autoFocus
+            autoComplete="current-password"
+            aria-label="암호"
+            value={passphrase}
+            onChange={(e) => setPassphrase(e.target.value)}
+            placeholder="암호"
+            className="field"
+          />
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-primary w-full">
+            {submitting ? "확인 중..." : "다음"}
+          </button>
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
+            취소
+          </button>
+        </form>
+      </section>
+    );
   }
 
   if (phase === "setup" && setupMaterial) {
@@ -499,11 +554,14 @@ function OtpSection() {
       ) : (
         <button
           type="button"
-          onClick={() => void handleStart()}
-          disabled={submitting}
+          onClick={() => {
+            setError(null);
+            setMessage(null);
+            setPhase("confirm-passphrase");
+          }}
           className="btn-primary w-full"
         >
-          {submitting ? "준비 중..." : "OTP 활성화"}
+          OTP 활성화
         </button>
       )}
     </section>
@@ -576,8 +634,8 @@ function ShamirSection({
   }
 
   function proveErrorMessage(err: unknown): string {
-    if (err instanceof WrongPassphraseError) return "패스프레이즈가 올바르지 않습니다.";
-    if (err instanceof InvalidShamirSharesError) return "조각들이 올바른 시드로 복원되지 않습니다.";
+    if (err instanceof WrongPassphraseError) return "암호가 올바르지 않습니다.";
+    if (err instanceof InvalidShamirSharesError) return "백업 코드가 올바른 시드로 복원되지 않습니다.";
     return "본인 확인에 실패했습니다.";
   }
 
@@ -585,7 +643,7 @@ function ShamirSection({
     event.preventDefault();
     setError(null);
     if (newK < 2 || newN < newK || newN > 10) {
-      setError("조각 수(N)는 2~10, 필요 조각 수(K)는 2 이상이면서 N 이하여야 합니다.");
+      setError("전체 코드 수(N)는 2~10, 필요한 코드 수(K)는 2 이상이면서 N 이하여야 합니다.");
       return;
     }
     setSubmitting(true);
@@ -610,7 +668,7 @@ function ShamirSection({
       await confirmPendingShamir();
       setRevealedShares([]);
       setPhase("status");
-      setMessage(config ? "Shamir 분산이 재발급되었습니다." : "Shamir 분산이 활성화되었습니다.");
+      setMessage(config ? "백업 코드가 재발급되었습니다." : "백업 코드가 활성화되었습니다.");
     } catch (err) {
       console.error("confirmPendingShamir failed", err);
       setError("저장하지 못했습니다. 다시 시도해주세요.");
@@ -627,7 +685,7 @@ function ShamirSection({
       await stage();
       await disableShamir();
       setPhase("status");
-      setMessage("Shamir 분산이 비활성화되었습니다.");
+      setMessage("백업 코드가 비활성화되었습니다.");
     } catch (err) {
       setError(proveErrorMessage(err));
     } finally {
@@ -644,7 +702,7 @@ function ShamirSection({
         onClick={() => setProveMode("passphrase")}
         className={`btn-sm flex-1 ${proveMode === "passphrase" ? "btn-primary" : "btn-secondary"}`}
       >
-        패스프레이즈로 인증
+        암호로 인증
       </button>
       <button
         type="button"
@@ -654,7 +712,7 @@ function ShamirSection({
         onClick={() => setProveMode("shamir")}
         className={`btn-sm flex-1 ${proveMode === "shamir" ? "btn-primary" : "btn-secondary"}`}
       >
-        기존 조각으로 인증
+        기존 백업 코드로 인증
       </button>
     </div>
   );
@@ -663,9 +721,9 @@ function ShamirSection({
     return (
       <section className="w-full max-w-lg space-y-3">
         <SecretReveal
-          title="Shamir 분산 조각"
-          description={`총 ${revealedShares.length}개의 조각 중 ${newK}개를 모으면 시드를 복원할 수 있습니다. 조각 하나만으로는 아무 의미가 없으니, 각 조각을 서로 다른 안전한 곳에 나눠 보관하세요. 이전에 발급된 조각이 있었다면 이제 무효가 됩니다. 이 화면은 다시 표시되지 않습니다.`}
-          confirmLabel={submitting ? "저장 중..." : "완료 — 이 조각들을 활성화합니다"}
+          title="백업 코드"
+          description={`총 ${revealedShares.length}개의 코드 중 ${newK}개를 모으면 시드를 복원할 수 있습니다. 코드 하나만으로는 아무 의미가 없으니, 각 코드를 서로 다른 안전한 곳에 나눠 보관하세요. 이전에 발급된 코드가 있었다면 이제 무효가 됩니다. 이 화면은 다시 표시되지 않습니다.`}
+          confirmLabel={submitting ? "저장 중..." : "완료 — 이 코드들을 활성화합니다"}
           confirming={submitting}
           onConfirm={() => void handleConfirmReveal()}
         >
@@ -673,9 +731,9 @@ function ShamirSection({
             {revealedShares.map((share, i) => (
               <SecretCard
                 key={i}
-                label={`조각 ${i + 1} / ${revealedShares.length}`}
+                label={`코드 ${i + 1} / ${revealedShares.length}`}
                 text={recoverySecretToText(share)}
-                filename={`privatediary-shamir-share-${i + 1}-of-${revealedShares.length}.txt`}
+                filename={`privatediary-backup-code-${i + 1}-of-${revealedShares.length}.txt`}
               />
             ))}
           </div>
@@ -695,7 +753,7 @@ function ShamirSection({
   if (phase === "prove") {
     return (
       <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">{config ? "Shamir 분산 재발급" : "Shamir 분산 활성화"}</h2>
+        <h2 className="text-lg font-semibold">{config ? "백업 코드 재발급" : "백업 코드 활성화"}</h2>
         <form onSubmit={handleProveForSetup} className="space-y-3">
           {proveModeToggle}
           {proveMode === "passphrase" ? (
@@ -703,10 +761,10 @@ function ShamirSection({
               type="password"
               required
               autoComplete="current-password"
-              aria-label="패스프레이즈"
+              aria-label="암호"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
-              placeholder="패스프레이즈"
+              placeholder="암호"
               className="field"
             />
           ) : (
@@ -716,12 +774,12 @@ function ShamirSection({
                   key={i}
                   type="text"
                   required
-                  aria-label={`Shamir 조각 ${i + 1}`}
+                  aria-label={`백업 코드 ${i + 1}`}
                   value={value}
                   onChange={(e) =>
                     setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
                   }
-                  placeholder={`조각 ${i + 1}`}
+                  placeholder={`코드 ${i + 1}`}
                   className="field-mono"
                 />
               ))}
@@ -770,7 +828,7 @@ function ShamirSection({
   if (phase === "disable" && config) {
     return (
       <section className="w-full max-w-sm space-y-4">
-        <h2 className="text-lg font-semibold">Shamir 분산 비활성화</h2>
+        <h2 className="text-lg font-semibold">백업 코드 비활성화</h2>
         <form onSubmit={handleProveForDisable} className="space-y-3">
           {proveModeToggle}
           {proveMode === "passphrase" ? (
@@ -778,10 +836,10 @@ function ShamirSection({
               type="password"
               required
               autoComplete="current-password"
-              aria-label="패스프레이즈"
+              aria-label="암호"
               value={passphrase}
               onChange={(e) => setPassphrase(e.target.value)}
-              placeholder="패스프레이즈"
+              placeholder="암호"
               className="field"
             />
           ) : (
@@ -791,12 +849,12 @@ function ShamirSection({
                   key={i}
                   type="text"
                   required
-                  aria-label={`Shamir 조각 ${i + 1}`}
+                  aria-label={`백업 코드 ${i + 1}`}
                   value={value}
                   onChange={(e) =>
                     setProofShares((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
                   }
-                  placeholder={`조각 ${i + 1}`}
+                  placeholder={`코드 ${i + 1}`}
                   className="field-mono"
                 />
               ))}
@@ -821,11 +879,11 @@ function ShamirSection({
   return (
     <section className="w-full max-w-sm space-y-3 card">
       <p className="text-sm font-medium">
-        Shamir 분산:{" "}
+        백업 코드:{" "}
         <strong>{config ? `사용 중 (${config.n}개 중 ${config.k}개 필요)` : "사용 안 함"}</strong>
       </p>
       <p className="text-xs text-zinc-500">
-        N개 조각으로 나눠, K개를 모아야 잠금 해제. 조각 하나만 유출되면 무의미해 더 안전합니다.
+        N개의 코드로 나눠, K개를 모아야 잠금 해제. 코드 하나만 유출되면 무의미해 더 안전합니다.
       </p>
       {message && (
         <p role="status" className="success-text">
@@ -880,11 +938,11 @@ function ResetKeysSection({
       return;
     }
     if (newPassphrase !== confirmPassphrase) {
-      setError("새 패스프레이즈 확인이 일치하지 않습니다.");
+      setError("새 암호 확인이 일치하지 않습니다.");
       return;
     }
     if (!checkPassphraseStrength(newPassphrase, [userEmail]).isStrongEnough) {
-      setError("새 패스프레이즈가 너무 약합니다.");
+      setError("새 암호가 너무 약합니다.");
       return;
     }
 
@@ -906,15 +964,15 @@ function ResetKeysSection({
       <div>
         <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">초기화</h2>
         <p className="mt-2 muted">
-          패스프레이즈와 Shamir 분산을 모두 잃어버렸다면 새 시드를 발급하는 방법뿐입니다.{" "}
+          암호와 백업 코드를 모두 잃어버렸다면 새 시드를 발급하는 방법뿐입니다.{" "}
           <strong>지금까지 작성한 모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 설정해둔
-          Shamir 분산도 함께 꺼집니다. 이 작업은 되돌릴 수 없습니다.
+          백업 코드도 함께 꺼집니다. 이 작업은 되돌릴 수 없습니다.
         </p>
       </div>
 
       {done && (
         <p role="status" className="success-text">
-          초기화되었습니다. 새 패스프레이즈로 로그인하세요.
+          초기화되었습니다. 새 암호로 로그인하세요.
         </p>
       )}
 
@@ -948,10 +1006,10 @@ function ResetKeysSection({
             type="password"
             required
             autoComplete="new-password"
-            aria-label="새 패스프레이즈"
+            aria-label="새 암호"
             value={newPassphrase}
             onChange={(e) => setNewPassphrase(e.target.value)}
-            placeholder="새 패스프레이즈"
+            placeholder="새 암호"
             className="field"
           />
           <PassphraseStrengthMeter passphrase={newPassphrase} userInputs={[userEmail]} />
@@ -959,10 +1017,10 @@ function ResetKeysSection({
             type="password"
             required
             autoComplete="new-password"
-            aria-label="새 패스프레이즈 확인"
+            aria-label="새 암호 확인"
             value={confirmPassphrase}
             onChange={(e) => setConfirmPassphrase(e.target.value)}
-            placeholder="새 패스프레이즈 확인"
+            placeholder="새 암호 확인"
             className="field"
           />
           {error && (

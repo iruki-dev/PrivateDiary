@@ -23,6 +23,22 @@ export class OtpLockedOutError extends Error {
   }
 }
 
+/** Shamir shares didn't reproduce a matching OTP-bypass proof — see verifyShamirOtpBypass. */
+export class ShamirOtpBypassFailedError extends Error {
+  constructor(message = "Shares did not match.") {
+    super(message);
+    this.name = "ShamirOtpBypassFailedError";
+  }
+}
+
+/** Shamir isn't configured for this account, so there's no verifier to bypass OTP with. */
+export class ShamirNotConfiguredError extends Error {
+  constructor(message = "Shamir is not set up for this account.") {
+    super(message);
+    this.name = "ShamirNotConfiguredError";
+  }
+}
+
 function rethrowOtpError(err: unknown): never {
   if (err instanceof FirebaseError) {
     if (err.code === "functions/permission-denied") throw new IncorrectOtpCodeError();
@@ -74,5 +90,28 @@ export async function disableOtp(code: string): Promise<void> {
     await call({ code });
   } catch (err) {
     rethrowOtpError(err);
+  }
+}
+
+/**
+ * Satisfies the OTP gate using a Shamir OTP-bypass proof instead of a TOTP
+ * code (see functions/src/index.ts's verifyShamirOtpBypass). `proof` comes
+ * from lib/crypto's computeShamirOtpBypassProof — this function never
+ * touches shares, the wrap key, or the seed itself. On success the ID
+ * token must be force-refreshed to pick up the new claims, same as verifyOtp.
+ */
+export async function verifyShamirOtpBypass(proof: string): Promise<void> {
+  const call = httpsCallable<{ proof: string }, { success: boolean; validForMs: number }>(
+    functions,
+    "verifyShamirOtpBypass"
+  );
+  try {
+    await call({ proof });
+  } catch (err) {
+    if (err instanceof FirebaseError) {
+      if (err.code === "functions/permission-denied") throw new ShamirOtpBypassFailedError();
+      if (err.code === "functions/failed-precondition") throw new ShamirNotConfiguredError();
+    }
+    throw err;
   }
 }

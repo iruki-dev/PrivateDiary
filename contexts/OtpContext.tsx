@@ -8,6 +8,7 @@ import {
   disableOtp as disableOtpCall,
   startOtpSetup,
   verifyOtp as verifyOtpCall,
+  verifyShamirOtpBypass as verifyShamirOtpBypassCall,
   type OtpSetupMaterial,
 } from "@/lib/firebase/otp";
 
@@ -34,6 +35,12 @@ interface OtpContextValue {
   otpVerified: boolean;
   /** Verifies `code` for this session. Throws IncorrectOtpCodeError / OtpLockedOutError on failure. */
   verify: (code: string) => Promise<void>;
+  /**
+   * Satisfies the OTP gate for this session using a Shamir OTP-bypass
+   * proof instead of a TOTP code — see lib/firebase/otp.ts. Throws
+   * ShamirOtpBypassFailedError / ShamirNotConfiguredError on failure.
+   */
+  verifyViaShamirBypass: (proof: string) => Promise<void>;
   /** Starts OTP setup — generates a secret + otpauth:// URI to show as a QR code. */
   startSetup: () => Promise<OtpSetupMaterial>;
   /** Confirms setup with one valid code from the freshly-scanned authenticator app. */
@@ -89,6 +96,14 @@ export function OtpProvider({ children }: { children: ReactNode }) {
     [refreshClaims]
   );
 
+  const verifyViaShamirBypass = useCallback(
+    async (proof: string) => {
+      await verifyShamirOtpBypassCall(proof);
+      await refreshClaims();
+    },
+    [refreshClaims]
+  );
+
   const startSetup = useCallback(() => startOtpSetup(), []);
 
   const confirmSetup = useCallback(
@@ -108,7 +123,18 @@ export function OtpProvider({ children }: { children: ReactNode }) {
   );
 
   return (
-    <OtpContext.Provider value={{ loading, otpEnabled, otpVerified, verify, startSetup, confirmSetup, disable }}>
+    <OtpContext.Provider
+      value={{
+        loading,
+        otpEnabled,
+        otpVerified,
+        verify,
+        verifyViaShamirBypass,
+        startSetup,
+        confirmSetup,
+        disable,
+      }}
+    >
       {children}
     </OtpContext.Provider>
   );

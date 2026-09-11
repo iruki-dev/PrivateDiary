@@ -1,7 +1,14 @@
-import { randomBytes } from "@noble/hashes/utils.js";
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { combine, split } from "shamir-secret-sharing";
 import { aesGcmDecrypt, aesGcmEncrypt } from "./aesGcm";
-import { AES_GCM_IV_LENGTH, SHAMIR_WRAP_KEY_LENGTH } from "./constants";
+import {
+  AES_GCM_IV_LENGTH,
+  SHAMIR_OTP_BYPASS_INFO,
+  SHAMIR_OTP_BYPASS_VERIFIER_LENGTH,
+  SHAMIR_WRAP_KEY_LENGTH,
+} from "./constants";
 import { InvalidShamirSharesError } from "./errors";
 import { wipeBytes } from "./memory";
 import type { ShamirWrappedSeed } from "./types";
@@ -41,19 +48,42 @@ import type { ShamirWrappedSeed } from "./types";
  * seed (never the passphrase string, which isn't derived from or embedded
  * in the seed), and the passphrase path never touches the Shamir wrap key
  * or shares at all.
+ *
+ * The wrap key also backs the OTP-bypass mechanism (ARCHITECTURE.md §3.8):
+ * `otpBypassVerifier` below is a one-way, domain-separated derivative of it
+ * (HKDF, never the key itself), stored server-side so a Cloud Function can
+ * confirm "this caller holds K valid Shamir shares" — and therefore
+ * satisfy firestore.rules' OTP gate — without ever learning the shares,
+ * the wrap key, or the seed. Because it's derived from the wrap key
+ * specifically (not the seed, and not anything the passphrase path
+ * touches), reproducing it requires real Shamir shares; the passphrase
+ * alone cannot produce it.
  */
 
 export interface ShamirSplitResult {
   shares: Uint8Array[];
   wrappedSeed: ShamirWrappedSeed;
+  otpBypassVerifier: Uint8Array;
+}
+
+function deriveShamirOtpBypassVerifier(wrapKey: Uint8Array): Uint8Array {
+  return hkdf(
+    sha256,
+    wrapKey,
+    undefined,
+    utf8ToBytes(SHAMIR_OTP_BYPASS_INFO),
+    SHAMIR_OTP_BYPASS_VERIFIER_LENGTH
+  );
 }
 
 /**
  * Wraps `masterSeed` under a fresh random AES-256 key, then splits that key
  * into `n` Shamir shares (`k` needed to reconstruct). Each share is 33 bytes
  * (32-byte key + 1-byte share index — see shamir-secret-sharing's GF(2^8)
- * encoding). Call again to reissue: a brand new key and ciphertext are
- * generated every time, unrelated to any previous call.
+ * encoding). Call again to reissue: a brand new key, ciphertext, and
+ * `otpBypassVerifier` are generated every time, unrelated to any previous
+ * call — reissuing invalidates old shares for OTP-bypass purposes exactly
+ * as it does for decryption.
  */
 export async function splitSeedShamir(
   masterSeed: Uint8Array,
@@ -65,7 +95,8 @@ export async function splitSeedShamir(
   try {
     const ciphertext = await aesGcmEncrypt(wrapKey, iv, masterSeed);
     const shares = await split(wrapKey, n, k);
-    return { shares, wrappedSeed: { ciphertext, iv } };
+    const otpBypassVerifier = deriveShamirOtpBypassVerifier(wrapKey);
+    return { shares, wrappedSeed: { ciphertext, iv }, otpBypassVerifier };
   } finally {
     wipeBytes(wrapKey);
   }
@@ -95,6 +126,31 @@ export async function combineSeedShamir(
     return await aesGcmDecrypt(wrapKey, wrappedSeed.iv, wrappedSeed.ciphertext);
   } catch {
     throw new InvalidShamirSharesError();
+  } finally {
+    wipeBytes(wrapKey);
+  }
+}
+
+/**
+ * Computes the OTP-bypass proof for `shares` (ARCHITECTURE.md §3.8): the
+ * same one-way derivative `splitSeedShamir` stored server-side, recomputed
+ * here from whatever shares the caller has. Doesn't validate the shares
+ * itself — combine() silently returns garbage for wrong/insufficient
+ * shares, so this just as silently returns a garbage proof, which the
+ * server-side comparison then simply fails to match. Callers that also
+ * need the actual seed should validate via `combineSeedShamir` (AES-GCM
+ * auth) first, both to fail fast locally and to avoid a wasted network
+ * round-trip on shares that were never going to work anyway.
+ */
+export async function computeShamirOtpBypassProof(shares: Uint8Array[]): Promise<Uint8Array> {
+  let wrapKey: Uint8Array;
+  try {
+    wrapKey = await combine(shares);
+  } catch {
+    throw new InvalidShamirSharesError();
+  }
+  try {
+    return deriveShamirOtpBypassVerifier(wrapKey);
   } finally {
     wipeBytes(wrapKey);
   }

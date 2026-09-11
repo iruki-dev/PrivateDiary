@@ -101,6 +101,7 @@ export type SeedStatus = "unknown" | "not-issued" | "locked" | "unlocked";
 interface PendingShamir {
   shares: Uint8Array[];
   wrappedSeed: ShamirWrappedSeed;
+  otpBypassVerifier: Uint8Array;
   n: number;
   k: number;
 }
@@ -357,9 +358,13 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       if (!stagedSeedRef.current) {
         throw new Error("No staged seed to prepare Shamir shares from");
       }
-      const { shares, wrappedSeed } = await splitSeedShamir(stagedSeedRef.current, n, k);
+      const { shares, wrappedSeed, otpBypassVerifier } = await splitSeedShamir(
+        stagedSeedRef.current,
+        n,
+        k
+      );
       clearPendingShamir();
-      pendingShamirRef.current = { shares, wrappedSeed, n, k };
+      pendingShamirRef.current = { shares, wrappedSeed, otpBypassVerifier, n, k };
       return shares;
     },
     [clearPendingShamir]
@@ -369,8 +374,8 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     if (!user || !pendingShamirRef.current) {
       throw new Error("No prepared Shamir shares to confirm");
     }
-    const { n, k, wrappedSeed } = pendingShamirRef.current;
-    await setShamirMethodFirestore(user.uid, n, k, wrappedSeed);
+    const { n, k, wrappedSeed, otpBypassVerifier } = pendingShamirRef.current;
+    await setShamirMethodFirestore(user.uid, n, k, wrappedSeed, otpBypassVerifier);
     shamirWrappedSeedRef.current = wrappedSeed;
     setDecryptionMethods({ shamir: { n, k } });
     clearStagedSeed();

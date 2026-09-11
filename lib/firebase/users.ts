@@ -9,6 +9,7 @@ import {
 } from "firebase/firestore";
 import { db } from "./config";
 import {
+  bytesToBase64,
   publicKeysFromStorage,
   publicKeysToStorage,
   shamirWrappedSeedFromStorage,
@@ -32,7 +33,21 @@ import {
  */
 
 interface DecryptionMethodsDocData {
-  shamir?: { n: number; k: number; wrappedSeed: ShamirWrappedSeedStorage };
+  shamir?: {
+    n: number;
+    k: number;
+    wrappedSeed: ShamirWrappedSeedStorage;
+    /**
+     * base64 — see lib/crypto/recovery.ts and functions/src/index.ts's
+     * verifyShamirOtpBypass. Optional because accounts that set up Shamir
+     * between the wrap-key fix and this field's introduction have a valid
+     * `wrappedSeed` but no verifier yet; the client never reads this value
+     * (only the Cloud Function does, server-side), so a missing verifier
+     * doesn't affect decrypt/reissue at all — the user just needs to
+     * reissue once to also get working OTP-bypass.
+     */
+    otpBypassVerifier?: string;
+  };
 }
 
 interface UserDocData {
@@ -164,19 +179,26 @@ export async function resetUserKeyRecord(
 
 /**
  * Sets up or reissues Shamir shares — the same write either way. Reissuing
- * overwrites `wrappedSeed` with a freshly wrap-keyed ciphertext (see
- * lib/crypto/recovery.ts), which is what actually invalidates whatever
- * shares were issued before this call — the shares themselves are never
- * stored, only this ciphertext and the (n, k) shape.
+ * overwrites `wrappedSeed` and `otpBypassVerifier` with freshly wrap-keyed
+ * values (see lib/crypto/recovery.ts), which is what actually invalidates
+ * whatever shares were issued before this call, for both decryption AND
+ * OTP-bypass purposes — the shares and the wrap key itself are never
+ * stored, only these derived values and the (n, k) shape.
  */
 export async function setShamirMethod(
   uid: string,
   n: number,
   k: number,
-  wrappedSeed: ShamirWrappedSeed
+  wrappedSeed: ShamirWrappedSeed,
+  otpBypassVerifier: Uint8Array
 ): Promise<void> {
   await updateDoc(doc(db, "users", uid), {
-    "decryptionMethods.shamir": { n, k, wrappedSeed: shamirWrappedSeedToStorage(wrappedSeed) },
+    "decryptionMethods.shamir": {
+      n,
+      k,
+      wrappedSeed: shamirWrappedSeedToStorage(wrappedSeed),
+      otpBypassVerifier: bytesToBase64(otpBypassVerifier),
+    },
     ...legacyRecoveryKeyCleanup,
   });
 }

@@ -18,7 +18,7 @@ export { deriveHybridKeyPair } from "./keys";
 
 export { wrapSeed, unwrapSeed, rewrapSeed } from "./passphrase";
 
-export { splitSeedShamir, combineSeedShamir } from "./recovery";
+export { splitSeedShamir, combineSeedShamir, computeShamirOtpBypassProof } from "./recovery";
 export type { ShamirSplitResult } from "./recovery";
 
 export { encapsulateContentKey, decapsulateContentKey } from "./hybridKem";
@@ -38,6 +38,11 @@ export {
   entryToStorage,
   entryFromStorage,
 } from "./codec";
+
+// Generic byte<->base64 codecs, exported directly for values (like the
+// Shamir OTP-bypass proof/verifier) that are opaque to lib/firebase and
+// don't warrant a dedicated domain-specific storage type of their own.
+export { bytesToBase64, base64ToBytes } from "./encoding";
 
 export { wipeBytes } from "./memory";
 
