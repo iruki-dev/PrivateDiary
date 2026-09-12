@@ -9,7 +9,11 @@ import { useSeed } from "@/contexts/SeedContext";
 import { OtpGate } from "@/components/OtpGate";
 import { LoadingScreen, LoadingState } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
-import { listEntries, type StoredEntry } from "@/lib/firebase/entries";
+import {
+  listEntries,
+  type EntrySequenceIntegrity,
+  type StoredEntry,
+} from "@/lib/firebase/entries";
 import { ShamirNotConfiguredError } from "@/lib/firebase/otp";
 import {
   bytesToBase64,
@@ -63,6 +67,11 @@ export default function EntriesPage() {
 
   const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [metadata, setMetadata] = useState<StoredEntry[]>([]);
+  // Sequence-level integrity of the fetched list (lib/firebase/entries.ts's
+  // checkEntrySequence). Per-entry tampering already surfaces as a
+  // decryption failure via the AAD binding; this catches the case that
+  // binding structurally cannot — entries that are simply missing.
+  const [integrity, setIntegrity] = useState<EntrySequenceIntegrity | null>(null);
 
   const [decrypted, setDecrypted] = useState<Record<string, string>>({});
   const [decryptErrors, setDecryptErrors] = useState<Record<string, string>>({});
@@ -97,9 +106,10 @@ export default function EntriesPage() {
     if (!user || !canReadEntries) return;
     let cancelled = false;
     listEntries(user.uid)
-      .then((entries) => {
+      .then((result) => {
         if (cancelled) return;
-        setMetadata(entries);
+        setMetadata(result.entries);
+        setIntegrity(result.integrity);
         setMetadataLoaded(true);
       })
       .catch(() => {
@@ -259,6 +269,33 @@ export default function EntriesPage() {
         {!otpLoading && seedStatus === "unlocked" && canReadEntries && (
           <>
             {!metadataLoaded && <LoadingState label="불러오는 중..." />}
+
+            {metadataLoaded && integrity && !integrity.ok && (
+              <div role="alert" className="card space-y-1 border-amber-500/50">
+                <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">
+                  일기 목록이 온전하지 않습니다
+                </p>
+                {integrity.missingTailCount > 0 && (
+                  <p className="muted text-xs">
+                    저장된 기록보다 {integrity.missingTailCount}개의 일기가 적게 조회되었습니다.
+                  </p>
+                )}
+                {integrity.missingSeqs.length > 0 && (
+                  <p className="muted text-xs">
+                    누락된 순번: {integrity.missingSeqs.join(", ")}
+                  </p>
+                )}
+                {integrity.duplicateSeqs.length > 0 && (
+                  <p className="muted text-xs">
+                    중복된 순번: {integrity.duplicateSeqs.join(", ")}
+                  </p>
+                )}
+                <p className="muted text-xs">
+                  각 일기의 내용 자체는 여전히 변조 검증을 통과했습니다. 목록에서 일기가 빠졌거나
+                  중복된 것으로, 서버 측 삭제·누락일 수 있습니다.
+                </p>
+              </div>
+            )}
 
             {metadataLoaded && metadata.length === 0 && (
               <div className="card space-y-3 text-center">

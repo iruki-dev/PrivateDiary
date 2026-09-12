@@ -66,6 +66,20 @@ interface UserDocData {
   wrappedSeed: WrappedSeedStorage;
   decryptionMethods?: DecryptionMethodsDocData;
   preferences?: Partial<UserPreferences>;
+  /**
+   * Highest entrySeq handed out so far (ARCHITECTURE.md §3.4). Lives here
+   * rather than being recomputed from the `entries` collection because
+   * writing an entry must keep working without any unlock step (§3.2 rule
+   * 5) while `entries` READS are behind the OTP gate — deriving the next
+   * sequence number by querying entries made every write depend on a gate
+   * that is deliberately read-only. firestore.rules lets this one field
+   * (and `preferences`) move without otpSatisfied(), and forces it
+   * forward-only so a stale client can't reissue a number already used.
+   *
+   * Optional: accounts created before this field existed don't have it —
+   * see lib/firebase/entries.ts's getNextEntrySeq fallback.
+   */
+  lastEntrySeq?: number;
   createdAt?: Timestamp;
 }
 
@@ -75,6 +89,13 @@ export interface UserKeyRecord {
   decryptionMethods: DecryptionMethodsConfig;
   /** The Shamir wrap-key indirection (lib/crypto/recovery.ts) — null unless Shamir is configured. */
   shamirWrappedSeed: ShamirWrappedSeed | null;
+}
+
+/** Reads the entry-sequence counter. `null` for accounts predating the field. */
+export async function getLastEntrySeq(uid: string): Promise<number | null> {
+  const snapshot = await getDoc(doc(db, "users", uid));
+  const stored = (snapshot.data() as UserDocData | undefined)?.lastEntrySeq;
+  return typeof stored === "number" ? stored : null;
 }
 
 /**
@@ -145,6 +166,7 @@ export async function createUserKeyRecord(
     publicKeys: publicKeysToStorage(publicKeys),
     wrappedSeed: wrappedSeedToStorage(wrappedSeed),
     decryptionMethods: {},
+    lastEntrySeq: 0,
     createdAt: serverTimestamp(),
   });
 }

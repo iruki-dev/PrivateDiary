@@ -14,6 +14,12 @@ import { NextResponse, type NextRequest } from "next/server";
  */
 export function proxy(request: NextRequest) {
   const nonce = Buffer.from(crypto.randomUUID()).toString("base64");
+  // React reconstructs server-side error stacks in the browser via eval in
+  // development only; production builds of neither React nor Next.js use
+  // it. Gating this on NODE_ENV keeps `next dev` working without ever
+  // shipping 'unsafe-eval' to production — the Next.js CSP guide's own
+  // recommended shape.
+  const isDev = process.env.NODE_ENV === "development";
 
   const csp = [
     "default-src 'self'",
@@ -22,7 +28,14 @@ export function proxy(request: NextRequest) {
     // load regardless of host, but the explicit google.com/gstatic.com
     // sources stay as the documented fallback for browsers that don't
     // support strict-dynamic (same pattern Google's own CSP guide uses).
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic' https://www.google.com https://www.gstatic.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""} https://www.google.com https://www.gstatic.com`,
+    // KNOWN, ACCEPTED WEAKENING. Tailwind's runtime-injected styles and
+    // next/font's inline <style> have no nonce threaded through them, so
+    // nonce-only style-src breaks the app's rendering outright. The
+    // exposure is far narrower than 'unsafe-inline' on script-src: with
+    // object-src 'none', base-uri 'self' and a nonce-only script-src, an
+    // injected <style> can restyle the page but cannot execute, exfiltrate
+    // via CSS (no external url() — style-src stays 'self'), or reframe it.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https://www.gstatic.com",
     "font-src 'self'",
@@ -35,6 +48,17 @@ export function proxy(request: NextRequest) {
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
+    // next.config.ts also sends X-Frame-Options: DENY, but that header is
+    // the legacy mechanism and browsers prefer frame-ancestors where both
+    // are present. Stating it here makes the clickjacking defense part of
+    // the same policy as everything else rather than depending on a header
+    // set in a different file.
+    "frame-ancestors 'none'",
+    // Any absolute http:// subresource that slips into the bundle gets
+    // rewritten to https:// rather than silently downgrading the page.
+    // Strict-Transport-Security (next.config.ts) covers the document
+    // itself; this covers what the document pulls in.
+    "upgrade-insecure-requests",
   ].join("; ");
 
   const requestHeaders = new Headers(request.headers);

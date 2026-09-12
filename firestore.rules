@@ -2,6 +2,37 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Base64 field guard. Every key/ciphertext field in this schema is
+    // base64 produced by lib/crypto/encoding.ts, so bounding each one
+    // keeps a scripted client from parking megabytes of junk in fields
+    // that rules would otherwise never look at. Sizes are the real
+    // encoded lengths plus generous headroom (e.g. an ML-KEM-768
+    // ciphertext is 1088 bytes -> ~1452 base64 chars).
+    function isB64(value, maxLen) {
+      return value is string && value.size() > 0 && value.size() <= maxLen;
+    }
+
+    // The passphrase-wrapped master seed (ARCHITECTURE.md §3.1 step 5).
+    // `kdfParams.iterations` carries a FLOOR, not just a type check: the
+    // client feeds this stored value straight back into PBKDF2 on unwrap
+    // (lib/crypto/passphrase.ts's unwrapSeed reads wrapped.kdfParams.
+    // iterations), so a document that says `iterations: 1` would make any
+    // future offline attack on the wrapped seed trivial. Pinning the floor
+    // to the constant lib/crypto ships with (PBKDF2_ITERATIONS) means a
+    // downgraded or tampered client can never weaken the KDF below what
+    // this codebase considers acceptable — only raise it.
+    function isValidWrappedSeed(seed) {
+      return seed.keys().hasOnly(['ciphertext', 'iv', 'salt', 'kdf', 'kdfParams'])
+          && isB64(seed.ciphertext, 200)
+          && isB64(seed.iv, 32)
+          && isB64(seed.salt, 32)
+          && seed.kdf == 'pbkdf2'
+          && seed.kdfParams.keys().hasOnly(['iterations', 'hash'])
+          && seed.kdfParams.iterations is int
+          && seed.kdfParams.iterations >= 600000
+          && seed.kdfParams.hash == 'SHA-256';
+    }
+
     // Shamir's Secret Sharing: the sole alternative to the passphrase
     // (opt-in) — replaces the removed BIP39 mnemonic and the earlier
     // recovery-key option (see lib/crypto/recovery.ts, ARCHITECTURE.md
@@ -15,13 +46,25 @@ service cloud.firestore {
     // derivative of the same wrap key, optional only because it predates
     // accounts that set up Shamir before this field existed — only
     // functions/src/index.ts's verifyShamirOtpBypass ever reads it.
+    //
+    // SECURITY: this field is the server-side half of the OTP-bypass
+    // comparison, so being able to write it is equivalent to being able to
+    // satisfy the OTP gate. `n`/`k` are bounded here, but what actually
+    // stops a session-only attacker from planting a verifier it knows the
+    // preimage of is the otpSatisfied() gate on `allow update` below — see
+    // isOtpUngatedChange().
     function isValidDecryptionMethods(methods) {
       return methods.keys().hasOnly(['shamir'])
           && (!('shamir' in methods)
               || (methods.shamir.keys().hasOnly(['n', 'k', 'wrappedSeed', 'otpBypassVerifier'])
-                  && methods.shamir.n is int && methods.shamir.k is int
+                  && methods.shamir.n is int && methods.shamir.n >= 2 && methods.shamir.n <= 255
+                  && methods.shamir.k is int && methods.shamir.k >= 2
+                  && methods.shamir.k <= methods.shamir.n
                   && methods.shamir.wrappedSeed.keys().hasOnly(['ciphertext', 'iv'])
-                  && (!('otpBypassVerifier' in methods.shamir) || methods.shamir.otpBypassVerifier is string)));
+                  && isB64(methods.shamir.wrappedSeed.ciphertext, 200)
+                  && isB64(methods.shamir.wrappedSeed.iv, 32)
+                  && (!('otpBypassVerifier' in methods.shamir)
+                      || isB64(methods.shamir.otpBypassVerifier, 64))));
     }
 
     // Pure display preferences (ARCHITECTURE.md §3.9) — never read by
@@ -36,29 +79,16 @@ service cloud.firestore {
     }
 
     function isValidUserDoc(data) {
-      return data.keys().hasOnly(['publicKeys', 'signingPublicKey', 'wrappedSeed', 'decryptionMethods', 'preferences', 'createdAt'])
+      return data.keys().hasOnly(['publicKeys', 'wrappedSeed', 'decryptionMethods', 'preferences', 'lastEntrySeq', 'createdAt'])
           && data.publicKeys.keys().hasOnly(['x25519', 'mlkem768'])
+          && isB64(data.publicKeys.mlkem768, 2048)
+          && data.publicKeys.x25519 is map
+          && data.publicKeys.x25519.keys().hasOnly(['kty', 'crv', 'x'])
+          && isB64(data.publicKeys.x25519.x, 64)
+          && isValidWrappedSeed(data.wrappedSeed)
           && (!('decryptionMethods' in data) || isValidDecryptionMethods(data.decryptionMethods))
-          && (!('preferences' in data) || isValidPreferences(data.preferences));
-    }
-
-    // ARCHITECTURE.md §5 gives `allow update: if ... isKeyRotationRequest()`
-    // without defining the function — filled in here. It covers all
-    // self-service mutations of the account owner's OWN document:
-    //   1. Passphrase change (Phase 4 rewrapSeed): only wrappedSeed changes.
-    //   2. Full key reset ("초기화", ARCHITECTURE.md §3.6 rule 5): a brand
-    //      new seed, so publicKeys + wrappedSeed (+ decryptionMethods reset
-    //      to {}) change together.
-    //   3. Enabling/disabling one decryption method: only `decryptionMethods`
-    //      (a single sub-field of it, via dotted-path updates) changes.
-    //   4. A display-preference change (§3.9): only `preferences` changes.
-    // In every case createdAt is immutable and the document shape stays
-    // valid. This only ever narrows what an authenticated uid can do to ITS
-    // OWN doc — the outer `request.auth.uid == uid` check is what actually
-    // prevents cross-user access, not this function.
-    function isKeyRotationRequest() {
-      return isValidUserDoc(request.resource.data)
-          && request.resource.data.createdAt == resource.data.createdAt;
+          && (!('preferences' in data) || isValidPreferences(data.preferences))
+          && (!('lastEntrySeq' in data) || (data.lastEntrySeq is int && data.lastEntrySeq >= 0));
     }
 
     // OTP (TOTP authenticator app) as a server-enforced ACCESS GATE, not a
@@ -69,13 +99,6 @@ service cloud.firestore {
     // client-writable, so a client can't forge its way past this by
     // setting its own claims. An account without OTP enabled is
     // unaffected (otpEnabled != true short-circuits to allowed).
-    //
-    // Only applied to `entries` reads, deliberately NOT to `users/{uid}`:
-    // that doc holds `publicKeys` (needed to WRITE — ARCHITECTURE.md §3.2
-    // rule 5 says writing must work without any unlock step at all) and
-    // `wrappedSeed` (ciphertext that's safe to read without the passphrase
-    // per §3.1 step 7). Nothing in `users/{uid}` is plaintext or requires
-    // OTP to be harmless; `entries` is where actual diary content lives.
     //
     // `otpVerified`/`otpVerifiedAt` can ALSO be set by
     // verifyShamirOtpBypass (ARCHITECTURE.md §3.8) instead of a real TOTP
@@ -94,27 +117,130 @@ service cloud.firestore {
               && request.auth.token.get('otpVerifiedAt', 0) > request.time.toMillis() - 43200000); // 12h session
     }
 
+    // The two fields on users/{uid} that carry no security weight and so
+    // stay writable without passing the OTP gate:
+    //
+    //  - `preferences` — display-only (§3.9), never read by lib/crypto or
+    //    functions/.
+    //  - `lastEntrySeq` — the entry-sequence hint the write path bumps on
+    //    every save. Writing a diary entry must keep working without any
+    //    unlock step (ARCHITECTURE.md §3.2 rule 5), and the OTP gate is
+    //    deliberately a READ gate, so the write path must not depend on
+    //    it. A session-only attacker can push this number forward, which
+    //    costs nothing: the number is a hint, the authoritative binding is
+    //    the AES-GCM AAD on each entry, and app/entries/page.tsx
+    //    cross-checks it against the entries actually present.
+    //
+    // Everything else in this document — wrappedSeed, publicKeys,
+    // decryptionMethods — is a credential-bearing field, and changing any
+    // of them requires otpSatisfied().
+    function isOtpUngatedChange() {
+      return request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['preferences', 'lastEntrySeq']);
+    }
+
+    // ARCHITECTURE.md §5 gives `allow update: if ... isKeyRotationRequest()`
+    // without defining the function — filled in here. It covers all
+    // self-service mutations of the account owner's OWN document:
+    //   1. Passphrase change (Phase 4 rewrapSeed): only wrappedSeed changes.
+    //   2. Full key reset ("초기화", ARCHITECTURE.md §3.6 rule 5): a brand
+    //      new seed, so publicKeys + wrappedSeed (+ decryptionMethods reset
+    //      to {}) change together.
+    //   3. Enabling/disabling one decryption method: only `decryptionMethods`
+    //      (a single sub-field of it, via dotted-path updates) changes.
+    //   4. A display-preference change (§3.9): only `preferences` changes.
+    //   5. An entry-sequence bump from the write path: only `lastEntrySeq`.
+    // In every case createdAt is immutable and the document shape stays
+    // valid. This only ever narrows what an authenticated uid can do to ITS
+    // OWN doc — the outer `request.auth.uid == uid` check is what actually
+    // prevents cross-user access, not this function.
+    //
+    // `lastEntrySeq` is additionally forced to move forward only: letting
+    // it rewind would let a stale or hostile client hand out entry
+    // sequence numbers that collide with entries already written.
+    function isKeyRotationRequest() {
+      return isValidUserDoc(request.resource.data)
+          && request.resource.data.createdAt == resource.data.createdAt
+          && (!('lastEntrySeq' in request.resource.data)
+              || !('lastEntrySeq' in resource.data)
+              || request.resource.data.lastEntrySeq >= resource.data.lastEntrySeq);
+    }
+
     match /users/{uid} {
       allow read: if request.auth.uid == uid;
       allow create: if request.auth.uid == uid
                     && isValidUserDoc(request.resource.data);
-      allow update: if request.auth.uid == uid && isKeyRotationRequest();
+      // otpSatisfied() here is what closes the OTP-bypass hole: without it
+      // a caller holding nothing but a stolen session could overwrite
+      // `decryptionMethods.shamir.otpBypassVerifier` with a value whose
+      // preimage it chose, then replay that preimage through
+      // verifyShamirOtpBypass to mint itself otpVerified claims — reaching
+      // every entry's ciphertext without the TOTP device, the passphrase,
+      // or a single real Shamir share. The same gate stops that session
+      // from destroying the account by overwriting `wrappedSeed` /
+      // `publicKeys` (entries are append-only and undeletable, so a seed
+      // overwrite is unrecoverable).
+      //
+      // The Shamir recovery path still works with the OTP device gone:
+      // verifyShamirOtpBypass sets otpVerified from real shares FIRST, and
+      // only then does the client rewrite wrappedSeed.
+      allow update: if request.auth.uid == uid
+                    && isKeyRotationRequest()
+                    && (isOtpUngatedChange() || otpSatisfied());
       allow delete: if false;
     }
-    // Caps the one variable-length field a write controls (base64
-    // ciphertext) so a scripted client can't run up storage/cost with
-    // giant garbage payloads — 500,000 chars is roughly a 375KB plaintext
-    // entry, far past anything a real diary entry needs. Defense in depth
-    // alongside App Check (README.md "DDoS 방지"), not a replacement for it:
-    // this only bounds the SIZE of an abusive write, not the RATE.
-    function isValidEntrySize(data) {
-      return data.ciphertext is string && data.ciphertext.size() <= 500000;
+
+    // Full shape validation for an entry, rather than the previous
+    // uid/entrySeq/size spot-checks. Two things it buys beyond bounding
+    // storage abuse:
+    //
+    //  1. Every field the read path feeds into lib/crypto must be present
+    //     and a bounded string, so a session-only attacker can't park
+    //     half-formed junk documents in a collection that is deliberately
+    //     append-only (allow update, delete: if false — junk can never be
+    //     removed once written).
+    //  2. `aad.uid`/`aad.entrySeq` must agree with the document's own
+    //     `uid`/`entrySeq`. Those top-level fields are what listEntries()
+    //     queries and orders by, while the `aad` copy is what's actually
+    //     bound into the AES-GCM tag (ARCHITECTURE.md §3.4). Letting the
+    //     two disagree would mean the ordering the UI displays is not the
+    //     ordering the ciphertext authenticates.
+    //
+    // Sizes are base64 lengths with headroom: ML-KEM-768 ciphertext 1088B
+    // -> ~1452 chars; wrapped content key 48B -> 64; X25519 public key and
+    // 12-byte IVs well under their caps. 500,000 chars of ciphertext is
+    // roughly a 375KB plaintext entry, far past anything a real diary
+    // entry needs.
+    //
+    // What rules deliberately do NOT enforce is global uniqueness of
+    // entrySeq — that needs a transactional counter read, which security
+    // rules can't express. lib/firebase/entries.ts allocates from
+    // users/{uid}.lastEntrySeq (forward-only, above) and
+    // app/entries/page.tsx reports duplicates and gaps it sees, so the
+    // residue is detectable rather than silent.
+    function isValidEntry(data) {
+      return data.keys().hasOnly(['uid', 'entrySeq', 'ciphertext', 'iv', 'wrappedContentKey',
+                                  'wrappedContentKeyIv', 'kemCiphertext',
+                                  'ephemeralX25519PublicKey', 'aad', 'createdAt'])
+          && data.uid is string
+          && data.entrySeq is int && data.entrySeq > 0
+          && isB64(data.ciphertext, 500000)
+          && isB64(data.iv, 32)
+          && isB64(data.wrappedContentKey, 128)
+          && isB64(data.wrappedContentKeyIv, 32)
+          && isB64(data.kemCiphertext, 2048)
+          && isB64(data.ephemeralX25519PublicKey, 64)
+          && data.createdAt is timestamp
+          && data.aad.keys().hasOnly(['uid', 'entrySeq', 'createdAt'])
+          && data.aad.uid == data.uid
+          && data.aad.entrySeq == data.entrySeq
+          && data.aad.createdAt is string && data.aad.createdAt.size() <= 40;
     }
+
     match /entries/{entryId} {
       allow read: if request.auth.uid == resource.data.uid && otpSatisfied();
       allow create: if request.auth.uid == request.resource.data.uid
-                    && request.resource.data.entrySeq is int
-                    && isValidEntrySize(request.resource.data);
+                    && isValidEntry(request.resource.data);
       allow update, delete: if false; // append-only: 수정/삭제 자체를 원천 차단
     }
     // The actual TOTP secret. Only functions/src/index.ts (Admin SDK, which

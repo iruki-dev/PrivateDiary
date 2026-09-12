@@ -33,8 +33,14 @@ const PROJECT_ID = "demo-privatediary";
 
 let testEnv: RulesTestEnvironment;
 
+// Mirrors lib/crypto/codec.ts's publicKeysToStorage() exactly — x25519 is a
+// JWK-shaped map, not a bare string. firestore.rules validates that shape
+// now, so a looser placeholder here would test something the app never writes.
 function validPublicKeys() {
-  return { x25519: "x25519-pub-placeholder", mlkem768: "mlkem768-pub-placeholder" };
+  return {
+    x25519: { kty: "OKP", crv: "X25519", x: "x25519-pub-placeholder" },
+    mlkem768: "mlkem768-pub-placeholder",
+  };
 }
 
 function validWrappedSeed(tag = "a") {
@@ -156,7 +162,10 @@ describe("users/{uid}", () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), {
-        publicKeys: { x25519: "new-x25519", mlkem768: "new-mlkem768" },
+        publicKeys: {
+          x25519: { kty: "OKP", crv: "X25519", x: "new-x25519" },
+          mlkem768: "new-mlkem768",
+        },
         wrappedSeed: validWrappedSeed("reset"),
       })
     );
@@ -715,5 +724,177 @@ describe("entries/{entryId}", () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertFails(updateDoc(doc(alice, "entries", entryId), { ciphertext: "tampered" }));
     await assertFails(deleteDoc(doc(alice, "entries", entryId)));
+  });
+});
+
+/**
+ * Regression tests for the authorization holes found in the security
+ * review. Each one FAILED (i.e. the attack succeeded) against the previous
+ * version of firestore.rules.
+ *
+ * The threat model throughout: an attacker holding nothing but a valid
+ * Firebase session for the victim — a stolen/hijacked ID token — and none
+ * of the actual credentials (no passphrase, no Shamir shares, no TOTP
+ * device). `otpEnabled: true` without `otpVerified` is exactly that caller.
+ */
+describe("hardening: a session-only attacker on an OTP-enabled account", () => {
+  function seedUserDoc(extra: Record<string, unknown> = {}) {
+    return testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("real"),
+        createdAt: new Date(2024, 0, 1),
+        ...extra,
+      });
+    });
+  }
+
+  /** Signed in, OTP enabled on the account, OTP never verified this session. */
+  function attacker() {
+    return testEnv
+      .authenticatedContext("alice", { otpEnabled: true })
+      .firestore() as unknown as Firestore;
+  }
+
+  /** Same account after a real TOTP code (or a real Shamir bypass proof). */
+  function verified() {
+    return testEnv
+      .authenticatedContext("alice", {
+        otpEnabled: true,
+        otpVerified: true,
+        otpVerifiedAt: Date.now(),
+      })
+      .firestore() as unknown as Firestore;
+  }
+
+  it("cannot plant an otpBypassVerifier it knows the preimage of (OTP gate bypass)", async () => {
+    await seedUserDoc({ decryptionMethods: { shamir: validShamir(5, 3, "victim") } });
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), {
+        "decryptionMethods.shamir": validShamir(2, 2, "attacker-chosen"),
+      })
+    );
+  });
+
+  it("cannot destroy the account by overwriting wrappedSeed + publicKeys", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("garbage"),
+      })
+    );
+  });
+
+  it("cannot strip the Shamir recovery credential off the account", async () => {
+    await seedUserDoc({ decryptionMethods: { shamir: validShamir(5, 3) } });
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), { "decryptionMethods.shamir": deleteField() })
+    );
+  });
+
+  it("cannot downgrade the PBKDF2 iteration count below the lib/crypto floor", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(verified(), "users/alice"), {
+        wrappedSeed: { ...validWrappedSeed("weak"), kdfParams: { iterations: 1, hash: "SHA-256" } },
+      })
+    );
+  });
+
+  it("cannot rewind lastEntrySeq to re-issue an already-used sequence number", async () => {
+    await seedUserDoc({ lastEntrySeq: 7 });
+    await assertFails(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 3 }));
+  });
+
+  // The gate must not swallow the two things that legitimately happen
+  // without it — otherwise writing a diary entry (ARCHITECTURE.md §3.2
+  // rule 5) would start depending on a gate that is meant to be read-only.
+  it("CAN still bump lastEntrySeq — the write path must work without OTP", async () => {
+    await seedUserDoc({ lastEntrySeq: 7 });
+    await assertSucceeds(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 8 }));
+  });
+
+  it("CAN still change display preferences — they carry no security weight", async () => {
+    await seedUserDoc();
+    await assertSucceeds(
+      updateDoc(doc(attacker(), "users/alice"), { "preferences.privateWritingMode": true })
+    );
+  });
+
+  it("the real Shamir recovery path still works once the bypass has verified", async () => {
+    // Lost passphrase AND lost the OTP device: verifyShamirOtpBypass sets
+    // otpVerified from genuine shares first, and only then does the client
+    // rewrite wrappedSeed. That ordering has to remain possible.
+    await seedUserDoc({ decryptionMethods: { shamir: validShamir(5, 3) } });
+    await assertSucceeds(
+      updateDoc(doc(verified(), "users/alice"), { wrappedSeed: validWrappedSeed("recovered") })
+    );
+  });
+});
+
+describe("hardening: entries/{entryId} shape validation", () => {
+  function validEntry(overrides: Record<string, unknown> = {}) {
+    return {
+      uid: "alice",
+      entrySeq: 1,
+      ciphertext: "ct",
+      iv: "iv",
+      wrappedContentKey: "wck",
+      wrappedContentKeyIv: "wckiv",
+      kemCiphertext: "kemct",
+      ephemeralX25519PublicKey: "eph",
+      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+      createdAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  it("accepts a well-formed entry", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(addDoc(collection(alice, "entries"), validEntry()));
+  });
+
+  it("rejects a half-formed junk document (entries can never be deleted once written)", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(collection(alice, "entries"), { uid: "alice", entrySeq: 1, ciphertext: "junk" })
+    );
+  });
+
+  it("rejects an aad.uid that disagrees with the document's own uid", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({ aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" } })
+      )
+    );
+  });
+
+  it("rejects an aad.entrySeq that disagrees with the indexed entrySeq it is ordered by", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({ aad: { uid: "alice", entrySeq: 99, createdAt: "2026-01-01T00:00:00.000Z" } })
+      )
+    );
+  });
+
+  it("rejects a non-positive entrySeq", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({ entrySeq: 0, aad: { uid: "alice", entrySeq: 0, createdAt: "2026-01-01T00:00:00.000Z" } })
+      )
+    );
+  });
+
+  it("rejects an unknown extra field", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(addDoc(collection(alice, "entries"), validEntry({ plaintext: "oops" })));
   });
 });

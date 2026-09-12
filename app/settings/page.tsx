@@ -1,9 +1,11 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
+import { OtpGate } from "@/components/OtpGate";
 import { useSeed } from "@/contexts/SeedContext";
 import { usePreferences } from "@/contexts/PreferencesContext";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
@@ -53,20 +55,50 @@ export default function SettingsPage() {
 
   return (
     <main className="flex flex-1 flex-col items-center gap-10 px-4 py-10 sm:gap-12 sm:px-6 sm:py-20">
+      {/*
+        Ungated: display preferences carry no security weight (§3.9), and
+        OtpSection manages OTP itself — requiring OTP to reach the OTP
+        settings would be circular, and each of its own actions already
+        demands a valid code.
+      */}
       <PrivateWritingSection />
-      <ChangePassphraseSection changePassphrase={changePassphrase} />
-      {shamirConfig && (
-        <ResetPassphraseSection
-          config={shamirConfig}
-          resetPassphraseWithShamirShares={resetPassphraseWithShamirShares}
-        />
-      )}
       <OtpSection
         stageSeedFromPassphrase={stageSeedFromPassphrase}
         discardStagedSeed={discardStagedSeed}
       />
 
-      <section className="w-full max-w-sm space-y-2">
+      {/*
+        Everything below mutates a credential-bearing field on users/{uid}
+        (wrappedSeed, publicKeys, decryptionMethods), which firestore.rules
+        now releases only when otpSatisfied(). Without this gate those forms
+        would render, accept input, and then fail with a bare
+        permission-denied at submit time.
+
+        The footer keeps the lost-the-OTP-device case recoverable: the
+        Shamir share entry on /entries satisfies the same gate via
+        verifyShamirOtpBypass (no TOTP code involved), and the claims it
+        stamps are good for 12h across the whole session — so coming back
+        here afterwards just works.
+      */}
+      <OtpGate
+        footer={
+          shamirConfig && (
+            <Link href="/entries" className="block w-full text-center text-xs link">
+              OTP 기기가 없다면 백업 코드로 잠금 해제 후 다시 시도
+            </Link>
+          )
+        }
+      >
+        <div className="flex w-full flex-col items-center gap-10 sm:gap-12">
+          <ChangePassphraseSection changePassphrase={changePassphrase} />
+          {shamirConfig && (
+            <ResetPassphraseSection
+              config={shamirConfig}
+              resetPassphraseWithShamirShares={resetPassphraseWithShamirShares}
+            />
+          )}
+
+          <section className="w-full max-w-sm space-y-2">
         <h2 className="text-lg font-semibold">일기 복호화 방법</h2>
         <p className="muted">
           암호와 백업 코드는 서로 동등한 자격입니다. 둘 중 무엇을 갖고 있어도 일기를
@@ -75,17 +107,19 @@ export default function SettingsPage() {
           쓰고, 그마저 잃어버렸을 때를 위한 비상 수단이 백업 코드입니다.
         </p>
       </section>
-      <ShamirSection
-        config={shamirConfig}
-        stageSeedFromPassphrase={stageSeedFromPassphrase}
-        stageSeedFromShamirShares={stageSeedFromShamirShares}
-        discardStagedSeed={discardStagedSeed}
-        prepareShamir={prepareShamir}
-        confirmPendingShamir={confirmPendingShamir}
-        disableShamir={disableShamir}
-      />
+          <ShamirSection
+            config={shamirConfig}
+            stageSeedFromPassphrase={stageSeedFromPassphrase}
+            stageSeedFromShamirShares={stageSeedFromShamirShares}
+            discardStagedSeed={discardStagedSeed}
+            prepareShamir={prepareShamir}
+            confirmPendingShamir={confirmPendingShamir}
+            disableShamir={disableShamir}
+          />
 
-      <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
+          <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
+        </div>
+      </OtpGate>
     </main>
   );
 }

@@ -137,10 +137,35 @@ async function verifyStoredOtp(
 // of this setting — it only controls whether the HTTP request is allowed
 // to reach that check at all.
 
-/** Step 1 of setup: generates and stores a fresh (unconfirmed) secret, returns it + a QR URI. */
+/**
+ * Step 1 of setup: generates and stores a fresh (unconfirmed) secret,
+ * returns it + a QR URI.
+ *
+ * Re-enrolling over an ALREADY-CONFIRMED authenticator requires a valid
+ * current code, exactly like disableOtp. Without that check this function
+ * was a complete bypass of the OTP gate: anyone holding nothing but a
+ * stolen session could call it to overwrite the account's TOTP secret with
+ * one it had just been handed, confirm that new secret, and verify it —
+ * arriving at otpVerified claims (and therefore every entry's ciphertext)
+ * without ever possessing the real authenticator. Overwriting the secret
+ * also reset failedAttempts/lockedUntil, clearing verifyStoredOtp's
+ * brute-force lockout as a side effect.
+ *
+ * Enrolling for the FIRST time (no document, or a setup that was started
+ * but never confirmed) stays unauthenticated beyond the session itself —
+ * there is no credential to prove yet, and an unconfirmed secret grants
+ * nothing until confirmOtpSetup succeeds against it.
+ */
 export const startOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
+
+  const existing = await getFirestore().collection(OTP_SECRETS_COLLECTION).doc(uid).get();
+  if (existing.exists && (existing.data() as OtpSecretDoc).confirmed) {
+    // Throws (and counts toward the lockout) unless the caller proves the
+    // authenticator that is currently registered on this account.
+    await verifyStoredOtp(uid, requireCode(request.data));
+  }
 
   const secret = generateSecret();
   const email = request.auth.token.email ?? uid;
@@ -232,7 +257,23 @@ export const verifyShamirOtpBypass = onCall({ invoker: "public", enforceAppCheck
   return { success: true, validForMs: OTP_SESSION_MS };
 });
 
-/** Disables OTP. Requires a currently-valid code — the same "prove the current method" rule as recovery-key/Shamir changes. */
+/**
+ * Disables OTP. Requires a currently-valid code — the same "prove the
+ * current method" rule as recovery-key/Shamir changes.
+ *
+ * Also revokes every refresh token on the account. Turning off the second
+ * factor is exactly the moment any other session still carrying
+ * otpVerified/otpVerifiedAt claims should stop being trusted, and nothing
+ * else in this codebase can invalidate a session that was already issued.
+ * Note the residual window this cannot close: claims live inside the
+ * signed Firebase ID token, so an ID token minted moments before this call
+ * stays valid until it expires (<= 1h). Revocation stops it being renewed
+ * past that.
+ *
+ * Cost of this: the caller's own device is signed out too — Firebase has
+ * no "revoke every session except mine" — so the user re-authenticates
+ * after disabling OTP. That is the intended trade.
+ */
 export const disableOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
@@ -241,5 +282,6 @@ export const disableOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK
   const { doc } = await verifyStoredOtp(uid, code);
   await doc.delete();
   await mergeClaims(uid, { otpEnabled: false, otpVerified: false, otpVerifiedAt: null });
-  return { success: true };
+  await getAuth().revokeRefreshTokens(uid);
+  return { success: true, sessionsRevoked: true };
 });

@@ -1,6 +1,6 @@
 import {
-  addDoc,
   collection,
+  doc,
   getDocs,
   limit,
   orderBy,
@@ -8,8 +8,14 @@ import {
   serverTimestamp,
   Timestamp,
   where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "./config";
+import { getLastEntrySeq } from "./users";
+import { checkEntrySequence, type EntrySequenceIntegrity } from "./entrySequence";
+export { checkEntrySequence } from "./entrySequence";
+export type { EntrySequenceIntegrity } from "./entrySequence";
+
 import {
   encryptEntry,
   entryFromStorage,
@@ -51,13 +57,30 @@ export interface StoredEntry extends StoredEntryMetadata {
 
 /**
  * Next entrySeq for this uid (§3.4's rollback-detection AAD binding).
- * Assignment isn't transactionally exclusive — a race between two
- * simultaneous writes on different devices could pick the same number —
- * but that's a bookkeeping edge case, not a security boundary: the AAD
- * binding still catches any post-write tampering with a stored entrySeq
- * regardless of how the number was originally assigned.
+ *
+ * Reads the counter on users/{uid} rather than querying the `entries`
+ * collection: `entries` reads are behind firestore.rules' OTP gate, but
+ * writing an entry must work without any unlock step (ARCHITECTURE.md §3.2
+ * rule 5), so sourcing the number from a gated read made every write fail
+ * for an OTP-enabled account that hadn't verified yet.
+ *
+ * The query fallback covers accounts created before `lastEntrySeq`
+ * existed; it needs the OTP gate satisfied exactly as the old code did, and
+ * only runs until that account's first write seeds the counter.
+ *
+ * Assignment still isn't transactionally exclusive — two devices writing at
+ * the same instant can read the same counter — but that's a bookkeeping
+ * edge case, not a security boundary: the AAD binding still catches any
+ * post-write tampering with a stored entrySeq regardless of how the number
+ * was assigned, and checkEntrySequence() below surfaces any collision that
+ * does slip through.
  */
 async function getNextEntrySeq(uid: string): Promise<number> {
+  const counter = await getLastEntrySeq(uid);
+  if (counter !== null) {
+    return counter + 1;
+  }
+
   const lastEntryQuery = query(
     collection(db, "entries"),
     where("uid", "==", uid),
@@ -94,7 +117,14 @@ export async function writeEntry(
     createdAt: serverTimestamp(),
   };
 
-  const ref = await addDoc(collection(db, "entries"), docData);
+  // One batch so the entry and the counter that allocated its sequence
+  // number can't diverge: a bare entry write followed by a failed counter
+  // bump would hand the same entrySeq to the next write.
+  const ref = doc(collection(db, "entries"));
+  const batch = writeBatch(db);
+  batch.set(ref, docData);
+  batch.update(doc(db, "users", uid), { lastEntrySeq: entrySeq });
+  await batch.commit();
   return ref.id;
 }
 
@@ -103,14 +133,19 @@ export async function writeEntry(
  * explicit step the UI performs with unwrapped private keys; see
  * ARCHITECTURE.md §3.3 / Phase 5's "본문은 절대 노출하지 않음").
  */
-export async function listEntries(uid: string): Promise<StoredEntry[]> {
+export async function listEntries(
+  uid: string
+): Promise<{ entries: StoredEntry[]; integrity: EntrySequenceIntegrity }> {
   const entriesQuery = query(
     collection(db, "entries"),
     where("uid", "==", uid),
     orderBy("entrySeq", "desc")
   );
-  const snapshot = await getDocs(entriesQuery);
-  return snapshot.docs.map((docSnapshot) => {
+  const [snapshot, lastEntrySeq] = await Promise.all([
+    getDocs(entriesQuery),
+    getLastEntrySeq(uid).catch(() => null),
+  ]);
+  const entries = snapshot.docs.map((docSnapshot) => {
     const data = docSnapshot.data() as EntryDocData;
     return {
       id: docSnapshot.id,
@@ -120,4 +155,5 @@ export async function listEntries(uid: string): Promise<StoredEntry[]> {
       payload: entryFromStorage(data),
     };
   });
+  return { entries, integrity: checkEntrySequence(entries, lastEntrySeq) };
 }
