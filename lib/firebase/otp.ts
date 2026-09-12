@@ -1,6 +1,9 @@
 import { FirebaseError } from "firebase/app";
 import { httpsCallable } from "firebase/functions";
 import { functions } from "./config";
+import { REAUTH_REQUIRED_MESSAGE, ReauthRequiredError } from "./reauth";
+
+export { ReauthRequiredError } from "./reauth";
 
 /**
  * Client wrappers for functions/src/index.ts's OTP callables. This module
@@ -43,6 +46,9 @@ function rethrowOtpError(err: unknown): never {
   if (err instanceof FirebaseError) {
     if (err.code === "functions/permission-denied") throw new IncorrectOtpCodeError();
     if (err.code === "functions/resource-exhausted") throw new OtpLockedOutError();
+    if (err.code === "functions/failed-precondition" && err.message === REAUTH_REQUIRED_MESSAGE) {
+      throw new ReauthRequiredError();
+    }
   }
   throw err;
 }
@@ -53,11 +59,19 @@ export interface OtpSetupMaterial {
   uri: string;
 }
 
-/** Step 1 of enabling OTP: generates and server-side-stores a fresh secret. */
+/**
+ * Step 1 of enabling OTP: generates and server-side-stores a fresh secret.
+ * Throws ReauthRequiredError (first-time enroll only) if this session's ID
+ * token isn't recent enough — see that error's doc comment.
+ */
 export async function startOtpSetup(): Promise<OtpSetupMaterial> {
   const call = httpsCallable<undefined, OtpSetupMaterial>(functions, "startOtpSetup");
-  const result = await call();
-  return result.data;
+  try {
+    const result = await call();
+    return result.data;
+  } catch (err) {
+    rethrowOtpError(err);
+  }
 }
 
 /** Step 2: proves the user scanned the QR by supplying one valid current code. */

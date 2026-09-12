@@ -52,7 +52,16 @@ export interface StoredEntryMetadata {
 }
 
 export interface StoredEntry extends StoredEntryMetadata {
-  payload: EncryptedEntryPayload;
+  /**
+   * security-patch-v2 / H2: null means this document exists (its
+   * uid/entrySeq/createdAt are real and counted for integrity purposes)
+   * but entryFromStorage() couldn't decode one of its base64 fields — see
+   * listEntries()'s doc comment. Distinct from a decryption failure
+   * (TamperedCiphertextError), which only ever happens for a payload that
+   * DID decode; the caller (app/entries/page.tsx) should show a decode
+   * failure for these without ever calling decryptEntry on them.
+   */
+  payload: EncryptedEntryPayload | null;
 }
 
 /**
@@ -132,6 +141,19 @@ export async function writeEntry(
  * Lists this user's entries (still encrypted — decrypting is a separate,
  * explicit step the UI performs with unwrapped private keys; see
  * ARCHITECTURE.md §3.3 / Phase 5's "본문은 절대 노출하지 않음").
+ *
+ * security-patch-v2 / H2: entryFromStorage() (base64 decode) used to run
+ * unguarded inside this map. firestore.rules now rejects non-base64
+ * ciphertext/key fields at write time, but entries are append-only and
+ * undeletable, so a document written before that rule existed — or one
+ * that slips through some future rules regression — must not be allowed
+ * to take the ENTIRE list down with it: base64ToBytes throws on the first
+ * invalid character, an unguarded Array.map has no per-element recovery,
+ * and the caller's blanket .catch() (app/entries/page.tsx) would then
+ * render as if the diary were completely empty, hiding every OTHER
+ * perfectly-fine entry along with it. Isolating the decode per-entry means
+ * one bad document surfaces as one bad entry (payload: null — see
+ * StoredEntry) instead of erasing the whole list.
  */
 export async function listEntries(
   uid: string
@@ -145,15 +167,20 @@ export async function listEntries(
     getDocs(entriesQuery),
     getLastEntrySeq(uid).catch(() => null),
   ]);
-  const entries = snapshot.docs.map((docSnapshot) => {
+  const entries = snapshot.docs.map((docSnapshot): StoredEntry => {
     const data = docSnapshot.data() as EntryDocData;
-    return {
+    const metadata: StoredEntryMetadata = {
       id: docSnapshot.id,
       uid: data.uid,
       entrySeq: data.entrySeq,
       createdAt: data.createdAt,
-      payload: entryFromStorage(data),
     };
+    try {
+      return { ...metadata, payload: entryFromStorage(data) };
+    } catch (err) {
+      console.error(`entryFromStorage failed to decode entry ${docSnapshot.id}`, err);
+      return { ...metadata, payload: null };
+    }
   });
   return { entries, integrity: checkEntrySequence(entries, lastEntrySeq) };
 }

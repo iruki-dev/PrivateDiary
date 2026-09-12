@@ -8,7 +8,9 @@
   "scripts": {
     "build": "tsc",
     "serve": "pnpm run build && firebase emulators:start --only functions",
-    "deploy": "firebase deploy --only functions"
+    "deploy": "firebase deploy --only functions",
+    "test": "vitest run",
+    "test:integration:run": "vitest run --config vitest.integration.config.ts"
   },
   "dependencies": {
     "@google-cloud/firestore": "^9.1.0",
@@ -17,6 +19,7 @@
     "otplib": "^13.5.0"
   },
   "devDependencies": {
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^5.0.0"
   }
 }

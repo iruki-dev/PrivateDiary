@@ -1,3 +1,4 @@
+import { FirebaseError } from "firebase/app";
 import {
   deleteField,
   doc,
@@ -8,6 +9,7 @@ import {
   type Timestamp,
 } from "firebase/firestore";
 import { db } from "./config";
+import { ReauthRequiredError } from "./reauth";
 import {
   bytesToBase64,
   publicKeysFromStorage,
@@ -113,6 +115,34 @@ export async function getLastEntrySeq(uid: string): Promise<number | null> {
 const legacyRecoveryKeyCleanup = { "decryptionMethods.recoveryKey": deleteField() };
 
 /**
+ * security-patch-v2 / C1: wraps every write that changes a credential-
+ * bearing field (wrappedSeed, publicKeys, decryptionMethods.shamir) —
+ * everything firestore.rules' isKeyRotationRequest() covers except the
+ * ungated preferences/lastEntrySeq path. firestore.rules now requires
+ * isRecentAuth() for these on accounts without OTP enabled (OTP-enabled
+ * accounts keep today's otpSatisfied() gate, unchanged) — this is what the
+ * caller (SeedContext / app/settings/page.tsx) actually sees when that
+ * check fails: a plain Firestore `permission-denied`, indistinguishable
+ * from any other rules rejection unless translated here into
+ * ReauthRequiredError so the UI knows to prompt reauthentication rather
+ * than show a generic failure. Safe to translate unconditionally: by the
+ * time one of these functions is called, the caller has already locally
+ * proven the passphrase or Shamir shares and shaped a document that passes
+ * isValidUserDoc()/isKeyRotationRequest() — the only rule left that can
+ * still reject it is the recent-auth requirement.
+ */
+async function runCredentialMutation(write: () => Promise<void>): Promise<void> {
+  try {
+    await write();
+  } catch (err) {
+    if (err instanceof FirebaseError && err.code === "permission-denied") {
+      throw new ReauthRequiredError();
+    }
+    throw err;
+  }
+}
+
+/**
  * Migration shim (ARCHITECTURE.md §3.7 rev. 4): before this revision, Shamir
  * split the master seed directly and Firestore stored only `{ n, k }` — no
  * `wrappedSeed`. Any account that set up Shamir before this shipped still
@@ -180,10 +210,12 @@ export async function createUserKeyRecord(
  * valid.
  */
 export async function updateWrappedSeed(uid: string, wrappedSeed: WrappedSeed): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    wrappedSeed: wrappedSeedToStorage(wrappedSeed),
-    ...legacyRecoveryKeyCleanup,
-  });
+  await runCredentialMutation(() =>
+    updateDoc(doc(db, "users", uid), {
+      wrappedSeed: wrappedSeedToStorage(wrappedSeed),
+      ...legacyRecoveryKeyCleanup,
+    })
+  );
 }
 
 /**
@@ -204,11 +236,13 @@ export async function resetUserKeyRecord(
   publicKeys: HybridPublicKeysRaw,
   wrappedSeed: WrappedSeed
 ): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    publicKeys: publicKeysToStorage(publicKeys),
-    wrappedSeed: wrappedSeedToStorage(wrappedSeed),
-    decryptionMethods: {},
-  });
+  await runCredentialMutation(() =>
+    updateDoc(doc(db, "users", uid), {
+      publicKeys: publicKeysToStorage(publicKeys),
+      wrappedSeed: wrappedSeedToStorage(wrappedSeed),
+      decryptionMethods: {},
+    })
+  );
 }
 
 /**
@@ -226,23 +260,27 @@ export async function setShamirMethod(
   wrappedSeed: ShamirWrappedSeed,
   otpBypassVerifier: Uint8Array
 ): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    "decryptionMethods.shamir": {
-      n,
-      k,
-      wrappedSeed: shamirWrappedSeedToStorage(wrappedSeed),
-      otpBypassVerifier: bytesToBase64(otpBypassVerifier),
-    },
-    ...legacyRecoveryKeyCleanup,
-  });
+  await runCredentialMutation(() =>
+    updateDoc(doc(db, "users", uid), {
+      "decryptionMethods.shamir": {
+        n,
+        k,
+        wrappedSeed: shamirWrappedSeedToStorage(wrappedSeed),
+        otpBypassVerifier: bytesToBase64(otpBypassVerifier),
+      },
+      ...legacyRecoveryKeyCleanup,
+    })
+  );
 }
 
 /** Turns Shamir off entirely. */
 export async function disableShamirMethod(uid: string): Promise<void> {
-  await updateDoc(doc(db, "users", uid), {
-    "decryptionMethods.shamir": deleteField(),
-    ...legacyRecoveryKeyCleanup,
-  });
+  await runCredentialMutation(() =>
+    updateDoc(doc(db, "users", uid), {
+      "decryptionMethods.shamir": deleteField(),
+      ...legacyRecoveryKeyCleanup,
+    })
+  );
 }
 
 const DEFAULT_PREFERENCES: UserPreferences = {

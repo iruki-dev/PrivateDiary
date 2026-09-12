@@ -1,7 +1,10 @@
 import {
   createUserWithEmailAndPassword,
+  EmailAuthProvider,
   GoogleAuthProvider,
   onAuthStateChanged,
+  reauthenticateWithCredential,
+  reauthenticateWithPopup,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
@@ -39,6 +42,27 @@ export async function signInWithGoogle(): Promise<User> {
 
 export function subscribeToAuthState(callback: (user: User | null) => void): () => void {
   return onAuthStateChanged(auth, callback);
+}
+
+/**
+ * security-patch-v2: proves the LOGIN password again, refreshing the ID
+ * token's `auth_time` claim to "now" — functions/src/index.ts's
+ * requireRecentAuth (C2 fix) checks this before letting a session enroll
+ * OTP for the first time on an account, since the passphrase can't be
+ * checked server-side (rule 1) but the login credential can be. Only
+ * meaningful for email/password accounts; call reauthenticateWithGoogle
+ * for a Google-signed-in user instead.
+ */
+export async function reauthenticateWithPassword(user: User, password: string): Promise<void> {
+  if (!user.email) {
+    throw new Error("This account has no email/password credential to reauthenticate with");
+  }
+  await reauthenticateWithCredential(user, EmailAuthProvider.credential(user.email, password));
+}
+
+/** Same as reauthenticateWithPassword, for a Google-signed-in user (re-runs the Google popup). */
+export async function reauthenticateWithGoogle(user: User): Promise<void> {
+  await reauthenticateWithPopup(user, new GoogleAuthProvider());
 }
 
 export async function signOut(): Promise<void> {

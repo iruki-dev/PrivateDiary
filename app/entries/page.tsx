@@ -134,6 +134,16 @@ export default function EntriesPage() {
       const plaintexts: Record<string, string> = {};
       const errors: Record<string, string> = {};
       for (const entry of metadata) {
+        // security-patch-v2 / H2: payload is null when
+        // lib/firebase/entries.ts's listEntries() couldn't even decode
+        // this entry's stored fields (not a decryption failure — there's
+        // no ciphertext to feed decryptEntry in the first place). Still
+        // surfaced per-entry, same as a real TamperedCiphertextError,
+        // rather than only being visible as a gap in dev console output.
+        if (!entry.payload) {
+          errors[entry.id] = "손상된 항목 — 저장된 데이터를 읽을 수 없습니다.";
+          continue;
+        }
         try {
           plaintexts[entry.id] = await decryptEntry(privateKeys, entry.payload);
         } catch {

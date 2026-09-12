@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-privatediary \"vitest run --config vitest.rules.config.ts\""
+    "test:rules": "firebase emulators:exec --only firestore --project demo-privatediary \"vitest run --config vitest.rules.config.ts\"",
+    "test:integration": "pnpm --prefix functions run build && firebase emulators:exec --only auth,firestore,functions --project demo-privatediary \"pnpm --prefix functions run test:integration:run\""
   },
   "dependencies": {
     "@noble/curves": "^2.4.0",

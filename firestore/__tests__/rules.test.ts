@@ -36,18 +36,24 @@ let testEnv: RulesTestEnvironment;
 // Mirrors lib/crypto/codec.ts's publicKeysToStorage() exactly — x25519 is a
 // JWK-shaped map, not a bare string. firestore.rules validates that shape
 // now, so a looser placeholder here would test something the app never writes.
+// security-patch-v2 / H2: firestore.rules' isB64/isB64Url now check the
+// actual base64(url) alphabet, not just length — every placeholder string
+// below must therefore be real base64(url) characters only (letters,
+// digits, and — only for the x25519.x field, which is base64url — `-`/`_`)
+// so tests asserting success don't spuriously start failing on charset
+// grounds unrelated to what they're actually testing.
 function validPublicKeys() {
   return {
-    x25519: { kty: "OKP", crv: "X25519", x: "x25519-pub-placeholder" },
-    mlkem768: "mlkem768-pub-placeholder",
+    x25519: { kty: "OKP", crv: "X25519", x: "x25519PubPlaceholder" },
+    mlkem768: "mlkem768PubPlaceholder",
   };
 }
 
 function validWrappedSeed(tag = "a") {
   return {
-    ciphertext: `ciphertext-${tag}`,
-    iv: `iv-${tag}`,
-    salt: `salt-${tag}`,
+    ciphertext: `ciphertext${tag}`,
+    iv: `iv${tag}`,
+    salt: `salt${tag}`,
     kdf: "pbkdf2",
     kdfParams: { iterations: 600_000, hash: "SHA-256" },
   };
@@ -57,9 +63,22 @@ function validShamir(n: number, k: number, tag = "a") {
   return {
     n,
     k,
-    wrappedSeed: { ciphertext: `shamir-ct-${tag}`, iv: `shamir-iv-${tag}` },
-    otpBypassVerifier: `shamir-otp-bypass-${tag}`,
+    wrappedSeed: { ciphertext: `shamirCt${tag}`, iv: `shamirIv${tag}` },
+    otpBypassVerifier: `shamirOtpBypass${tag}`,
   };
+}
+
+/**
+ * security-patch-v2 / C1: every legitimate self-service credential
+ * mutation on a NON-OTP account (passphrase change, Shamir setup/reissue/
+ * disable, full reset) now additionally requires firestore.rules'
+ * isRecentAuth() — see that function's doc comment. A plain
+ * `authenticatedContext(uid)` carries no `auth_time` claim at all, which
+ * correctly reads as "not recently authenticated", so every test that
+ * exercises one of those legitimate flows needs this instead.
+ */
+function recentlyAuthenticatedContext(uid: string) {
+  return testEnv.authenticatedContext(uid, { auth_time: Math.floor(Date.now() / 1000) });
 }
 
 beforeAll(async () => {
@@ -143,7 +162,7 @@ describe("users/{uid}", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), { wrappedSeed: validWrappedSeed("new") })
     );
@@ -159,12 +178,12 @@ describe("users/{uid}", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), {
         publicKeys: {
-          x25519: { kty: "OKP", crv: "X25519", x: "new-x25519" },
-          mlkem768: "new-mlkem768",
+          x25519: { kty: "OKP", crv: "X25519", x: "newX25519" },
+          mlkem768: "newMlkem768",
         },
         wrappedSeed: validWrappedSeed("reset"),
       })
@@ -245,7 +264,7 @@ describe("users/{uid}.decryptionMethods", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": validShamir(5, 3) })
     );
@@ -286,7 +305,7 @@ describe("users/{uid}.decryptionMethods", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), {
         wrappedSeed: validWrappedSeed("new"),
@@ -309,7 +328,7 @@ describe("users/{uid}.decryptionMethods", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": validShamir(3, 2, "gen2") })
     );
@@ -333,7 +352,7 @@ describe("users/{uid}.decryptionMethods", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), { "decryptionMethods.shamir": deleteField() })
     );
@@ -353,7 +372,7 @@ describe("users/{uid}.decryptionMethods", () => {
       });
     });
 
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), { wrappedSeed: validWrappedSeed("new") })
     );
@@ -772,7 +791,7 @@ describe("hardening: a session-only attacker on an OTP-enabled account", () => {
     await seedUserDoc({ decryptionMethods: { shamir: validShamir(5, 3, "victim") } });
     await assertFails(
       updateDoc(doc(attacker(), "users/alice"), {
-        "decryptionMethods.shamir": validShamir(2, 2, "attacker-chosen"),
+        "decryptionMethods.shamir": validShamir(2, 2, "attackerChosen"),
       })
     );
   });
@@ -896,5 +915,239 @@ describe("hardening: entries/{entryId} shape validation", () => {
   it("rejects an unknown extra field", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertFails(addDoc(collection(alice, "entries"), validEntry({ plaintext: "oops" })));
+  });
+});
+
+describe("security-patch-v2 / C1: credentialMutationAllowed() on NON-OTP accounts", () => {
+  function seedUserDoc(extra: Record<string, unknown> = {}) {
+    return testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("real"),
+        createdAt: new Date(2024, 0, 1),
+        ...extra,
+      });
+    });
+  }
+
+  const NOW_S = () => Math.floor(Date.now() / 1000);
+  /** No auth_time claim at all — the realistic shape of a long-lived, silently-refreshed session token (e.g. a stolen one). */
+  const staleSession = () =>
+    testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+  const sixHoursStaleSession = () =>
+    testEnv
+      .authenticatedContext("alice", { auth_time: NOW_S() - 6 * 60 * 60 })
+      .firestore() as unknown as Firestore;
+
+  it("cannot overwrite wrappedSeed + publicKeys without a recent sign-in (the C1 hole this closes)", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(staleSession(), "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed("attacker"),
+      })
+    );
+  });
+
+  it("cannot overwrite decryptionMethods.shamir without a recent sign-in", async () => {
+    await seedUserDoc({ decryptionMethods: { shamir: validShamir(5, 3, "victim") } });
+    await assertFails(
+      updateDoc(doc(staleSession(), "users/alice"), {
+        "decryptionMethods.shamir": validShamir(2, 2, "attackerChosen"),
+      })
+    );
+  });
+
+  it("cannot strip the Shamir recovery credential without a recent sign-in", async () => {
+    await seedUserDoc({ decryptionMethods: { shamir: validShamir(5, 3) } });
+    await assertFails(
+      updateDoc(doc(staleSession(), "users/alice"), { "decryptionMethods.shamir": deleteField() })
+    );
+  });
+
+  it("an hours-old auth_time is still treated as stale, not just a totally absent claim", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(sixHoursStaleSession(), "users/alice"), { wrappedSeed: validWrappedSeed("attacker") })
+    );
+  });
+
+  it("a genuinely recent sign-in CAN still change the passphrase (the legitimate flow keeps working)", async () => {
+    await seedUserDoc();
+    await assertSucceeds(
+      updateDoc(doc(recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore, "users/alice"), {
+        wrappedSeed: validWrappedSeed("new"),
+      })
+    );
+  });
+
+  it("preferences/lastEntrySeq stay ungated regardless of auth_time — the write path must not require reauth", async () => {
+    await seedUserDoc({ lastEntrySeq: 3 });
+    await assertSucceeds(updateDoc(doc(staleSession(), "users/alice"), { lastEntrySeq: 4 }));
+    await assertSucceeds(
+      updateDoc(doc(staleSession(), "users/alice"), { "preferences.privateWritingMode": true })
+    );
+  });
+
+  it("does not change OTP-enabled accounts: a fresh sign-in alone still does not bypass otpSatisfied()", async () => {
+    await seedUserDoc();
+    const otpAttacker = testEnv
+      .authenticatedContext("alice", { otpEnabled: true, auth_time: NOW_S() })
+      .firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(otpAttacker, "users/alice"), { wrappedSeed: validWrappedSeed("attacker") })
+    );
+  });
+
+  it("does not change OTP-enabled accounts: an OTP-verified session with a stale auth_time can still rotate the passphrase", async () => {
+    await seedUserDoc();
+    const otpVerified = testEnv
+      .authenticatedContext("alice", {
+        otpEnabled: true,
+        otpVerified: true,
+        otpVerifiedAt: Date.now(),
+        auth_time: NOW_S() - 6 * 60 * 60,
+      })
+      .firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(otpVerified, "users/alice"), { wrappedSeed: validWrappedSeed("new") })
+    );
+  });
+});
+
+describe("security-patch-v2 / H1: entrySeq / lastEntrySeq upper bound", () => {
+  function validEntry(overrides: Record<string, unknown> = {}) {
+    return {
+      uid: "alice",
+      entrySeq: 1,
+      ciphertext: "ct",
+      iv: "iv",
+      wrappedContentKey: "wck",
+      wrappedContentKeyIv: "wckiv",
+      kemCiphertext: "kemct",
+      ephemeralX25519PublicKey: "eph",
+      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+      createdAt: new Date(),
+      ...overrides,
+    };
+  }
+
+  it("rejects an entry with an absurdly large entrySeq — the unbounded-DoS-loop hole this closes", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({
+          entrySeq: 1_000_000_000,
+          aad: { uid: "alice", entrySeq: 1_000_000_000, createdAt: "2026-01-01T00:00:00.000Z" },
+        })
+      )
+    );
+  });
+
+  it("accepts an entrySeq right at the cap", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({
+          entrySeq: 1_000_000,
+          aad: { uid: "alice", entrySeq: 1_000_000, createdAt: "2026-01-01T00:00:00.000Z" },
+        })
+      )
+    );
+  });
+
+  it("rejects lastEntrySeq set past the same cap", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        lastEntrySeq: 9_000_000_000,
+        createdAt: new Date(),
+      })
+    );
+  });
+});
+
+describe("security-patch-v2 / H2: isB64 / isB64Url actually check the alphabet", () => {
+  it("rejects non-base64 characters in an entry's ciphertext instead of silently accepting junk", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(collection(alice, "entries"), {
+        uid: "alice",
+        entrySeq: 1,
+        ciphertext: "not base64 at all!!!",
+        iv: "iv",
+        wrappedContentKey: "wck",
+        wrappedContentKeyIv: "wckiv",
+        kemCiphertext: "kemct",
+        ephemeralX25519PublicKey: "eph",
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("still accepts real base64 with + / and = padding in an entry field", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      addDoc(collection(alice, "entries"), {
+        uid: "alice",
+        entrySeq: 1,
+        ciphertext: "SGVsbG8rL3dvcmxkPT0=",
+        iv: "iv",
+        wrappedContentKey: "wck",
+        wrappedContentKeyIv: "wckiv",
+        kemCiphertext: "kemct",
+        ephemeralX25519PublicKey: "eph",
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("rejects a users/{uid} document whose mlkem768 key contains characters outside the base64 alphabet", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: {
+          x25519: { kty: "OKP", crv: "X25519", x: "x25519PubPlaceholder" },
+          mlkem768: "not valid base64!!!",
+        },
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("accepts a real base64url x25519.x value (- and _, no padding) — the field lib/crypto's bytesToBase64Url actually produces", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: {
+          x25519: { kty: "OKP", crv: "X25519", x: "abc-DEF_123" },
+          mlkem768: validPublicKeys().mlkem768,
+        },
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(),
+      })
+    );
+  });
+
+  it("rejects a base64url x25519.x value that still contains standard-alphabet + or / characters", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      setDoc(doc(alice, "users/alice"), {
+        publicKeys: {
+          x25519: { kty: "OKP", crv: "X25519", x: "abc+DEF/123" },
+          mlkem768: validPublicKeys().mlkem768,
+        },
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(),
+      })
+    );
   });
 });

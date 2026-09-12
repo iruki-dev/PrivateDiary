@@ -15,7 +15,13 @@ import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
-import { IncorrectOtpCodeError, OtpLockedOutError, type OtpSetupMaterial } from "@/lib/firebase/otp";
+import { reauthenticateWithGoogle, reauthenticateWithPassword } from "@/lib/firebase/auth";
+import {
+  IncorrectOtpCodeError,
+  OtpLockedOutError,
+  ReauthRequiredError,
+  type OtpSetupMaterial,
+} from "@/lib/firebase/otp";
 import {
   InvalidShamirSharesError,
   WrongPassphraseError,
@@ -411,13 +417,23 @@ function ResetPassphraseSection({
  * OTP (TOTP authenticator app) as an access gate — see
  * functions/src/index.ts and contexts/OtpContext.tsx for why this is a
  * server-verified gate rather than a cryptographic factor combined into
- * the diary's encryption. Enabling requires proving the passphrase first
- * (the same "prove a master credential before changing account security
- * settings" rule the Shamir setup/disable flows already follow — see
- * ChangePassphraseSection's doc comment further up), then scanning a QR
- * and confirming one live code; disabling requires a currently-valid code.
+ * the diary's encryption.
+ *
+ * Enabling asks for the passphrase first, matching the "prove a master
+ * credential before changing account security settings" rule the Shamir
+ * setup/disable flows follow — but that check alone is NOT what actually
+ * protects a first-time enrollment: it's a local AES-GCM unwrap the server
+ * never sees (lib/crypto/passphrase.ts's unwrapSeed doc comment — this
+ * codebase has no server-side "is this passphrase correct" check anywhere,
+ * by design). security-patch-v2: the server-verifiable gate is
+ * requireRecentAuth() in functions/src/index.ts, which the passphrase step
+ * here can't satisfy on its own. When startSetup() reports that (via
+ * ReauthRequiredError), this drops into a "reauth" phase that asks the
+ * user to prove the LOGIN credential instead — a password re-entry or a
+ * fresh Google popup — which the server CAN verify (via the ID token's
+ * auth_time claim), then retries. Disabling requires a currently-valid code.
  */
-type OtpPhase = "status" | "confirm-passphrase" | "setup" | "disable";
+type OtpPhase = "status" | "confirm-passphrase" | "reauth" | "setup" | "disable";
 
 function OtpSection({
   stageSeedFromPassphrase,
@@ -426,19 +442,59 @@ function OtpSection({
   stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
   discardStagedSeed: () => void;
 }) {
+  const { user } = useAuth();
   const { loading, otpEnabled, startSetup, confirmSetup, disable } = useOtp();
   const [phase, setPhase] = useState<OtpPhase>("status");
   const [passphrase, setPassphrase] = useState("");
+  const [reauthPassword, setReauthPassword] = useState("");
   const [setupMaterial, setSetupMaterial] = useState<OtpSetupMaterial | null>(null);
   const [code, setCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // Google-signed-in users have no login password to re-enter — see
+  // lib/firebase/auth.ts's reauthenticateWithGoogle doc comment.
+  const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
+
   function otpErrorMessage(err: unknown, fallback: string): string {
     if (err instanceof IncorrectOtpCodeError) return "코드가 올바르지 않습니다.";
     if (err instanceof OtpLockedOutError) return "시도 횟수를 초과했습니다. 잠시 후 다시 시도하세요.";
     return fallback;
+  }
+
+  function friendlyReauthError(err: unknown): string {
+    const code = err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "";
+    switch (code) {
+      case "auth/invalid-credential":
+      case "auth/wrong-password":
+        return "비밀번호가 올바르지 않습니다.";
+      case "auth/popup-closed-by-user":
+      case "auth/cancelled-popup-request":
+        return "다시 로그인이 취소되었습니다.";
+      default:
+        return "다시 로그인하지 못했습니다. 다시 시도해주세요.";
+    }
+  }
+
+  // Shared by both entry points into OTP setup (the passphrase step below,
+  // and the reauth retry) so ReauthRequiredError is handled in exactly one
+  // place: attempt startSetup(), and if the server says this session's
+  // sign-in isn't recent enough, drop into the reauth phase instead of
+  // surfacing it as a generic failure.
+  async function beginOtpSetup() {
+    try {
+      const material = await startSetup();
+      setSetupMaterial(material);
+      setPhase("setup");
+    } catch (err) {
+      if (err instanceof ReauthRequiredError) {
+        setError(null);
+        setPhase("reauth");
+        return;
+      }
+      throw err;
+    }
   }
 
   async function handleConfirmPassphrase(event: FormEvent<HTMLFormElement>) {
@@ -452,11 +508,39 @@ function OtpSection({
       await stageSeedFromPassphrase(passphrase);
       discardStagedSeed();
       setPassphrase("");
-      const material = await startSetup();
-      setSetupMaterial(material);
-      setPhase("setup");
+      await beginOtpSetup();
     } catch (err) {
       setError(err instanceof WrongPassphraseError ? "암호가 올바르지 않습니다." : "OTP 설정을 시작하지 못했습니다.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleReauthPassword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!user) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await reauthenticateWithPassword(user, reauthPassword);
+      setReauthPassword("");
+      await beginOtpSetup();
+    } catch (err) {
+      setError(friendlyReauthError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleReauthGoogle() {
+    if (!user) return;
+    setError(null);
+    setSubmitting(true);
+    try {
+      await reauthenticateWithGoogle(user);
+      await beginOtpSetup();
+    } catch (err) {
+      setError(friendlyReauthError(err));
     } finally {
       setSubmitting(false);
     }
@@ -500,6 +584,7 @@ function OtpSection({
     setPhase("status");
     setSetupMaterial(null);
     setPassphrase("");
+    setReauthPassword("");
     setCode("");
     setError(null);
   }
@@ -537,6 +622,52 @@ function OtpSection({
             취소
           </button>
         </form>
+      </section>
+    );
+  }
+
+  if (phase === "reauth") {
+    return (
+      <section className="w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold">다시 로그인해주세요</h2>
+        <p className="muted">
+          보안을 위해 OTP를 새로 등록하려면 로그인을 한 번 더 확인해야 합니다.
+        </p>
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
+          </p>
+        )}
+        {isGoogleAccount ? (
+          <button
+            type="button"
+            disabled={submitting}
+            onClick={() => void handleReauthGoogle()}
+            className="btn-primary w-full"
+          >
+            {submitting ? "확인 중..." : "Google로 다시 로그인"}
+          </button>
+        ) : (
+          <form onSubmit={handleReauthPassword} className="space-y-3">
+            <input
+              type="password"
+              required
+              autoFocus
+              autoComplete="current-password"
+              aria-label="로그인 비밀번호"
+              value={reauthPassword}
+              onChange={(e) => setReauthPassword(e.target.value)}
+              placeholder="로그인 비밀번호"
+              className="field"
+            />
+            <button type="submit" disabled={submitting} className="btn-primary w-full">
+              {submitting ? "확인 중..." : "다시 로그인"}
+            </button>
+          </form>
+        )}
+        <button type="button" onClick={cancel} className="w-full text-center text-xs link">
+          취소
+        </button>
       </section>
     );
   }

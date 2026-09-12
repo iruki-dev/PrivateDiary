@@ -8,8 +8,38 @@ service cloud.firestore {
     // that rules would otherwise never look at. Sizes are the real
     // encoded lengths plus generous headroom (e.g. an ML-KEM-768
     // ciphertext is 1088 bytes -> ~1452 base64 chars).
+    //
+    // security-patch-v2 / H2: despite the name, this used to check ONLY
+    // length, not that the value is actually base64 — a string like "!!!"
+    // passed. lib/crypto/encoding.ts's base64ToBytes throws
+    // "Invalid base64 character" on the first byte outside its lookup
+    // table, and lib/firebase/entries.ts's listEntries() calls it inside a
+    // bare Array.map with no per-entry try/catch, so ONE such document
+    // (entries are append-only and can never be deleted once written)
+    // rejects the whole listEntries() promise — app/entries/page.tsx's
+    // .catch just marks metadataLoaded and leaves `metadata` at its
+    // initial empty array, rendering "아직 작성한 일기가 없습니다" as if the
+    // diary were empty. Every OTHER entry, and the account itself, stays
+    // completely fine; nothing is actually lost — but the owner has no way
+    // to know that from what the UI shows them. Requiring the base64
+    // alphabet here means that document can never be written in the first
+    // place. This is the standard alphabet (A-Za-z0-9+/, `=` padding) that
+    // bytesToBase64 produces; publicKeys.x25519.x is the one field encoded
+    // with bytesToBase64Url instead (no padding, `-`/`_` in place of
+    // `+`/`/`) — see isB64Url below.
     function isB64(value, maxLen) {
-      return value is string && value.size() > 0 && value.size() <= maxLen;
+      return value is string && value.size() > 0 && value.size() <= maxLen
+          && value.matches('^[A-Za-z0-9+/]*={0,2}$');
+    }
+
+    // base64url (RFC 4648 §5), as produced by
+    // lib/crypto/encoding.ts's bytesToBase64Url — currently only
+    // publicKeys.x25519.x is encoded this way (bytesToBase64Url strips
+    // padding and swaps in `-`/`_`); everything else in this schema uses
+    // isB64 above.
+    function isB64Url(value, maxLen) {
+      return value is string && value.size() > 0 && value.size() <= maxLen
+          && value.matches('^[A-Za-z0-9_-]+$');
     }
 
     // The passphrase-wrapped master seed (ARCHITECTURE.md §3.1 step 5).
@@ -78,17 +108,34 @@ service cloud.firestore {
           && (!('privateWritingPeekAllowed' in prefs) || prefs.privateWritingPeekAllowed is bool);
     }
 
+    // security-patch-v2 / H1: the real ceiling on how many entries a real
+    // diary needs — daily writes for centuries. entrySeq/lastEntrySeq had
+    // no upper bound before this, so a single crafted entry with, say,
+    // entrySeq: 1e9 was accepted, and lib/firebase/entrySequence.ts's
+    // checkEntrySequence() (which every /entries page load runs) walks
+    // 1..highestSeen collecting missingSeqs — linear in that value, with no
+    // early exit (entries can never be deleted once written, so this isn't
+    // a one-time cost). Measured: ~30ms/35MB at 1e6, ~360ms/255MB at 1e7 —
+    // an entrySeq near 1e9 is tens of seconds and hundreds of MB on every
+    // single page load, indefinitely, with no way to remove the offending
+    // document. Bounding entrySeq here is what actually prevents the
+    // document from ever being written.
+    function maxEntrySeq() {
+      return 1000000;
+    }
+
     function isValidUserDoc(data) {
       return data.keys().hasOnly(['publicKeys', 'wrappedSeed', 'decryptionMethods', 'preferences', 'lastEntrySeq', 'createdAt'])
           && data.publicKeys.keys().hasOnly(['x25519', 'mlkem768'])
           && isB64(data.publicKeys.mlkem768, 2048)
           && data.publicKeys.x25519 is map
           && data.publicKeys.x25519.keys().hasOnly(['kty', 'crv', 'x'])
-          && isB64(data.publicKeys.x25519.x, 64)
+          && isB64Url(data.publicKeys.x25519.x, 64)
           && isValidWrappedSeed(data.wrappedSeed)
           && (!('decryptionMethods' in data) || isValidDecryptionMethods(data.decryptionMethods))
           && (!('preferences' in data) || isValidPreferences(data.preferences))
-          && (!('lastEntrySeq' in data) || (data.lastEntrySeq is int && data.lastEntrySeq >= 0));
+          && (!('lastEntrySeq' in data)
+              || (data.lastEntrySeq is int && data.lastEntrySeq >= 0 && data.lastEntrySeq <= maxEntrySeq()));
     }
 
     // OTP (TOTP authenticator app) as a server-enforced ACCESS GATE, not a
@@ -115,6 +162,23 @@ service cloud.firestore {
       return request.auth.token.get('otpEnabled', false) != true
           || (request.auth.token.get('otpVerified', false) == true
               && request.auth.token.get('otpVerifiedAt', 0) > request.time.toMillis() - 43200000); // 12h session
+    }
+
+    // security-patch-v2 / C1: `auth_time` is a standard ID-token claim —
+    // the Unix-seconds moment of the actual sign-in/reauthentication event.
+    // Unlike everything else on the token it does NOT advance on silent ID
+    // token refresh, so requiring it to be recent forces proof of the
+    // LOGIN credential (mirrors functions/src/authFreshness.ts's
+    // isAuthTimeFresh, which functions/src/index.ts's requireRecentAuth
+    // uses for the same reason — see that module's doc comment for the
+    // full threat this closes). Deliberately NOT folded into otpSatisfied():
+    // that function also gates `entries/{entryId}` reads, and a normal,
+    // long-lived-but-never-reauthenticated session reading its own diary
+    // is completely expected — only WRITES that grant or replace a master
+    // credential need this.
+    function isRecentAuth() {
+      return request.auth.token.auth_time is number
+          && request.time.toMillis() - (request.auth.token.auth_time * 1000) <= 300000; // 5 min
     }
 
     // The two fields on users/{uid} that carry no security weight and so
@@ -166,14 +230,40 @@ service cloud.firestore {
               || request.resource.data.lastEntrySeq >= resource.data.lastEntrySeq);
     }
 
+    // security-patch-v2 / C1: otpSatisfied() ALONE used to gate every
+    // credential-bearing update, but it's vacuously true the instant
+    // otpEnabled isn't set (`!= true` short-circuits) — which is every
+    // account that hasn't opted into OTP, i.e. most accounts. That meant a
+    // session-only attacker (stolen ID token / XSS — no passphrase, no
+    // Shamir shares) could freely overwrite wrappedSeed/publicKeys/
+    // decryptionMethods on any non-OTP account: a full key-reset destroys
+    // every existing entry irreversibly (append-only, undeletable), a
+    // wrappedSeed-only overwrite stops the real passphrase from ever
+    // unwrapping the seed again (arguably worse — not even a fresh usable
+    // seed is left behind), and a decryptionMethods.shamir overwrite
+    // strands whatever real shares were issued. None of the flows that
+    // legitimately perform these writes (passphrase change, Shamir setup/
+    // reissue/disable, full reset) can have their real proof — a local
+    // AES-GCM unwrap/combine — verified here; the server never sees a
+    // passphrase or shares by design (rule 1). What CAN be verified here
+    // is isRecentAuth() above. OTP-enabled accounts are UNCHANGED — they
+    // keep exactly otpSatisfied() as before, still covered by the
+    // "hardening" test suite below; OTP-disabled accounts now need
+    // isRecentAuth() as their baseline instead of nothing at all.
+    function credentialMutationAllowed() {
+      return request.auth.token.get('otpEnabled', false) == true
+          ? otpSatisfied()
+          : isRecentAuth();
+    }
+
     match /users/{uid} {
       allow read: if request.auth.uid == uid;
       allow create: if request.auth.uid == uid
                     && isValidUserDoc(request.resource.data);
-      // otpSatisfied() here is what closes the OTP-bypass hole: without it
-      // a caller holding nothing but a stolen session could overwrite
-      // `decryptionMethods.shamir.otpBypassVerifier` with a value whose
-      // preimage it chose, then replay that preimage through
+      // credentialMutationAllowed() here is what closes the OTP-bypass
+      // hole: without it a caller holding nothing but a stolen session
+      // could overwrite `decryptionMethods.shamir.otpBypassVerifier` with
+      // a value whose preimage it chose, then replay that preimage through
       // verifyShamirOtpBypass to mint itself otpVerified claims — reaching
       // every entry's ciphertext without the TOTP device, the passphrase,
       // or a single real Shamir share. The same gate stops that session
@@ -186,7 +276,7 @@ service cloud.firestore {
       // only then does the client rewrite wrappedSeed.
       allow update: if request.auth.uid == uid
                     && isKeyRotationRequest()
-                    && (isOtpUngatedChange() || otpSatisfied());
+                    && (isOtpUngatedChange() || credentialMutationAllowed());
       allow delete: if false;
     }
 
@@ -223,7 +313,7 @@ service cloud.firestore {
                                   'wrappedContentKeyIv', 'kemCiphertext',
                                   'ephemeralX25519PublicKey', 'aad', 'createdAt'])
           && data.uid is string
-          && data.entrySeq is int && data.entrySeq > 0
+          && data.entrySeq is int && data.entrySeq > 0 && data.entrySeq <= maxEntrySeq()
           && isB64(data.ciphertext, 500000)
           && isB64(data.iv, 32)
           && isB64(data.wrappedContentKey, 128)
