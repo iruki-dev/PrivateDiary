@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
+import { copyWithAutoClear } from "@/lib/security/clipboard";
 
 /**
  * Displays one recovery secret (a recovery key, or a single Shamir share)
@@ -55,7 +56,12 @@ export function SecretCard({
 
   async function handleCopy() {
     try {
-      await navigator.clipboard.writeText(text);
+      // lib/security/clipboard.ts: clears the clipboard again after a
+      // delay (if it still holds exactly what was copied) — a recovery
+      // key or Shamir share sitting in the clipboard indefinitely is
+      // readable by any extension with clipboard-read permission, or any
+      // other app on the device polling it.
+      await copyWithAutoClear(text);
       setCopied(true);
     } catch {
       // Clipboard access can fail (permissions, insecure context, etc.) —
@@ -80,6 +86,11 @@ export function SecretCard({
           파일로 다운로드
         </button>
       </div>
+      {copied && (
+        <p className="text-xs text-zinc-400">
+          복사한 내용은 30초 후 클립보드에서 자동으로 지워집니다.
+        </p>
+      )}
     </div>
   );
 }

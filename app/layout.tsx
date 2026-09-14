@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/contexts/Providers";
 import { NavBar } from "@/components/NavBar";
+import { SecurityWarningBanner } from "@/components/SecurityWarningBanner";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -58,6 +59,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         <Providers>
+          <SecurityWarningBanner />
           <NavBar />
           {children}
         </Providers>

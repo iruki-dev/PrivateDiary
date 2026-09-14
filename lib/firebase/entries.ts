@@ -13,6 +13,7 @@ import {
 import { db } from "./config";
 import { getLastEntrySeq } from "./users";
 import { checkEntrySequence, type EntrySequenceIntegrity } from "./entrySequence";
+import { assertNativeIntegrity } from "@/lib/security/nativeIntegrity";
 export { checkEntrySequence } from "./entrySequence";
 export type { EntrySequenceIntegrity } from "./entrySequence";
 
@@ -113,6 +114,10 @@ export async function writeEntry(
   recipientPublicKeys: HybridPublicKeysRaw,
   plaintext: string
 ): Promise<string> {
+  // lib/security/nativeIntegrity.ts: refuses to encrypt (and therefore to
+  // hand the plaintext to encryptEntry at all) if a security-critical API
+  // this app's own crypto depends on has been tampered with.
+  assertNativeIntegrity();
   const entrySeq = await getNextEntrySeq(uid);
   const aad: EntryAAD = { uid, entrySeq, createdAt: new Date().toISOString() };
 
