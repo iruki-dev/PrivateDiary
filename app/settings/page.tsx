@@ -107,6 +107,12 @@ export default function SettingsPage() {
         <div className="flex w-full flex-col items-center gap-10 sm:gap-12">
           <PrivateWritingSection />
           <SessionSection />
+          <DailyEntryLimitSection
+            shamirConfig={shamirConfig}
+            stageSeedFromPassphrase={stageSeedFromPassphrase}
+            stageSeedFromShamirShares={stageSeedFromShamirShares}
+            discardStagedSeed={discardStagedSeed}
+          />
           <ChangePassphraseSection changePassphrase={changePassphrase} />
           {shamirConfig && (
             <ResetPassphraseSection
@@ -209,15 +215,8 @@ function PrivateWritingSection() {
  * below as ReauthRequiredError rather than a bare failure.
  */
 function SessionSection() {
-  const {
-    loading,
-    autoLockMinutes,
-    draftAutosave,
-    dailyEntryLimit,
-    setAutoLockMinutes,
-    setDraftAutosave,
-    setDailyEntryLimit,
-  } = usePreferences();
+  const { loading, autoLockMinutes, draftAutosave, setAutoLockMinutes, setDraftAutosave } =
+    usePreferences();
   const [error, setError] = useState<string | null>(null);
 
   if (loading) {
@@ -236,15 +235,6 @@ function SessionSection() {
       await setAutoLockMinutes(minutes);
     } catch (err) {
       setError(reauthMessage(err, "자동 잠금 설정을 저장하지 못했습니다."));
-    }
-  }
-
-  async function handleDailyEntryLimitChange(limit: number) {
-    setError(null);
-    try {
-      await setDailyEntryLimit(limit);
-    } catch (err) {
-      setError(reauthMessage(err, "일일 작성 한도를 저장하지 못했습니다."));
     }
   }
 
@@ -291,30 +281,6 @@ function SessionSection() {
       </div>
 
       <div className="space-y-2">
-        <label htmlFor="daily-entry-limit" className="block text-sm font-medium">
-          일일 작성 한도
-        </label>
-        <p className="muted">
-          하루에 저장할 수 있는 일기 개수를 제한합니다. 세션(로그인 상태)만 탈취한 공격자가
-          지울 수 없는 일기를 대량으로 끼워 넣는 것을 막기 위한 서버 측 방어이며, 계정을 처음
-          만들면 기본값이 이미 적용되어 있습니다. 값을 바꾸려면 암호나 백업 코드 수준의
-          본인 확인이 필요합니다.
-        </p>
-        <select
-          id="daily-entry-limit"
-          value={dailyEntryLimit}
-          onChange={(event) => void handleDailyEntryLimitChange(Number(event.target.value))}
-          className="field"
-        >
-          {DAILY_ENTRY_LIMIT_CHOICES.map((choice) => (
-            <option key={choice.limit} value={choice.limit}>
-              {choice.label}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="space-y-2">
         <p className="muted">
           작성 중인 일기를 기기에 임시 저장해두면, 탭이 닫히거나 브라우저가 꺼져도 글이 남습니다.
           다만 임시 저장본은 <strong>암호화되지 않은 상태로 그 기기에 저장</strong>되므로 기본값은
@@ -335,6 +301,228 @@ function SessionSection() {
           {error}
         </p>
       )}
+    </section>
+  );
+}
+
+type DailyLimitPhase = "status" | "prove";
+type DailyLimitProveMode = "passphrase" | "shamir";
+
+/**
+ * PENTEST FINDING F-2 follow-up: changing `security.dailyEntryLimit` used
+ * to only need firestore.rules' credentialMutationAllowed() (a valid OTP
+ * session, or — for non-OTP accounts — a login within the last 5 minutes)
+ * — the same bar as autoLockMinutes/draftAutosave. Per explicit request,
+ * this now ALSO requires proving the actual master credential
+ * (passphrase or K backup codes) first, exactly like issuing/reissuing
+ * backup codes does (ShamirSection below) — a stolen-but-recent session
+ * is no longer enough on its own to raise or disable the limit that
+ * bounds mass entry injection.
+ *
+ * Two independent layers, same shape as DeleteAccountSection:
+ *  1. CLIENT-SIDE (this component): stageSeedFromPassphrase/
+ *     stageSeedFromShamirShares — a local AES-GCM unwrap or Shamir combine
+ *     the server never sees. Only proving possession is needed here, so
+ *     the staged seed is discarded immediately rather than used for
+ *     anything.
+ *  2. SERVER-SIDE (unchanged): credentialMutationAllowed() still gates the
+ *     actual Firestore write (setDailyEntryLimit -> setUserPreferences),
+ *     since the server has no way to verify a passphrase or Shamir shares
+ *     at all (rule 1) and this remains the only proof it CAN check.
+ */
+function DailyEntryLimitSection({
+  shamirConfig,
+  stageSeedFromPassphrase,
+  stageSeedFromShamirShares,
+  discardStagedSeed,
+}: {
+  shamirConfig: { n: number; k: number } | null;
+  stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
+  stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
+  discardStagedSeed: () => void;
+}) {
+  const { loading, dailyEntryLimit, setDailyEntryLimit } = usePreferences();
+  const [phase, setPhase] = useState<DailyLimitPhase>("status");
+  const [proveMode, setProveMode] = useState<DailyLimitProveMode>("passphrase");
+  const [passphrase, setPassphrase] = useState("");
+  const [shareInputs, setShareInputs] = useState<string[]>(
+    shamirConfig ? Array(shamirConfig.k).fill("") : []
+  );
+  const [newLimit, setNewLimit] = useState(dailyEntryLimit);
+  const [error, setError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
+
+  if (loading) {
+    return null;
+  }
+
+  function cancel() {
+    discardStagedSeed();
+    setPhase("status");
+    setProveMode("passphrase");
+    setPassphrase("");
+    setShareInputs(shamirConfig ? Array(shamirConfig.k).fill("") : []);
+    setError(null);
+  }
+
+  function open() {
+    setError(null);
+    setMessage(null);
+    setNewLimit(dailyEntryLimit);
+    setPhase("prove");
+  }
+
+  function credentialErrorMessage(err: unknown): string {
+    if (err instanceof WrongPassphraseError) return "암호가 올바르지 않습니다.";
+    if (err instanceof InvalidShamirSharesError) return "백업 코드가 올바른 시드로 복원되지 않습니다.";
+    if (err instanceof ReauthRequiredError) {
+      return "보안 설정을 바꾸려면 최근에 로그인한 상태여야 합니다. 로그아웃 후 다시 로그인해 시도해주세요.";
+    }
+    return "일일 작성 한도를 저장하지 못했습니다.";
+  }
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (proveMode === "passphrase") {
+        await stageSeedFromPassphrase(passphrase);
+      } else {
+        await stageSeedFromShamirShares(shareInputs.map((s) => textToRecoverySecret(s)));
+      }
+      // Only proving possession here, exactly like ShamirSection's setup/
+      // disable flows — the limit change itself doesn't need the seed.
+      discardStagedSeed();
+      setPassphrase("");
+      await setDailyEntryLimit(newLimit);
+      setPhase("status");
+      setMessage("일일 작성 한도가 변경되었습니다.");
+    } catch (err) {
+      setError(credentialErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  if (phase === "prove") {
+    return (
+      <section className="w-full max-w-sm space-y-4">
+        <h2 className="text-lg font-semibold">일일 작성 한도 변경</h2>
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <p className="muted">
+            계속하려면 암호 또는 백업 코드로 본인임을 증명하세요.
+          </p>
+          <div className="flex gap-2" role="radiogroup" aria-label="본인 확인 방법">
+            <button
+              type="button"
+              role="radio"
+              aria-checked={proveMode === "passphrase"}
+              onClick={() => setProveMode("passphrase")}
+              className={`btn-sm flex-1 ${proveMode === "passphrase" ? "btn-primary" : "btn-secondary"}`}
+            >
+              암호로 인증
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={proveMode === "shamir"}
+              disabled={!shamirConfig}
+              onClick={() => setProveMode("shamir")}
+              className={`btn-sm flex-1 ${proveMode === "shamir" ? "btn-primary" : "btn-secondary"}`}
+            >
+              백업 코드로 인증
+            </button>
+          </div>
+          {proveMode === "passphrase" ? (
+            <input
+              type="password"
+              required
+              autoFocus
+              autoComplete="current-password"
+              aria-label="암호"
+              value={passphrase}
+              onChange={(e) => setPassphrase(e.target.value)}
+              placeholder="암호"
+              className="field"
+            />
+          ) : (
+            shamirConfig && (
+              <div className="space-y-2">
+                {shareInputs.map((value, i) => (
+                  <input
+                    key={i}
+                    type="text"
+                    required
+                    aria-label={`백업 코드 ${i + 1}`}
+                    value={value}
+                    onChange={(e) =>
+                      setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+                    }
+                    placeholder={`코드 ${i + 1}`}
+                    className="field-mono"
+                  />
+                ))}
+              </div>
+            )
+          )}
+          <label htmlFor="daily-entry-limit-new" className="block text-sm font-medium">
+            새 한도
+          </label>
+          <select
+            id="daily-entry-limit-new"
+            value={newLimit}
+            onChange={(event) => setNewLimit(Number(event.target.value))}
+            className="field"
+          >
+            {DAILY_ENTRY_LIMIT_CHOICES.map((choice) => (
+              <option key={choice.limit} value={choice.limit}>
+                {choice.label}
+              </option>
+            ))}
+          </select>
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-primary w-full">
+            {submitting ? "확인 중..." : "변경하기"}
+          </button>
+          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
+            취소
+          </button>
+        </form>
+      </section>
+    );
+  }
+
+  return (
+    <section className="w-full max-w-sm space-y-3 card">
+      <h2 className="text-lg font-semibold">일일 작성 한도</h2>
+      <p className="muted">
+        하루에 저장할 수 있는 일기 개수를 제한합니다. 세션(로그인 상태)만 탈취한 공격자가
+        지울 수 없는 일기를 대량으로 끼워 넣는 것을 막기 위한 서버 측 방어이며, 계정을 처음
+        만들면 기본값이 이미 적용되어 있습니다.
+      </p>
+      <p className="text-sm font-medium">
+        현재:{" "}
+        <strong>
+          {DAILY_ENTRY_LIMIT_CHOICES.find((c) => c.limit === dailyEntryLimit)?.label ??
+            `하루 ${dailyEntryLimit}개`}
+        </strong>
+      </p>
+      {message && (
+        <p role="status" className="success-text">
+          {message}
+        </p>
+      )}
+      <button type="button" onClick={open} className="btn-secondary w-full">
+        한도 변경 — 암호 또는 백업 코드 필요
+      </button>
     </section>
   );
 }
