@@ -31,6 +31,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // touch a real project even if emulator env vars are misconfigured.
 const PROJECT_ID = "demo-privatediary";
 
+/**
+ * Stand-in for a real entry ciphertext, long enough to clear the padding
+ * floor firestore.rules enforces (ARCHITECTURE.md §3.15). A genuine padded
+ * entry is at least 1024 + 16 bytes = 1388 base64 characters; a short
+ * placeholder like "ct" is now rejected outright, which is the point.
+ */
+const PADDED_CIPHERTEXT = "c".repeat(1400);
+
 let testEnv: RulesTestEnvironment;
 
 // Mirrors lib/crypto/codec.ts's publicKeysToStorage() exactly — x25519 is a
@@ -584,8 +592,8 @@ describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simu
       await setDoc(doc(db, "entries/entry1"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
     });
@@ -654,13 +662,13 @@ describe("entries/{entryId}", () => {
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
+        ciphertext: PADDED_CIPHERTEXT,
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
@@ -672,8 +680,8 @@ describe("entries/{entryId}", () => {
       addDoc(collection(alice, "entries"), {
         uid: "bob",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
@@ -685,44 +693,44 @@ describe("entries/{entryId}", () => {
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: "1",
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
   });
 
-  it("rejects an entry whose ciphertext exceeds the 500,000-char size cap", async () => {
+  it("rejects an entry whose ciphertext exceeds the 560,000-char size cap", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertFails(
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "x".repeat(500_001),
+        ciphertext: "x".repeat(560_001),
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
   });
 
-  it("allows an entry whose ciphertext is right at the 500,000-char size cap", async () => {
+  it("allows an entry whose ciphertext is right at the 560,000-char size cap", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "x".repeat(500_000),
+        ciphertext: "x".repeat(560_000),
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
@@ -735,8 +743,8 @@ describe("entries/{entryId}", () => {
       const ref = await addDoc(collection(db, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
       entryId = ref.id;
@@ -755,8 +763,8 @@ describe("entries/{entryId}", () => {
       await addDoc(collection(db, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
     });
@@ -775,8 +783,8 @@ describe("entries/{entryId}", () => {
       const ref = await addDoc(collection(db, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
       entryId = ref.id;
@@ -925,13 +933,13 @@ describe("hardening: entries/{entryId} shape validation", () => {
     return {
       uid: "alice",
       entrySeq: 1,
-      ciphertext: "ct",
+      ciphertext: PADDED_CIPHERTEXT,
       iv: "iv",
       wrappedContentKey: "wck",
       wrappedContentKeyIv: "wckiv",
       kemCiphertext: "kemct",
       ephemeralX25519PublicKey: "eph",
-      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
       createdAt: new Date(),
       ...overrides,
     };
@@ -940,6 +948,44 @@ describe("hardening: entries/{entryId} shape validation", () => {
   it("accepts a well-formed entry", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(addDoc(collection(alice, "entries"), validEntry()));
+  });
+
+  // Length padding (ARCHITECTURE.md §3.15) is a ratchet: entries written
+  // before it stay readable, but nothing can write an unpadded one again.
+  // These three are what make that true at the server rather than being a
+  // promise the client makes to itself.
+  it("rejects an entry whose aad carries no format tag — padding is mandatory now", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({ aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" } })
+      )
+    );
+  });
+
+  it("rejects an unrecognized format tag", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({
+          aad: {
+            uid: "alice",
+            entrySeq: 1,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            fmt: "padded-v99",
+          },
+        })
+      )
+    );
+  });
+
+  it("rejects a ciphertext too short to have been padded at all", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(collection(alice, "entries"), validEntry({ ciphertext: "c".repeat(1379) }))
+    );
   });
 
   it("rejects a half-formed junk document (entries can never be deleted once written)", async () => {
@@ -954,7 +1000,7 @@ describe("hardening: entries/{entryId} shape validation", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
-        validEntry({ aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" } })
+        validEntry({ aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" } })
       )
     );
   });
@@ -964,7 +1010,7 @@ describe("hardening: entries/{entryId} shape validation", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
-        validEntry({ aad: { uid: "alice", entrySeq: 99, createdAt: "2026-01-01T00:00:00.000Z" } })
+        validEntry({ aad: { uid: "alice", entrySeq: 99, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" } })
       )
     );
   });
@@ -974,7 +1020,7 @@ describe("hardening: entries/{entryId} shape validation", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
-        validEntry({ entrySeq: 0, aad: { uid: "alice", entrySeq: 0, createdAt: "2026-01-01T00:00:00.000Z" } })
+        validEntry({ entrySeq: 0, aad: { uid: "alice", entrySeq: 0, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" } })
       )
     );
   });

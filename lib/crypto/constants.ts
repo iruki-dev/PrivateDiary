@@ -42,3 +42,24 @@ export const SHAMIR_WRAP_KEY_LENGTH = 32;
 // passphrase path could produce, since the passphrase never touches this key.
 export const SHAMIR_OTP_BYPASS_INFO = "diary-shamir-otp-bypass-v1";
 export const SHAMIR_OTP_BYPASS_VERIFIER_LENGTH = 32;
+
+// Entry length padding (ARCHITECTURE.md §3.15, lib/crypto/padding.ts).
+// AES-GCM adds only a 16-byte tag, so an unpadded ciphertext's size is the
+// plaintext's size — readable from the database without any key. These
+// constants define the record format that hides it.
+//
+// The tag lives in the ENTRY AAD rather than in a plain document field so
+// that stripping it is detected: the AAD is authenticated, so an entry
+// downgraded to "unpadded" fails its tag check instead of quietly decoding
+// as raw text. Entries written before this existed have no tag and are
+// still read as raw text — see decryptEntry.
+export const ENTRY_FORMAT_PADDED = "padded-v1" as const;
+export const ENTRY_LENGTH_PREFIX_BYTES = 4;
+
+// Everything at or below this pads to exactly this size, so short entries
+// are indistinguishable from each other. 1 KiB covers a few hundred Korean
+// characters — roughly "a bad day, two sentences" through "an ordinary
+// day, a paragraph", which is the distinction most worth hiding and the
+// one Padmé's fine buckets would otherwise expose. The cost is under a
+// kilobyte per entry.
+export const MIN_PADDED_ENTRY_LENGTH = 1024;

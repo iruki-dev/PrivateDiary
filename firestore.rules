@@ -239,17 +239,43 @@ service cloud.firestore {
                                   'ephemeralX25519PublicKey', 'aad', 'createdAt'])
           && data.uid is string
           && data.entrySeq is int && data.entrySeq > 0
-          && isB64(data.ciphertext, 500000)
+          // Ceiling raised from 500,000 with length padding (§3.15): the
+          // same entry now stores up to ~12% larger, and an unchanged cap
+          // would have started rejecting entries that used to fit.
+          && isB64(data.ciphertext, 560000)
+          // Floor, not an exact check. A padded record is at least
+          // MIN_PADDED_ENTRY_LENGTH (1024) + the 16-byte GCM tag = 1040
+          // bytes, which is 1388 base64 chars; anything materially shorter
+          // was not padded at all. Rules cannot verify real padding — the
+          // bytes are opaque here — but they can refuse the obvious case,
+          // so "every stored entry is padded" is structural rather than a
+          // promise the client makes to itself.
+          && data.ciphertext.size() >= 1380
           && isB64(data.iv, 32)
           && isB64(data.wrappedContentKey, 128)
           && isB64(data.wrappedContentKeyIv, 32)
           && isB64(data.kemCiphertext, 2048)
           && isB64(data.ephemeralX25519PublicKey, 64)
           && data.createdAt is timestamp
-          && data.aad.keys().hasOnly(['uid', 'entrySeq', 'createdAt'])
+          && data.aad.keys().hasOnly(['uid', 'entrySeq', 'createdAt', 'fmt'])
           && data.aad.uid == data.uid
           && data.aad.entrySeq == data.entrySeq
-          && data.aad.createdAt is string && data.aad.createdAt.size() <= 40;
+          && data.aad.createdAt is string && data.aad.createdAt.size() <= 40
+          // REQUIRED on every new entry (ARCHITECTURE.md §3.15). This is a
+          // ratchet: existing unpadded entries keep working (they are only
+          // ever read, and `entries` is append-only), but nothing can write
+          // an unpadded one again — not a stale client, not a tampered one.
+          //
+          // DEPLOY ORDER MATTERS because of that: ship the client that
+          // writes `fmt` BEFORE deploying these rules, or in-flight clients
+          // lose the ability to save. Same constraint in reverse if the
+          // client is ever rolled back.
+          //
+          // The tag is inside the AEAD's AAD as well, which is what makes
+          // it meaningful rather than decorative: strip it from the stored
+          // document and the entry stops decrypting instead of quietly
+          // being read as unpadded.
+          && 'fmt' in data.aad && data.aad.fmt == 'padded-v1';
     }
 
     match /entries/{entryId} {

@@ -1,3 +1,5 @@
+import type { ENTRY_FORMAT_PADDED } from "./constants";
+
 /** In-memory (raw byte) types used by lib/crypto's core functions. */
 
 export interface HybridPublicKeysRaw {
@@ -35,6 +37,19 @@ export interface EntryAAD {
   uid: string;
   entrySeq: number;
   createdAt: string;
+  /**
+   * Plaintext record format (ARCHITECTURE.md §3.15). Present and equal to
+   * ENTRY_FORMAT_PADDED on everything this code writes; absent only on
+   * entries written before length padding existed, which are read back as
+   * raw UTF-8.
+   *
+   * This belongs in the AAD, not in a plain document field, precisely
+   * because the AAD is authenticated: an attacker who strips it to make a
+   * padded entry decode as raw text changes the AAD bytes, and the GCM tag
+   * check fails. A bare field would let the same downgrade happen
+   * silently.
+   */
+  fmt?: typeof ENTRY_FORMAT_PADDED;
 }
 
 export interface EncryptedEntryPayload {
