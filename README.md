@@ -52,6 +52,16 @@ lib/
 
   passphraseStrength.ts   # zxcvbn-ts 강도 추정 (lib/crypto 밖 — 암호화 연산이 아닌 UX 휴리스틱)
 
+  security/          # 브라우저/로컬 환경 자체가 변조되었을 가능성을 감지하는 모듈.
+                      # lib/crypto와 달리 암호 연산을 하지 않고, window/navigator를 읽는다
+                      # ("클라이언트 환경 변조 감지" 참조).
+    nativeIntegrity.ts  # crypto.subtle 등 보안 관련 전역 API가 확장 프로그램/주입 스크립트에
+                        # 의해 후킹되었는지 감지 — 감지되면 SeedContext/entries.ts가 잠금 해제·
+                        # 저장·복호화를 실제로 차단한다.
+    environmentSignals.ts # 안전하지 않은 컨텍스트/자동화 도구/개발자 도구 열림 — 차단은 안 하고
+                          # 배너로 경고만 하는 약한 신호들
+    clipboard.ts        # 복사한 백업 코드를 일정 시간 후 자동으로 지움
+
 hooks/
   usePageTitle.ts              # 탭 제목
 
@@ -65,6 +75,8 @@ contexts/
                        # unlock/lock/changePassphrase/resetKeys 외에, 백업 코드 설정/재발급을
                        # 위한 stage/prepare/confirm 3단계 API와 resetPassphraseWithShamirShares
                        # 보유 (암호·백업 코드 어느 쪽으로도 서로를 관리 가능 — 아래 참조)
+  SecurityContext.tsx # lib/security의 검사를 주기적으로 돌리고 배너(SecurityWarningBanner)에
+                       # 상태를 제공. Provider 트리 맨 바깥 — 로그인 여부와 무관하게 항상 감시
 
 components/
   SecretReveal.tsx              # "한 번만 보여주고 다시 못 봄" 공용 스캐폴드 (백업 코드에 재사용)
@@ -72,6 +84,8 @@ components/
   OtpGate.tsx                     # OTP 활성화 시 코드 입력 전까지 children을 가리는 래퍼 (/entries에서 사용)
   OtpQrCard.tsx                    # OTP 설정용 QR(otpauth:// URI) + 수동 입력 코드 표시
   PassphraseStrengthMeter.tsx
+  SecurityWarningBanner.tsx         # 모든 페이지 상단에 렌더 — 변조 감지 시 차단 안내(닫기 불가),
+                                    # 그 외 약한 신호는 개별적으로 닫을 수 있는 경고
 
 app/                  # Next.js App Router 페이지
   login/, signup/, settings/, write/, entries/
@@ -174,3 +188,15 @@ pnpm exec firebase deploy --only firestore:rules,firestore:indexes,functions --p
 ## 보안 헤더 / CSP
 
 `next.config.ts`에 정적 헤더(HSTS, X-Frame-Options 등), `proxy.ts`에 요청마다 새로 발급하는 CSP nonce가 있다. Next.js App Router의 하이드레이션 스크립트에 nonce를 붙이려면 페이지가 요청마다 렌더링되어야 하므로 `app/layout.tsx`에 `export const dynamic = "force-dynamic"`을 설정했다 (이 앱은 서버 데이터 의존성이 없는 클라이언트 앱이라 정적 생성의 이점이 크지 않고, 개인용 규모에서 요청마다 렌더링하는 비용은 무시할 만하다).
+
+## 클라이언트 환경 변조 감지 (security-patch-v3)
+
+CSP·Firestore 규칙·Cloud Functions는 전부 "이 페이지가 보낸 코드가 실제로 이 앱이 배포한 코드"라는 전제 위에 서 있다. 악성 브라우저 확장 프로그램(특히 Chrome MV3의 `world: "MAIN"`처럼 페이지 자신의 실행 컨텍스트에 직접 주입되는 콘텐츠 스크립트)이나 이미 감염된 로컬 환경은 이 페이지의 CSP를 전혀 거치지 않는다 — 브라우저가 사용자 권한으로 직접 실행해주는 코드이지, 이 페이지가 로드한 "콘텐츠"가 아니기 때문이다. **이건 코드로 완전히 막을 수 있는 문제가 아니다.** `lib/security/`는 이 전제를 정면으로 인정하고, "완전 차단"이 아니라 "최선을 다한 감지 + 가능하면 차단, 안 되면 경고"를 목표로 한다.
+
+- **`lib/security/nativeIntegrity.ts`** — `crypto.subtle.encrypt/decrypt`, `Uint8Array`, `TextEncoder`, `JSON.stringify` 등 이 앱의 암호화가 실제로 의존하는 전역 API들이 후킹(몽키패치)되었는지 두 가지 신호로 감지한다: (1) 이 모듈이 로드된 시점에 캡처해둔 참조와 지금 값이 다른지, (2) `Function.prototype.toString`(이것도 앱 로드 시점에 미리 캡처해둠 — 그래야 이것 자체가 조작당해도 속지 않는다)으로 확인했을 때 브라우저 네이티브 코드 모양(`[native code]`)이 아닌지. 감지되면 `contexts/SeedContext.tsx`의 잠금 해제/암호 변경/백업 코드 설정/초기화, `lib/firebase/entries.ts`의 저장, `app/entries/page.tsx`의 복호화가 **실제로 차단**된다 — 이 프로젝트에서 "코드로 막을 수 있는 부분"에 해당하는 유일한 지점이다.
+  - **한계를 숨기지 않는다**: 확장 프로그램의 콘텐츠 스크립트가 이 앱의 JS보다 먼저 실행되면(예: `document_start`), 그 스크립트는 이 모듈이 기준값을 캡처하기도 전에 API를 이미 바꿔치기했을 수 있고, 그 경우 이 검사는 "원래부터 이런 모양이었나 보다" 하고 속을 수 있다 — 이건 브라우저 확장 프로그램 권한 모델 자체의 한계이지, 이 코드가 서툴러서가 아니다. 그래서 이 검사는 앱 시작 시 1회뿐 아니라 민감한 작업 직전마다, 그리고 백그라운드에서 주기적으로/탭 포커스 복귀 시에도 다시 돈다 — 늦게 주입되거나 세션 도중에 걸리는 변조까지 넓게 잡기 위해서다.
+- **`lib/security/environmentSignals.ts`** — 차단할 정도는 아니지만 알려줄 가치가 있는 신호들: 안전하지 않은 컨텍스트(HTTP), `navigator.webdriver`(자동화/원격 제어 도구), 개발자 도구가 열려 있음(콘솔 오브젝트 프리뷰 getter 트릭 — 완벽하지 않은 휴리스틱임을 명시). 각각 정상적인 이유로도 참일 수 있어(개발자 본인, 접근성 도구 등) 닫을 수 있는 경고로만 표시한다.
+- **`lib/security/clipboard.ts`** — 백업 코드를 클립보드에 복사하면 30초 후 자동으로 지운다(단, 그 사이 사용자가 클립보드에 다른 걸 복사하지 않았을 때만 — `readText()`로 먼저 확인). 클립보드는 `clipboardRead` 권한을 가진 확장 프로그램이나 같은 기기의 다른 프로그램이 읽을 수 있는 채널이라, 페이지 코드가 "그 사이"에 끼어들어 막을 방법은 없다 — 노출 시간을 줄이는 것이 최선이다(1Password/Bitwarden 등이 쓰는 것과 같은 완화책).
+- **`components/SecurityWarningBanner.tsx`** — 위 신호들을 모든 페이지 상단에 표시. 변조 감지는 닫기 버튼이 없다(실제로 차단되고 있는 상태이므로 숨겨봐야 의미가 없다); 나머지는 개별적으로 닫을 수 있다.
+
+이 기능 전체가 "완전한 차단"이 아니라 "탐지 가능한 범위를 최대한 넓히는 심층 방어"라는 점은 각 모듈 자체의 doc comment에도 반복해서 적어뒀다 — 과장해서 안전하다고 주장하는 것이 실제로 더 위험하기 때문이다.

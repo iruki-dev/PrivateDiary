@@ -23,6 +23,7 @@ import {
   InvalidShamirSharesError,
   WrongPassphraseError,
 } from "@/lib/crypto";
+import { assertNativeIntegrity, EnvironmentTamperedError } from "@/lib/security/nativeIntegrity";
 
 type UnlockMode = "passphrase" | "shamir";
 
@@ -133,7 +134,33 @@ export default function EntriesPage() {
     (async () => {
       const plaintexts: Record<string, string> = {};
       const errors: Record<string, string> = {};
+      // lib/security/nativeIntegrity.ts: checked once before decrypting
+      // this batch rather than never at all — a tampered environment
+      // could be reading `plaintexts` (or the private keys used to
+      // produce it) regardless of what this component does with the
+      // result, so this refuses to even attempt decryption instead of
+      // handing plaintext to it.
+      try {
+        assertNativeIntegrity();
+      } catch (err) {
+        if (!cancelled && err instanceof EnvironmentTamperedError) {
+          const message = "브라우저 환경이 변조된 것으로 감지되어 복호화를 중단했습니다.";
+          setDecryptErrors(Object.fromEntries(metadata.map((entry) => [entry.id, message])));
+          setDecryptedForMetadata(metadata);
+        }
+        return;
+      }
       for (const entry of metadata) {
+        // security-patch-v2 / H2: payload is null when
+        // lib/firebase/entries.ts's listEntries() couldn't even decode
+        // this entry's stored fields (not a decryption failure — there's
+        // no ciphertext to feed decryptEntry in the first place). Still
+        // surfaced per-entry, same as a real TamperedCiphertextError,
+        // rather than only being visible as a gap in dev console output.
+        if (!entry.payload) {
+          errors[entry.id] = "손상된 항목 — 저장된 데이터를 읽을 수 없습니다.";
+          continue;
+        }
         try {
           plaintexts[entry.id] = await decryptEntry(privateKeys, entry.payload);
         } catch {

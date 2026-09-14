@@ -17,6 +17,7 @@ import {
   disableShamirMethod as disableShamirMethodFirestore,
   updateWrappedSeed,
 } from "@/lib/firebase/users";
+import { assertNativeIntegrity } from "@/lib/security/nativeIntegrity";
 import {
   combineSeedShamir,
   deriveHybridKeyPair,
@@ -248,8 +249,18 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     setStatus("unlocked");
   }, []);
 
+  // Every function below that touches the raw seed or private keys calls
+  // assertNativeIntegrity() first (lib/security/nativeIntegrity.ts) — the
+  // one point in this app where a detected browser-extension/environment
+  // tamper (see that module's doc comment for what it can and can't catch)
+  // actually BLOCKS something, by refusing to unwrap/wrap/derive/split at
+  // all rather than handing plaintext key material to a compromised
+  // environment. contexts/SecurityContext.tsx's banner is the "warn"
+  // counterpart for the case where the user hasn't triggered one of these
+  // yet.
   const unlock = useCallback(
     async (passphrase: string) => {
+      assertNativeIntegrity();
       if (!wrappedSeedRef.current) {
         throw new Error("No wrapped seed available to unlock");
       }
@@ -262,6 +273,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const unlockWithShamirShares = useCallback(
     async (shares: Uint8Array[]) => {
+      assertNativeIntegrity();
       if (!shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
@@ -279,6 +291,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const changePassphrase = useCallback(
     async (oldPassphrase: string, newPassphrase: string) => {
+      assertNativeIntegrity();
       if (!user || !wrappedSeedRef.current) {
         throw new Error("No wrapped seed available");
       }
@@ -291,6 +304,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const resetPassphraseWithShamirShares = useCallback(
     async (shares: Uint8Array[], newPassphrase: string) => {
+      assertNativeIntegrity();
       if (!user || !shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
@@ -306,6 +320,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const resetKeys = useCallback(
     async (newPassphrase: string) => {
+      assertNativeIntegrity();
       if (!user) {
         throw new Error("Not signed in");
       }
@@ -329,6 +344,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const stageSeedFromPassphrase = useCallback(
     async (passphrase: string) => {
+      assertNativeIntegrity();
       if (!wrappedSeedRef.current) {
         throw new Error("No wrapped seed available");
       }
@@ -341,6 +357,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const stageSeedFromShamirShares = useCallback(
     async (shares: Uint8Array[]) => {
+      assertNativeIntegrity();
       if (!shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
@@ -355,6 +372,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
 
   const prepareShamir = useCallback(
     async (n: number, k: number) => {
+      assertNativeIntegrity();
       if (!stagedSeedRef.current) {
         throw new Error("No staged seed to prepare Shamir shares from");
       }

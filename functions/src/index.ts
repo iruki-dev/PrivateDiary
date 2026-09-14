@@ -2,8 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
-import { onCall, HttpsError } from "firebase-functions/v2/https";
+import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
 import { generateSecret, generateURI, verify } from "otplib";
+import { isAuthTimeFresh, REAUTH_REQUIRED_MESSAGE } from "./authFreshness";
 
 /**
  * TOTP (OTP app) as a server-enforced access gate — NOT a cryptographic
@@ -43,6 +44,10 @@ const OTP_SECRETS_COLLECTION = "otpSecrets";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 60_000;
 const OTP_SESSION_MS = 12 * 60 * 60 * 1000; // 12h — how long a successful verify stays valid
+// security-patch-v2: how recently the caller must have actually signed in
+// (not just refreshed an existing ID token) to enroll OTP for the first
+// time on this account — see authFreshness.ts and startOtpSetup below.
+const REAUTH_MAX_AGE_MS = 5 * 60 * 1000;
 const APP_CHECK_ENFORCE = process.env.APP_CHECK_ENFORCE === "true";
 
 interface OtpSecretDoc {
@@ -51,6 +56,18 @@ interface OtpSecretDoc {
   createdAt: Timestamp;
   failedAttempts: number;
   lockedUntil: Timestamp | null;
+  /**
+   * security-patch-v2 (replay protection): the TOTP time step consumed by
+   * the last successful verify, fed back in as `afterTimeStep` so the same
+   * step can never validate twice — otplib's own documented pattern (see
+   * its TOTP VerifyResult doc comment: "Save timeStep to prevent reuse").
+   * Without this, a code observed once (shoulder-surfed, logged by a
+   * proxy, read from a synced clipboard) stays replayable for the rest of
+   * its ~90s acceptance window (epochTolerance below).
+   * Optional: absent for accounts whose last successful verify predates
+   * this field, and for freshly-created (never yet verified) docs.
+   */
+  lastUsedTimeStep?: number;
 }
 
 function requireAuth(uid: string | undefined): asserts uid is string {
@@ -81,44 +98,121 @@ async function mergeClaims(uid: string, patch: Record<string, unknown>): Promise
 }
 
 /**
+ * security-patch-v2: throws unless `request`'s ID token was minted from an
+ * actual sign-in (not a refresh) within the last REAUTH_MAX_AGE_MS — see
+ * authFreshness.ts's module doc for why this, rather than a passphrase
+ * check, is the real fix for startOtpSetup's first-enroll hole. The
+ * client (lib/firebase/otp.ts) matches on REAUTH_REQUIRED_MESSAGE
+ * specifically to tell "please reauthenticate" apart from every other
+ * failed-precondition this module throws.
+ */
+function requireRecentAuth(request: CallableRequest): void {
+  const authTime = request.auth?.token.auth_time;
+  if (typeof authTime !== "number" || !isAuthTimeFresh(authTime, Date.now(), REAUTH_MAX_AGE_MS)) {
+    throw new HttpsError("failed-precondition", REAUTH_REQUIRED_MESSAGE);
+  }
+}
+
+type VerifyStoredOtpOutcome =
+  | { kind: "not-set-up" }
+  | { kind: "locked-out" }
+  | { kind: "wrong-code" }
+  | { kind: "ok"; doc: FirebaseFirestore.DocumentReference; data: OtpSecretDoc };
+
+/**
  * Verifies `code` against the stored secret for `uid`, enforcing a simple
  * lockout after repeated failures (a bare 6-digit TOTP code only has ~20
  * bits of entropy — without this, verifyOtp/disableOtp would be brute-
  * forceable by anyone who already has a valid signed-in session).
+ *
+ * security-patch-v2: the whole read-check-verify-write cycle now runs
+ * inside one Firestore transaction. It used to be a plain read followed by
+ * an update computed from that read — N concurrent calls could all read
+ * the same failedAttempts value and each independently write attempts+1,
+ * so a parallel brute-force burst could blow straight through
+ * MAX_FAILED_ATTEMPTS without ever tripping the lockout. A transaction
+ * serializes every read-modify-write against this document, closing that
+ * race. It also now feeds the last consumed TOTP time step back in via
+ * afterTimeStep, so a code that already succeeded once can never
+ * succeed again for the rest of its acceptance window (replay protection
+ * — see OtpSecretDoc.lastUsedTimeStep's doc comment).
+ *
+ * The transaction callback returns a plain outcome value and never
+ * throws — a caught bug from the first draft of this fix: throwing INSIDE
+ * a Firestore transaction callback aborts the whole transaction and
+ * discards every write staged via tx.update() before the throw, exactly
+ * like an uncommitted SQL transaction. The old code's plain (non-
+ * transactional) `await ref.update(...); throw ...;` never had this
+ * problem — `.update()` resolves and commits before the throw runs — so
+ * moving straight to "stage the write, then throw" inside runTransaction
+ * silently made the wrong-code write never persist at all: every failed
+ * attempt still returned "Incorrect code." to the caller, but
+ * failedAttempts stayed at 0 forever and the lockout could never trigger.
+ * Caught by src/otpFlow.integration.test.ts's M4 test failing against a
+ * real emulator, not by inspection. Throwing the actual HttpsError only
+ * AFTER the transaction has resolved is what keeps the write and the
+ * error correctly paired.
  */
 async function verifyStoredOtp(
   uid: string,
   code: string
 ): Promise<{ doc: FirebaseFirestore.DocumentReference; data: OtpSecretDoc }> {
   const ref = getFirestore().collection(OTP_SECRETS_COLLECTION).doc(uid);
-  const snapshot = await ref.get();
-  if (!snapshot.exists) {
-    throw new HttpsError("failed-precondition", "OTP is not set up for this account.");
-  }
-  const data = snapshot.data() as OtpSecretDoc;
 
-  if (data.lockedUntil && data.lockedUntil.toMillis() > Date.now()) {
-    throw new HttpsError(
-      "resource-exhausted",
-      "Too many incorrect attempts. Try again in a minute."
-    );
-  }
+  const outcome: VerifyStoredOtpOutcome = await getFirestore().runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    if (!snapshot.exists) {
+      return { kind: "not-set-up" };
+    }
+    const data = snapshot.data() as OtpSecretDoc;
 
-  const result = await verify({ secret: data.secret, token: code, epochTolerance: 30 });
-  if (!result.valid) {
-    const failedAttempts = (data.failedAttempts ?? 0) + 1;
-    await ref.update({
-      failedAttempts,
-      lockedUntil:
-        failedAttempts >= MAX_FAILED_ATTEMPTS
-          ? Timestamp.fromMillis(Date.now() + LOCKOUT_MS)
-          : null,
+    if (data.lockedUntil && data.lockedUntil.toMillis() > Date.now()) {
+      return { kind: "locked-out" };
+    }
+
+    const result = await verify({
+      secret: data.secret,
+      token: code,
+      epochTolerance: 30,
+      afterTimeStep: data.lastUsedTimeStep,
     });
-    throw new HttpsError("permission-denied", "Incorrect code.");
-  }
+    if (!result.valid) {
+      const failedAttempts = (data.failedAttempts ?? 0) + 1;
+      tx.update(ref, {
+        failedAttempts,
+        lockedUntil:
+          failedAttempts >= MAX_FAILED_ATTEMPTS
+            ? Timestamp.fromMillis(Date.now() + LOCKOUT_MS)
+            : null,
+      });
+      return { kind: "wrong-code" };
+    }
 
-  await ref.update({ failedAttempts: 0, lockedUntil: null });
-  return { doc: ref, data };
+    // Only TOTP's VerifyResultValid carries `timeStep` (HOTP's doesn't) —
+    // this module only ever verifies TOTP codes (no `counter` is ever
+    // passed), but narrow structurally rather than assume the union member.
+    const timeStep = "timeStep" in result ? result.timeStep : undefined;
+    tx.update(ref, {
+      failedAttempts: 0,
+      lockedUntil: null,
+      ...(timeStep !== undefined ? { lastUsedTimeStep: timeStep } : {}),
+    });
+    return { kind: "ok", doc: ref, data };
+  });
+
+  switch (outcome.kind) {
+    case "not-set-up":
+      throw new HttpsError("failed-precondition", "OTP is not set up for this account.");
+    case "locked-out":
+      throw new HttpsError(
+        "resource-exhausted",
+        "Too many incorrect attempts. Try again in a minute."
+      );
+    case "wrong-code":
+      throw new HttpsError("permission-denied", "Incorrect code.");
+    case "ok":
+      return { doc: outcome.doc, data: outcome.data };
+  }
 }
 
 // `invoker: "public"` is explicit rather than relying on onCall's normal
@@ -151,10 +245,28 @@ async function verifyStoredOtp(
  * also reset failedAttempts/lockedUntil, clearing verifyStoredOtp's
  * brute-force lockout as a side effect.
  *
- * Enrolling for the FIRST time (no document, or a setup that was started
- * but never confirmed) stays unauthenticated beyond the session itself —
- * there is no credential to prove yet, and an unconfirmed secret grants
- * nothing until confirmOtpSetup succeeds against it.
+ * security-patch-v2: enrolling for the FIRST time (no document, or a setup
+ * that was started but never confirmed) USED to stay unauthenticated
+ * beyond the session itself, on the reasoning that there's no OTP
+ * credential to prove yet. That reasoning missed what confirming a
+ * first-time enrollment actually grants: otpEnabled claims that make
+ * firestore.rules' otpSatisfied() gate start demanding a code — one only
+ * the caller who just ran this function knows. A session-only attacker
+ * (stolen ID token, XSS — no passphrase, no Shamir shares) could enroll
+ * an authenticator of their own choosing on a victim's account that never
+ * had OTP, then the real owner can never satisfy the gate again:
+ * disableOtp and every recovery path that touches wrappedSeed both
+ * require otpSatisfied() or a valid current code, and the attacker holds
+ * the only authenticator that can produce one. That's a permanent,
+ * unrecoverable read lockout — worse than the already-fixed re-enroll
+ * hole below, since Shamir's OTP-bypass can't help either (Shamir being
+ * configured doesn't stop THIS attack from succeeding in the first
+ * place). Since there's still no OTP credential to prove for a genuine
+ * first enrollment, requireRecentAuth() below checks the one thing that
+ * IS server-verifiable without breaking zero-knowledge (rule 1): that
+ * this session's ID token was minted from an actual sign-in — proving the
+ * LOGIN credential, not the passphrase — in the last few minutes, not
+ * just carried forward by silent token refresh. See authFreshness.ts.
  */
 export const startOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
   requireAuth(request.auth?.uid);
@@ -165,6 +277,8 @@ export const startOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CH
     // Throws (and counts toward the lockout) unless the caller proves the
     // authenticator that is currently registered on this account.
     await verifyStoredOtp(uid, requireCode(request.data));
+  } else {
+    requireRecentAuth(request);
   }
 
   const secret = generateSecret();
