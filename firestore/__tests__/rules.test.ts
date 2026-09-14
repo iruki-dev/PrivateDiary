@@ -176,7 +176,17 @@ describe("users/{uid}", () => {
     );
   });
 
-  it("allows a full reset (publicKeys + wrappedSeed change together, createdAt untouched)", async () => {
+  // "초기화" (a full key reset — brand-new publicKeys + wrappedSeed
+  // together) was removed as a feature: unlike a passphrase change, it had
+  // no cryptographic requirement to prove the OLD passphrase (issuing a
+  // fresh, unrelated seed doesn't need to unwrap anything), which made it
+  // the one credential-mutating write reachable by session-only proof
+  // (recent login or a valid OTP session) alone — a real permission
+  // mismatch for an operation that destroys every existing entry
+  // irreversibly. `publicKeys` is now immutable after creation, full stop
+  // (isKeyRotationRequest()) — this replaces the old "allows a full reset"
+  // test with its exact opposite.
+  it("rejects any update that changes publicKeys — the removed 초기화 full-reset shape", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
@@ -186,14 +196,39 @@ describe("users/{uid}", () => {
       });
     });
 
+    // Even a fully-authenticated, recently-signed-in owner — the same
+    // level of proof that legitimately changes wrappedSeed below — cannot
+    // touch publicKeys. This isn't an auth-level gate at all; it's a flat
+    // "no update may ever touch this field" rule.
     const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
-    await assertSucceeds(
+    await assertFails(
       updateDoc(doc(alice, "users/alice"), {
         publicKeys: {
           x25519: { kty: "OKP", crv: "X25519", x: "newX25519" },
           mlkem768: "newMlkem768",
         },
         wrappedSeed: validWrappedSeed("reset"),
+      })
+    );
+  });
+
+  it("rejects changing publicKeys alone too, even with everything else unchanged", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), {
+        publicKeys: {
+          x25519: { kty: "OKP", crv: "X25519", x: "newX25519" },
+          mlkem768: "newMlkem768",
+        },
       })
     );
   });

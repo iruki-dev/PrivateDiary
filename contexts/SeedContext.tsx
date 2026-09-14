@@ -14,7 +14,6 @@ import { usePreferences } from "./PreferencesContext";
 import { clearAllDrafts } from "@/lib/drafts";
 import {
   getUserKeyRecord,
-  resetUserKeyRecord,
   setShamirMethod as setShamirMethodFirestore,
   disableShamirMethod as disableShamirMethodFirestore,
   updateWrappedSeed,
@@ -23,7 +22,6 @@ import { assertNativeIntegrity } from "@/lib/security/nativeIntegrity";
 import {
   combineSeedShamir,
   deriveHybridKeyPair,
-  generateMasterSeed,
   rewrapSeed,
   splitSeedShamir,
   unwrapSeed,
@@ -140,15 +138,6 @@ interface SeedContextValue {
    * seed on file.
    */
   resetPassphraseWithShamirShares: (shares: Uint8Array[], newPassphrase: string) => Promise<void>;
-  /**
-   * "초기화" (ARCHITECTURE.md §3.6 rule 5): issues a brand-new seed and
-   * discards the old one, including any configured Shamir shares. Every
-   * previously written entry becomes permanently undecryptable — the
-   * caller (UI) is responsible for warning the user before calling this.
-   * This is the true last resort; a merely-forgotten passphrase should use
-   * resetPassphraseWithShamirShares instead, which keeps every entry.
-   */
-  resetKeys: (newPassphrase: string) => Promise<void>;
 
   /** Currently enabled decryption methods, or null while still loading. */
   decryptionMethods: DecryptionMethodsConfig | null;
@@ -341,30 +330,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     [user, deriveAndUnlock]
   );
 
-  const resetKeys = useCallback(
-    async (newPassphrase: string) => {
-      assertNativeIntegrity();
-      if (!user) {
-        throw new Error("Not signed in");
-      }
-      const seed = generateMasterSeed();
-      const { publicKeys: newPublicKeys, privateKeys } = deriveHybridKeyPair(seed);
-      const wrapped = await wrapSeed(seed, newPassphrase);
-      wipeBytes(seed, privateKeys.x25519SecretKey, privateKeys.mlkem768SecretKey);
-
-      await resetUserKeyRecord(user.uid, newPublicKeys, wrapped);
-
-      wrappedSeedRef.current = wrapped;
-      shamirWrappedSeedRef.current = null;
-      publicKeysRef.current = newPublicKeys;
-      setPublicKeys(newPublicKeys);
-      setDecryptionMethods({ shamir: null });
-      wipePrivateKeys();
-      setStatus("locked");
-    },
-    [user, wipePrivateKeys]
-  );
-
   const stageSeedFromPassphrase = useCallback(
     async (passphrase: string) => {
       assertNativeIntegrity();
@@ -507,7 +472,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         refresh,
         changePassphrase,
         resetPassphraseWithShamirShares,
-        resetKeys,
         decryptionMethods,
         stageSeedFromPassphrase,
         stageSeedFromShamirShares,

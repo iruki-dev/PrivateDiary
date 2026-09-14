@@ -413,29 +413,44 @@ export const disableOtp = onCall({ invoker: "public" }, async (request) => {
  * "append-only for the app" with "erasable by its owner", and doing it
  * here keeps the rules themselves absolute.
  *
- * Note what is NOT required: the passphrase or the Shamir shares. Those
- * prove you can READ the diary, and destruction does not need read access —
- * demanding them would mean someone who forgot their passphrase could never
- * close their account, which is the opposite of the point.
+ * TWO INDEPENDENT layers gate reaching this, and this function is only
+ * ever the second one:
  *
- * What IS required mirrors firestore.rules' credentialMutationAllowed()
- * (security-patch-v2 / C1), because this function performs the single most
- * destructive credential-adjacent mutation there is — more so than
- * overwriting wrappedSeed, since that at least leaves a recoverable
- * account behind. An earlier version of this function required an OTP
- * code ONLY when OTP was enabled and left non-OTP accounts (the majority)
- * checked by nothing but requireAuth() — exactly the gap C1 closed for
- * wrappedSeed/publicKeys/decryptionMethods, just reopened here for the one
- * mutation with no undo at all. Now:
- *   - OTP enabled: a valid current code, as before.
- *   - OTP not enabled: requireRecentAuth() — proof of an actual sign-in
- *     (not a silently-refreshed token) within the last few minutes. A pure
- *     token-theft attacker who never had the login credential cannot
- *     produce this on demand.
+ *  1. CLIENT-SIDE, before this function is even called: app/settings/page.tsx's
+ *     DeleteAccountSection requires proving the passphrase or K backup
+ *     codes first (stageSeedFromPassphrase/stageSeedFromShamirShares — the
+ *     same "prove one master credential" rule every other account-security
+ *     change follows). An earlier version of both this function and that
+ *     UI skipped this entirely, reasoning that destruction needs no read
+ *     access — but that missed that login credentials and the diary
+ *     passphrase are deliberately different secrets in this design (rule
+ *     3), so gating the single most destructive, least reversible action
+ *     behind only the weaker one was a genuine permission mismatch.
+ *  2. SERVER-SIDE, here: mirrors firestore.rules' credentialMutationAllowed()
+ *     (security-patch-v2 / C1) and remains regardless of layer 1, because
+ *     this function has no way to verify a passphrase or Shamir shares AT
+ *     ALL (rule 1 — the server never sees them) — layer 1's proof is
+ *     purely local and nothing about it reaches here. This is the one
+ *     check that IS server-verifiable:
+ *       - OTP enabled: a valid current code.
+ *       - OTP not enabled: requireRecentAuth() — proof of an actual
+ *         sign-in (not a silently-refreshed token) within the last few
+ *         minutes. A pure token-theft attacker who never had the login
+ *         credential cannot produce this on demand.
  *
- * "초기화" (resetKeys, ARCHITECTURE.md §3.6 rule 5) remains the lighter
- * option: it issues a new seed, leaving the old ciphertext stored but
- * permanently unreadable. This removes the ciphertext too.
+ * Losing BOTH the passphrase and Shamir shares means layer 1 can never be
+ * satisfied — there is deliberately no bypass for that case (a UI button
+ * that skips layer 1 "because I lost my passphrase" would be trivially
+ * clickable by anyone holding a stolen session too, reopening exactly the
+ * hole this closes). "초기화" — a lighter option that used to exist here,
+ * issuing a fresh seed while leaving old ciphertext unreadable but the
+ * account alive — was removed for the same reason: it had no cryptographic
+ * tie to the old passphrase either, so it was reachable by session-only
+ * proof alone (see firestore.rules' isKeyRotationRequest() doc comment).
+ * Losing both credentials is already unrecoverable by design
+ * (ARCHITECTURE.md rule 4); this accepts that it also means the account
+ * itself can no longer be closed by anyone but an attacker who'd need the
+ * same proof a legitimate owner no longer has either.
  */
 export const deleteAccount = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);

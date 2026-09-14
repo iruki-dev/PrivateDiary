@@ -241,21 +241,46 @@ service cloud.firestore {
     // without defining the function — filled in here. It covers all
     // self-service mutations of the account owner's OWN document:
     //   1. Passphrase change (Phase 4 rewrapSeed): only wrappedSeed changes.
-    //   2. Full key reset ("초기화", ARCHITECTURE.md §3.6 rule 5): a brand
-    //      new seed, so publicKeys + wrappedSeed (+ decryptionMethods reset
-    //      to {}) change together.
-    //   3. Enabling/disabling one decryption method: only `decryptionMethods`
+    //   2. Enabling/disabling one decryption method: only `decryptionMethods`
     //      (a single sub-field of it, via dotted-path updates) changes.
-    //   4. A display-preference change (§3.9): only `preferences` changes —
+    //   3. A display-preference change (§3.9): only `preferences` changes —
     //      reachable via isOtpUngatedChange() without either gate below.
-    //   5. A security-preference change (§3.11, §3.12): only `security`
+    //   4. A security-preference change (§3.11, §3.12): only `security`
     //      changes — reachable only via credentialMutationAllowed() below,
     //      same as a credential-bearing field.
-    //   6. An entry-sequence bump from the write path: only `lastEntrySeq`.
+    //   5. An entry-sequence bump from the write path: only `lastEntrySeq`.
     // In every case createdAt is immutable and the document shape stays
     // valid. This only ever narrows what an authenticated uid can do to ITS
     // OWN doc — the outer `request.auth.uid == uid` check is what actually
     // prevents cross-user access, not this function.
+    //
+    // `publicKeys` is IMMUTABLE after creation — no update may touch it at
+    // all. There used to be a second legitimate shape here: "초기화" (a
+    // full key reset issuing a brand-new seed, so publicKeys + wrappedSeed
+    // changed together), gated by nothing but credentialMutationAllowed()
+    // — the same OTP-or-recent-login bar as an ordinary passphrase change.
+    // That was a genuine permission mismatch: unlike a passphrase change
+    // (which mechanically requires unwrapping the OLD wrappedSeed first,
+    // so knowing the passphrase is already a hard prerequisite, not just a
+    // UI step), issuing a brand-new unrelated seed has no cryptographic
+    // tie to the old one — nothing about the write itself required
+    // proving the passphrase or Shamir shares. That made it the one
+    // operation reachable by session-only proof (a stolen-but-recent login,
+    // or a valid OTP session) alone, silently destroying every existing
+    // entry for the real owner. The feature was removed rather than
+    // patched with a client-side credential-staging step (as deleteAccount
+    // was, see that function's doc comment) — requiring the passphrase to
+    // reach "I lost the passphrase" recovery is a contradiction, and the
+    // only two ways to resolve it are pinning it to a stronger check that
+    // is trivially bypassable in practice (unhelpful) or pinning it to
+    // client-side possession (which real "lost everything" wouldn't have
+    // by definition) — so there is no shape of this feature that is both
+    // useful and safe. Losing both master credentials is unrecoverable by
+    // design (ARCHITECTURE.md rule 4); this closes the one path that let
+    // that unrecoverable state be reached by someone OTHER than the real
+    // owner. This is enforced here, not just by removing the client UI,
+    // so a hand-crafted write bypassing the app entirely still can't
+    // reproduce the old shape.
     //
     // `lastEntrySeq` is additionally forced to move forward only: letting
     // it rewind would let a stale or hostile client hand out entry
@@ -263,6 +288,7 @@ service cloud.firestore {
     function isKeyRotationRequest() {
       return isValidUserDoc(request.resource.data)
           && request.resource.data.createdAt == resource.data.createdAt
+          && request.resource.data.publicKeys == resource.data.publicKeys
           && (!('lastEntrySeq' in request.resource.data)
               || !('lastEntrySeq' in resource.data)
               || request.resource.data.lastEntrySeq >= resource.data.lastEntrySeq);
@@ -273,15 +299,17 @@ service cloud.firestore {
     // otpEnabled isn't set (`!= true` short-circuits) — which is every
     // account that hasn't opted into OTP, i.e. most accounts. That meant a
     // session-only attacker (stolen ID token / XSS — no passphrase, no
-    // Shamir shares) could freely overwrite wrappedSeed/publicKeys/
-    // decryptionMethods on any non-OTP account: a full key-reset destroys
-    // every existing entry irreversibly (append-only, undeletable), a
-    // wrappedSeed-only overwrite stops the real passphrase from ever
-    // unwrapping the seed again (arguably worse — not even a fresh usable
-    // seed is left behind), and a decryptionMethods.shamir overwrite
-    // strands whatever real shares were issued. None of the flows that
-    // legitimately perform these writes (passphrase change, Shamir setup/
-    // reissue/disable, full reset) can have their real proof — a local
+    // Shamir shares) could freely overwrite wrappedSeed/decryptionMethods
+    // on any non-OTP account: a wrappedSeed-only overwrite stops the real
+    // passphrase from ever unwrapping the seed again (arguably the worst
+    // case — not even a fresh usable seed is left behind), and a
+    // decryptionMethods.shamir overwrite strands whatever real shares were
+    // issued. (publicKeys was also in this original list — a "초기화"
+    // full-reset flow existed back then — but that flow was later removed
+    // entirely and publicKeys is now immutable after creation regardless
+    // of this gate; see isKeyRotationRequest()'s doc comment.) None of the
+    // flows that legitimately perform these writes (passphrase change,
+    // Shamir setup/reissue/disable) can have their real proof — a local
     // AES-GCM unwrap/combine — verified here; the server never sees a
     // passphrase or shares by design (rule 1). What CAN be verified here
     // is isRecentAuth() above. OTP-enabled accounts are UNCHANGED — they
@@ -305,9 +333,10 @@ service cloud.firestore {
       // verifyShamirOtpBypass to mint itself otpVerified claims — reaching
       // every entry's ciphertext without the TOTP device, the passphrase,
       // or a single real Shamir share. The same gate stops that session
-      // from destroying the account by overwriting `wrappedSeed` /
-      // `publicKeys` (entries are append-only and undeletable, so a seed
-      // overwrite is unrecoverable).
+      // from destroying the account by overwriting `wrappedSeed`
+      // (entries are append-only and undeletable, so a seed overwrite is
+      // unrecoverable). `publicKeys` doesn't need this gate at all — it's
+      // immutable after creation (isKeyRotationRequest()), full stop.
       //
       // The Shamir recovery path still works with the OTP device gone:
       // verifyShamirOtpBypass sets otpVerified from real shares FIRST, and

@@ -232,33 +232,6 @@ export async function updateWrappedSeed(uid: string, wrappedSeed: WrappedSeed): 
 }
 
 /**
- * "초기화" (Phase 4, ARCHITECTURE.md §3.6 rule 5): a brand new seed replaces
- * the old one, so publicKeys change too. `createdAt` is deliberately left
- * untouched (not included in this update) — firestore.rules' isKeyRotationRequest()
- * requires it stay equal to the existing value, matching the original
- * account creation time rather than the reset time.
- *
- * Any configured Shamir shares are cleared: shares split against the OLD
- * seed can no longer reconstruct anything meaningful once the seed
- * changes. This is the true last resort — for a merely-forgotten
- * passphrase, prefer updateWrappedSeed() via Shamir proof instead, which
- * keeps the same seed (and thus every existing entry) intact.
- */
-export async function resetUserKeyRecord(
-  uid: string,
-  publicKeys: HybridPublicKeysRaw,
-  wrappedSeed: WrappedSeed
-): Promise<void> {
-  await runCredentialMutation(() =>
-    updateDoc(doc(db, "users", uid), {
-      publicKeys: publicKeysToStorage(publicKeys),
-      wrappedSeed: wrappedSeedToStorage(wrappedSeed),
-      decryptionMethods: {},
-    })
-  );
-}
-
-/**
  * Sets up or reissues Shamir shares — the same write either way. Reissuing
  * overwrites `wrappedSeed` and `otpBypassVerifier` with freshly wrap-keyed
  * values (see lib/crypto/recovery.ts), which is what actually invalidates

@@ -34,15 +34,15 @@ import {
   WrongPassphraseError,
   recoverySecretToText,
   textToRecoverySecret,
+  type DecryptionMethodsConfig,
 } from "@/lib/crypto";
 
 export default function SettingsPage() {
-  const { user, status: authStatus } = useAuth();
+  const { status: authStatus } = useAuth();
   const {
     status: seedStatus,
     changePassphrase,
     resetPassphraseWithShamirShares,
-    resetKeys,
     decryptionMethods,
     stageSeedFromPassphrase,
     stageSeedFromShamirShares,
@@ -134,9 +134,12 @@ export default function SettingsPage() {
             disableShamir={disableShamir}
           />
 
-          <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
-
-          <DeleteAccountSection />
+          <DeleteAccountSection
+            stageSeedFromPassphrase={stageSeedFromPassphrase}
+            stageSeedFromShamirShares={stageSeedFromShamirShares}
+            discardStagedSeed={discardStagedSeed}
+            decryptionMethods={decryptionMethods}
+          />
         </div>
       </OtpGate>
     </main>
@@ -1253,176 +1256,126 @@ function ShamirSection({
   );
 }
 
-const RESET_CONFIRM_PHRASE = "초기화합니다";
-
-function ResetKeysSection({
-  userEmail,
-  resetKeys,
-}: {
-  userEmail: string;
-  resetKeys: (newPassphrase: string) => Promise<void>;
-}) {
-  const [open, setOpen] = useState(false);
-  const [confirmPhrase, setConfirmPhrase] = useState("");
-  const [newPassphrase, setNewPassphrase] = useState("");
-  const [confirmPassphrase, setConfirmPassphrase] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  const [done, setDone] = useState(false);
-
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-
-    if (confirmPhrase !== RESET_CONFIRM_PHRASE) {
-      setError(`확인 문구를 정확히 입력해주세요: "${RESET_CONFIRM_PHRASE}"`);
-      return;
-    }
-    if (newPassphrase !== confirmPassphrase) {
-      setError("새 암호 확인이 일치하지 않습니다.");
-      return;
-    }
-    if (!checkPassphraseStrength(newPassphrase, [userEmail]).isStrongEnough) {
-      setError("새 암호가 너무 약합니다.");
-      return;
-    }
-
-    setSubmitting(true);
-    try {
-      await resetKeys(newPassphrase);
-      setDone(true);
-      setOpen(false);
-    } catch (err) {
-      console.error("resetKeys failed", err);
-      setError("초기화하지 못했습니다. 다시 시도해주세요.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <section className="w-full max-w-sm space-y-4 card-danger">
-      <div>
-        <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">초기화</h2>
-        <p className="mt-2 muted">
-          암호와 백업 코드를 모두 잃어버렸다면 새 시드를 발급하는 방법뿐입니다.{" "}
-          <strong>지금까지 작성한 모든 일기는 영구히 복호화할 수 없게 됩니다.</strong> 설정해둔
-          백업 코드도 함께 꺼집니다. 이 작업은 되돌릴 수 없습니다.
-        </p>
-      </div>
-
-      {done && (
-        <p role="status" className="success-text">
-          초기화되었습니다. 새 암호로 로그인하세요.
-        </p>
-      )}
-
-      {!open ? (
-        <button
-          type="button"
-          onClick={() => {
-            setOpen(true);
-            setDone(false);
-          }}
-          className="btn-danger-outline w-full"
-        >
-          초기화 시작
-        </button>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <p className="muted">
-            계속하려면 아래에 <code className="font-mono">{RESET_CONFIRM_PHRASE}</code>를
-            입력하세요.
-          </p>
-          <input
-            type="text"
-            required
-            aria-label="확인 문구"
-            value={confirmPhrase}
-            onChange={(e) => setConfirmPhrase(e.target.value)}
-            placeholder={RESET_CONFIRM_PHRASE}
-            className="field"
-          />
-          <input
-            type="password"
-            required
-            autoComplete="new-password"
-            aria-label="새 암호"
-            value={newPassphrase}
-            onChange={(e) => setNewPassphrase(e.target.value)}
-            placeholder="새 암호"
-            className="field"
-          />
-          <PassphraseStrengthMeter passphrase={newPassphrase} userInputs={[userEmail]} />
-          <input
-            type="password"
-            required
-            autoComplete="new-password"
-            aria-label="새 암호 확인"
-            value={confirmPassphrase}
-            onChange={(e) => setConfirmPassphrase(e.target.value)}
-            placeholder="새 암호 확인"
-            className="field"
-          />
-          {error && (
-            <p role="alert" className="error-text">
-              {error}
-            </p>
-          )}
-          <button type="submit" disabled={submitting} className="btn-danger w-full">
-            {submitting ? "초기화 중..." : "영구적으로 초기화"}
-          </button>
-        </form>
-      )}
-    </section>
-  );
-}
-
 const DELETE_CONFIRM_PHRASE = "계정을 삭제합니다";
 
-type DeleteAccountPhase = "confirm" | "reauth";
+type DeleteAccountPhase = "credential" | "confirm" | "reauth";
+type DeleteCredentialMode = "passphrase" | "shamir";
 
 /**
  * Permanently deletes the account and every entry in it.
  *
- * Distinct from "초기화" above, and the copy has to make the difference
- * obvious because they sound alike: 초기화 issues a new seed and leaves the
- * old ciphertext stored-but-unreadable (cryptographic erasure — the account
- * survives and keeps working). This removes the rows themselves and the
- * login with them. An app that will hold someone's diary for years needs
- * both: one for "I lost my credentials but want to keep going", one for "I
- * want to not be here any more".
+ * This used to be paired with a lighter "초기화" (full key reset) option
+ * above it — issue a brand-new seed, leave the old ciphertext stored but
+ * permanently unreadable, keep the account itself alive. That feature was
+ * removed entirely (see firestore.rules' isKeyRotationRequest() doc
+ * comment for the full reasoning): unlike every other credential-mutating
+ * write in this file, it had no cryptographic requirement to prove the
+ * OLD passphrase, which made it reachable by session-only proof alone —
+ * silently destroying every existing entry for the real owner. There is
+ * no safe shape of that feature (requiring the passphrase defeats its own
+ * "I forgot the passphrase" purpose), so account deletion below is now the
+ * only self-service option once both master credentials are gone — and
+ * this function itself requires proving one of them (see below), so that
+ * scenario has genuinely no self-service path left. That is an accepted,
+ * deliberate trade-off, not an oversight.
  *
- * The work happens in functions/src/index.ts's deleteAccount, because
- * firestore.rules denies delete on users and entries unconditionally
- * (append-only, ARCHITECTURE.md §5) and only the Admin SDK can go around
- * that. It requires a current OTP code when OTP is enabled; on accounts
- * WITHOUT OTP it requires requireRecentAuth() instead — proof of an actual
- * sign-in in the last few minutes, mirroring firestore.rules'
- * credentialMutationAllowed() — never the passphrase (see that function's
- * doc comment for why). This is the single most destructive action in the
- * app, so unlike SessionSection above it gets the SAME full reauth
- * ceremony as OtpSection's first-time enrollment (password re-entry or a
- * fresh Google popup) rather than just a message telling the user to sign
- * out and back in themselves — unhelpfully stopping short right before the
- * one action a panicking or malicious actor would most want to retry.
+ * TWO INDEPENDENT layers gate this, deliberately stacked rather than
+ * either replacing the other:
+ *
+ *  1. CLIENT-SIDE, before anything is sent to the server: the same "prove
+ *     one of the two co-equal master credentials" rule that gates every
+ *     other account-security change in this file (OtpSection, ShamirSection,
+ *     ChangePassphraseSection) — passphrase OR K backup codes, staged via
+ *     stageSeedFromPassphrase/stageSeedFromShamirShares exactly like those.
+ *     This closes a real gap the first version of this function had: it
+ *     only asked for the login-level proof below, which meant anyone
+ *     holding a valid, sufficiently fresh SESSION — not necessarily the
+ *     diary's actual master credential — could destroy the whole account.
+ *     Login credentials and the diary passphrase are deliberately
+ *     different secrets in this design (ARCHITECTURE.md rule 3); gating
+ *     the single most destructive, least reversible action behind only
+ *     the weaker of the two didn't match its severity.
+ *  2. SERVER-SIDE (functions/src/index.ts's deleteAccount): a current OTP
+ *     code when OTP is enabled, or requireRecentAuth() otherwise — proof
+ *     of an actual sign-in in the last few minutes. This layer can't be
+ *     replaced by the client-side one above: the server has no way to
+ *     verify a passphrase or Shamir shares at all (rule 1 — it never sees
+ *     them), so this remains the only proof the SERVER itself can check
+ *     before executing the deletion. Surfaced here as the "reauth" phase
+ *     (password re-entry or a fresh Google popup, then automatic retry)
+ *     when it's the piece still missing.
+ *
+ * Passphrase and backup codes stay genuinely equivalent here, same as
+ * everywhere else in this app (ARCHITECTURE.md §3.7) — losing the
+ * passphrase alone never locks someone out of deleting their own account,
+ * as long as they still hold K backup codes.
  */
-function DeleteAccountSection() {
+function DeleteAccountSection({
+  stageSeedFromPassphrase,
+  stageSeedFromShamirShares,
+  discardStagedSeed,
+  decryptionMethods,
+}: {
+  stageSeedFromPassphrase: (passphrase: string) => Promise<void>;
+  stageSeedFromShamirShares: (shares: Uint8Array[]) => Promise<void>;
+  discardStagedSeed: () => void;
+  decryptionMethods: DecryptionMethodsConfig | null;
+}) {
   const { user } = useAuth();
   const { otpEnabled } = useOtp();
   const router = useRouter();
+  const shamirConfig = decryptionMethods?.shamir ?? null;
 
-  const [phase, setPhase] = useState<DeleteAccountPhase>("confirm");
+  const [phase, setPhase] = useState<DeleteAccountPhase>("credential");
   const [open, setOpen] = useState(false);
+  const [credentialMode, setCredentialMode] = useState<DeleteCredentialMode>("passphrase");
+  const [passphrase, setPassphrase] = useState("");
+  const [shareInputs, setShareInputs] = useState<string[]>(
+    shamirConfig ? Array(shamirConfig.k).fill("") : []
+  );
   const [confirmPhrase, setConfirmPhrase] = useState("");
   const [code, setCode] = useState("");
   const [reauthPassword, setReauthPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  // A staged seed left behind by an abandoned attempt (navigated away
+  // mid-flow) must not sit in memory indefinitely — same discipline
+  // ShamirSection follows.
+  useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
+
   // Google-signed-in users have no login password to re-enter — see
   // lib/firebase/auth.ts's reauthenticateWithGoogle doc comment.
   const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
+
+  function credentialErrorMessage(err: unknown): string {
+    if (err instanceof WrongPassphraseError) return "암호가 올바르지 않습니다.";
+    if (err instanceof InvalidShamirSharesError) return "백업 코드가 올바른 시드로 복원되지 않습니다.";
+    return "본인 확인에 실패했습니다.";
+  }
+
+  async function handleProveCredential(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    setSubmitting(true);
+    try {
+      if (credentialMode === "passphrase") {
+        await stageSeedFromPassphrase(passphrase);
+      } else {
+        await stageSeedFromShamirShares(shareInputs.map((s) => textToRecoverySecret(s)));
+      }
+      // Only proving possession here — deleteAccount doesn't need the seed
+      // itself (destruction needs no read access; see the module doc
+      // above), so nothing more is done with it once proven.
+      discardStagedSeed();
+      setPassphrase("");
+      setPhase("confirm");
+    } catch (err) {
+      setError(credentialErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   // Shared by the confirm form and the reauth retry (mirrors OtpSection's
   // beginOtpSetup) so ReauthRequiredError is handled in exactly one place:
@@ -1512,13 +1465,114 @@ function DeleteAccountSection() {
   }
 
   function cancel() {
+    discardStagedSeed();
     setOpen(false);
-    setPhase("confirm");
+    setPhase("credential");
+    setCredentialMode("passphrase");
+    setPassphrase("");
+    setShareInputs(shamirConfig ? Array(shamirConfig.k).fill("") : []);
     setConfirmPhrase("");
     setCode("");
     setReauthPassword("");
     setError(null);
     setSubmitting(false);
+  }
+
+  if (phase === "credential") {
+    return (
+      <section className="w-full max-w-sm space-y-4 card-danger">
+        <div>
+          <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">계정 삭제</h2>
+          <p className="mt-2 muted">
+            작성한 모든 일기와 계정 자체를 서버에서{" "}
+            <strong>완전히, 되돌릴 수 없이</strong> 삭제합니다.
+          </p>
+          <p className="mt-2 muted">
+            남기고 싶은 일기가 있다면 먼저{" "}
+            <Link href="/entries" className="link">
+              지난 일기
+            </Link>{" "}
+            화면에서 잠금을 해제하고 내보내두세요. 삭제 후에는 어떤 방법으로도 되살릴 수 없습니다.
+          </p>
+        </div>
+
+        {!open ? (
+          <button type="button" onClick={() => setOpen(true)} className="btn-danger-outline w-full">
+            계정 삭제 시작
+          </button>
+        ) : (
+          <form onSubmit={handleProveCredential} className="space-y-3">
+            <p className="muted">
+              계속하려면 암호 또는 백업 코드로 본인임을 증명하세요.
+            </p>
+            <div className="flex gap-2" role="radiogroup" aria-label="본인 확인 방법">
+              <button
+                type="button"
+                role="radio"
+                aria-checked={credentialMode === "passphrase"}
+                onClick={() => setCredentialMode("passphrase")}
+                className={`btn-sm flex-1 ${credentialMode === "passphrase" ? "btn-primary" : "btn-secondary"}`}
+              >
+                암호로 인증
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={credentialMode === "shamir"}
+                disabled={!shamirConfig}
+                onClick={() => setCredentialMode("shamir")}
+                className={`btn-sm flex-1 ${credentialMode === "shamir" ? "btn-primary" : "btn-secondary"}`}
+              >
+                백업 코드로 인증
+              </button>
+            </div>
+            {credentialMode === "passphrase" ? (
+              <input
+                type="password"
+                required
+                autoFocus
+                autoComplete="current-password"
+                aria-label="암호"
+                value={passphrase}
+                onChange={(e) => setPassphrase(e.target.value)}
+                placeholder="암호"
+                className="field"
+              />
+            ) : (
+              shamirConfig && (
+                <div className="space-y-2">
+                  {shareInputs.map((value, i) => (
+                    <input
+                      key={i}
+                      type="text"
+                      required
+                      aria-label={`백업 코드 ${i + 1}`}
+                      value={value}
+                      onChange={(e) =>
+                        setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+                      }
+                      placeholder={`코드 ${i + 1}`}
+                      className="field-mono"
+                    />
+                  ))}
+                </div>
+              )
+            )}
+            {error && (
+              <p role="alert" className="error-text">
+                {error}
+              </p>
+            )}
+            <button type="submit" disabled={submitting} className="btn-danger w-full">
+              {submitting ? "확인 중..." : "다음"}
+            </button>
+            <button type="button" onClick={cancel} className="w-full text-center text-xs link">
+              취소
+            </button>
+          </form>
+        )}
+      </section>
+    );
   }
 
   if (phase === "reauth") {
@@ -1568,73 +1622,53 @@ function DeleteAccountSection() {
     );
   }
 
+  // phase === "confirm": credential already proven above — this is only
+  // the typed "are you sure" confirmation (and the OTP code the server
+  // itself separately requires).
   return (
     <section className="w-full max-w-sm space-y-4 card-danger">
-      <div>
-        <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">계정 삭제</h2>
-        <p className="mt-2 muted">
-          작성한 모든 일기와 계정 자체를 서버에서 완전히 지웁니다. 위의 &ldquo;초기화&rdquo;는
-          계정을 남긴 채 기존 일기만 읽을 수 없게 만들지만, 이쪽은{" "}
-          <strong>저장된 데이터와 로그인 자체를 함께 삭제</strong>합니다. 되돌릴 수 없습니다.
+      <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">계정 삭제</h2>
+      <p className="muted">본인 확인이 끝났습니다. 계속하려면 아래에 확인 문구를 입력하세요.</p>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <p className="muted">
+          계속하려면 아래에 <code className="font-mono">{DELETE_CONFIRM_PHRASE}</code>를
+          입력하세요.
         </p>
-        <p className="mt-2 muted">
-          남기고 싶은 일기가 있다면 먼저{" "}
-          <Link href="/entries" className="link">
-            지난 일기
-          </Link>{" "}
-          화면에서 잠금을 해제하고 내보내두세요. 삭제 후에는 어떤 방법으로도 되살릴 수 없습니다.
-        </p>
-      </div>
-
-      {!open ? (
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          className="btn-danger-outline w-full"
-        >
-          계정 삭제 시작
-        </button>
-      ) : (
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <p className="muted">
-            계속하려면 아래에 <code className="font-mono">{DELETE_CONFIRM_PHRASE}</code>를
-            입력하세요.
-          </p>
+        <input
+          type="text"
+          required
+          autoFocus
+          aria-label="확인 문구"
+          value={confirmPhrase}
+          onChange={(e) => setConfirmPhrase(e.target.value)}
+          placeholder={DELETE_CONFIRM_PHRASE}
+          className="field"
+        />
+        {otpEnabled && (
           <input
             type="text"
             required
-            aria-label="확인 문구"
-            value={confirmPhrase}
-            onChange={(e) => setConfirmPhrase(e.target.value)}
-            placeholder={DELETE_CONFIRM_PHRASE}
-            className="field"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            aria-label="OTP 코드"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="OTP 코드"
+            className="field-code"
           />
-          {otpEnabled && (
-            <input
-              type="text"
-              required
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              aria-label="OTP 코드"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-              placeholder="OTP 코드"
-              className="field-code"
-            />
-          )}
-          {error && (
-            <p role="alert" className="error-text">
-              {error}
-            </p>
-          )}
-          <button type="submit" disabled={submitting} className="btn-danger w-full">
-            {submitting ? "삭제 중..." : "계정과 모든 일기 영구 삭제"}
-          </button>
-          <button type="button" onClick={cancel} className="w-full text-center text-xs link">
-            취소
-          </button>
-        </form>
-      )}
+        )}
+        {error && (
+          <p role="alert" className="error-text">
+            {error}
+          </p>
+        )}
+        <button type="submit" disabled={submitting} className="btn-danger w-full">
+          {submitting ? "삭제 중..." : "계정과 모든 일기 영구 삭제"}
+        </button>
+        <button type="button" onClick={cancel} className="w-full text-center text-xs link">
+          취소
+        </button>
+      </form>
     </section>
   );
 }
