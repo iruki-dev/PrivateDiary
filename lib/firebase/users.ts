@@ -8,6 +8,7 @@ import {
   type Timestamp,
 } from "firebase/firestore";
 import { db } from "./config";
+import { normalizePreferences, type UserPreferences } from "@/lib/preferences";
 import {
   bytesToBase64,
   publicKeysFromStorage,
@@ -51,15 +52,12 @@ interface DecryptionMethodsDocData {
 }
 
 /**
- * Pure display preferences (ARCHITECTURE.md §3.9) — never read by
- * lib/crypto or functions/, kept account-level (not localStorage) because
- * that's what was actually asked for: these should follow the user across
- * devices rather than being per-device.
+ * Account-level preferences. The shape, defaults and validation live in
+ * lib/preferences.ts (no Firebase import, so firestore.rules has one
+ * auditable counterpart and the rules can be mirrored in unit tests);
+ * re-exported here because this is where callers already import them from.
  */
-export interface UserPreferences {
-  privateWritingMode: boolean;
-  privateWritingPeekAllowed: boolean;
-}
+export type { UserPreferences } from "@/lib/preferences";
 
 interface UserDocData {
   publicKeys: HybridPublicKeysStorage;
@@ -72,8 +70,8 @@ interface UserDocData {
    * writing an entry must keep working without any unlock step (§3.2 rule
    * 5) while `entries` READS are behind the OTP gate — deriving the next
    * sequence number by querying entries made every write depend on a gate
-   * that is deliberately read-only. firestore.rules lets this one field
-   * (and `preferences`) move without otpSatisfied(), and forces it
+   * that is deliberately read-only. firestore.rules lets this one field —
+   * and now ONLY this field — move without otpSatisfied(), and forces it
    * forward-only so a stale client can't reissue a number already used.
    *
    * Optional: accounts created before this field existed don't have it —
@@ -245,16 +243,14 @@ export async function disableShamirMethod(uid: string): Promise<void> {
   });
 }
 
-const DEFAULT_PREFERENCES: UserPreferences = {
-  privateWritingMode: false,
-  privateWritingPeekAllowed: true,
-};
-
-/** Missing fields fall back to their default — covers accounts that never set a given preference yet. */
+/**
+ * Missing or invalid fields fall back to their default — covers accounts
+ * that never set a given preference, and refuses to trust a stored value
+ * outside what the UI can produce (see normalizePreferences).
+ */
 export async function getUserPreferences(uid: string): Promise<UserPreferences> {
   const snapshot = await getDoc(doc(db, "users", uid));
-  const stored = (snapshot.data() as UserDocData | undefined)?.preferences;
-  return { ...DEFAULT_PREFERENCES, ...stored };
+  return normalizePreferences((snapshot.data() as UserDocData | undefined)?.preferences);
 }
 
 /** Merges `patch` into `preferences` via dotted-path updates, leaving unrelated fields (and other preferences) untouched. */

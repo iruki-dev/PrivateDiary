@@ -115,3 +115,26 @@ export async function verifyShamirOtpBypass(proof: string): Promise<void> {
     throw err;
   }
 }
+
+/**
+ * Permanently deletes the account and all of its data (see
+ * functions/src/index.ts's deleteAccount for why this has to be a Cloud
+ * Function rather than client-side Firestore deletes). `code` is required
+ * only when OTP is enabled on the account.
+ *
+ * Lives in this module because it is the same thing every other function
+ * here is: a call to the server-side gate. It performs no cryptography and
+ * never touches the seed — it destroys ciphertext without ever reading it.
+ */
+export async function deleteAccount(code?: string): Promise<{ deletedEntries: number }> {
+  const call = httpsCallable<{ code?: string }, { success: boolean; deletedEntries: number }>(
+    functions,
+    "deleteAccount"
+  );
+  try {
+    const result = await call(code ? { code } : {});
+    return { deletedEntries: result.data.deletedEntries };
+  } catch (err) {
+    rethrowOtpError(err);
+  }
+}

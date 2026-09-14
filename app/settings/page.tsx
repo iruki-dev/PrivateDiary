@@ -15,7 +15,15 @@ import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
-import { IncorrectOtpCodeError, OtpLockedOutError, type OtpSetupMaterial } from "@/lib/firebase/otp";
+import { AUTO_LOCK_CHOICES } from "@/lib/preferences";
+import { clearAllDrafts } from "@/lib/drafts";
+import {
+  deleteAccount,
+  IncorrectOtpCodeError,
+  OtpLockedOutError,
+  type OtpSetupMaterial,
+} from "@/lib/firebase/otp";
+import { signOut } from "@/lib/firebase/auth";
 import {
   InvalidShamirSharesError,
   WrongPassphraseError,
@@ -56,12 +64,14 @@ export default function SettingsPage() {
   return (
     <main className="flex flex-1 flex-col items-center gap-10 px-4 py-10 sm:gap-12 sm:px-6 sm:py-20">
       {/*
-        Ungated: display preferences carry no security weight (§3.9), and
-        OtpSection manages OTP itself — requiring OTP to reach the OTP
-        settings would be circular, and each of its own actions already
-        demands a valid code.
+        Ungated, and the ONLY thing left that is: OtpSection manages OTP
+        itself, so requiring OTP to reach the OTP settings would be
+        circular — and each of its own actions already demands a valid
+        code. Preferences used to sit out here too, back when they were
+        display-only; `autoLockMinutes` made them security-relevant, so
+        they moved inside the gate along with firestore.rules' matching
+        change (see lib/preferences.ts).
       */}
-      <PrivateWritingSection />
       <OtpSection
         stageSeedFromPassphrase={stageSeedFromPassphrase}
         discardStagedSeed={discardStagedSeed}
@@ -90,6 +100,8 @@ export default function SettingsPage() {
         }
       >
         <div className="flex w-full flex-col items-center gap-10 sm:gap-12">
+          <PrivateWritingSection />
+          <SessionSection />
           <ChangePassphraseSection changePassphrase={changePassphrase} />
           {shamirConfig && (
             <ResetPassphraseSection
@@ -118,6 +130,8 @@ export default function SettingsPage() {
           />
 
           <ResetKeysSection userEmail={user?.email ?? ""} resetKeys={resetKeys} />
+
+          <DeleteAccountSection />
         </div>
       </OtpGate>
     </main>
@@ -125,12 +139,13 @@ export default function SettingsPage() {
 }
 
 /**
- * Toggles the /write textarea's blur-while-typing display (this page never
- * touches the diary's actual encryption — contexts/PreferencesContext.tsx's
- * doc comment explains why these are account-level Firestore fields rather
- * than something proven with the passphrase/OTP the way the sections below
- * are). Styled like OtpSection's status text + button rather than a boxed
- * switch — consistent with the rest of this page instead of a one-off widget.
+ * Toggles the /write textarea's blur-while-typing display. This never
+ * touches the diary's actual encryption — it is a pure display layer
+ * (ARCHITECTURE.md §3.9) — but it lives on the same `preferences` field as
+ * auto-lock, and that field is now OTP-gated as a whole, so this renders
+ * inside the gate with everything else. Styled like OtpSection's status
+ * text + button rather than a boxed switch, for consistency with the rest
+ * of this page.
  */
 function PrivateWritingSection() {
   const { loading, privateWritingMode, privateWritingPeekAllowed, setPrivateWritingMode, setPrivateWritingPeekAllowed } =
@@ -167,6 +182,81 @@ function PrivateWritingSection() {
       >
         {privateWritingPeekAllowed ? "확인 아이콘 숨기기" : "확인 아이콘 보이기"}
       </button>
+    </section>
+  );
+}
+
+/**
+ * Session and draft handling — the two preferences that are about
+ * exposure rather than appearance.
+ *
+ * Both are account-level (users/{uid}.preferences, lib/preferences.ts), so
+ * they follow the account onto every device it signs in on. That is also
+ * why this section sits inside the OTP gate: once a security control lives
+ * in `preferences`, letting a session-only caller change it without
+ * satisfying otpSatisfied() would hand an attacker the ability to switch
+ * auto-lock off and wait. firestore.rules enforces the same thing
+ * server-side; this placement just means the UI doesn't offer a form that
+ * would fail at submit.
+ */
+function SessionSection() {
+  const { loading, autoLockMinutes, draftAutosave, setAutoLockMinutes, setDraftAutosave } =
+    usePreferences();
+
+  if (loading) {
+    return null;
+  }
+
+  async function toggleDraftAutosave() {
+    const next = !draftAutosave;
+    // Turning it off has to remove what is already stored on this device,
+    // otherwise the setting reads as "no plaintext here" while yesterday's
+    // draft is still sitting in localStorage.
+    if (!next) clearAllDrafts();
+    await setDraftAutosave(next);
+  }
+
+  return (
+    <section className="w-full max-w-sm space-y-4">
+      <h2 className="text-lg font-semibold">세션과 임시 저장</h2>
+
+      <div className="space-y-2">
+        <label htmlFor="auto-lock-minutes" className="block text-sm font-medium">
+          자동 잠금
+        </label>
+        <p className="muted">
+          잠금을 해제한 뒤 이만큼 아무 조작이 없으면 메모리에서 키를 지우고 다시 잠급니다. 일기를
+          쓰는 것은 잠긴 상태에서도 그대로 됩니다.
+        </p>
+        <select
+          id="auto-lock-minutes"
+          value={autoLockMinutes}
+          onChange={(event) => void setAutoLockMinutes(Number(event.target.value))}
+          className="field"
+        >
+          {AUTO_LOCK_CHOICES.map((choice) => (
+            <option key={choice.minutes} value={choice.minutes}>
+              {choice.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        <p className="muted">
+          작성 중인 일기를 기기에 임시 저장해두면, 탭이 닫히거나 브라우저가 꺼져도 글이 남습니다.
+          다만 임시 저장본은 <strong>암호화되지 않은 상태로 그 기기에 저장</strong>되므로 기본값은
+          꺼짐입니다. 일기를 저장하거나 로그아웃하면 즉시 지워집니다. 현재:{" "}
+          <strong>{draftAutosave ? "사용 중" : "사용 안 함"}</strong>
+        </p>
+        <button
+          type="button"
+          onClick={() => void toggleDraftAutosave()}
+          className={draftAutosave ? "btn-danger-outline w-full" : "btn-secondary w-full"}
+        >
+          {draftAutosave ? "임시 저장 끄기" : "임시 저장 켜기"}
+        </button>
+      </div>
     </section>
   );
 }
@@ -754,7 +844,15 @@ function ShamirSection({
       setMessage(config ? "백업 코드가 재발급되었습니다." : "백업 코드가 활성화되었습니다.");
     } catch (err) {
       console.error("confirmPendingShamir failed", err);
-      setError("저장하지 못했습니다. 다시 시도해주세요.");
+      // The likeliest cause is auto-lock firing while the codes were on
+      // screen being written down: locking discards the staged seed and
+      // the prepared shares with it (contexts/SeedContext.tsx). Nothing
+      // was written to Firestore, so the previous codes — if any — still
+      // work and the whole flow can simply be repeated.
+      setError(
+        "저장하지 못했습니다. 자동 잠금이 걸렸을 수 있습니다 — 처음부터 다시 시도해주세요. " +
+          "방금 표시된 코드는 저장되지 않았으므로 사용할 수 없고, 이전 백업 코드가 있다면 그대로 유효합니다."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -1113,6 +1211,140 @@ function ResetKeysSection({
           )}
           <button type="submit" disabled={submitting} className="btn-danger w-full">
             {submitting ? "초기화 중..." : "영구적으로 초기화"}
+          </button>
+        </form>
+      )}
+    </section>
+  );
+}
+
+const DELETE_CONFIRM_PHRASE = "계정을 삭제합니다";
+
+/**
+ * Permanently deletes the account and every entry in it.
+ *
+ * Distinct from "초기화" above, and the copy has to make the difference
+ * obvious because they sound alike: 초기화 issues a new seed and leaves the
+ * old ciphertext stored-but-unreadable (cryptographic erasure — the account
+ * survives and keeps working). This removes the rows themselves and the
+ * login with them. An app that will hold someone's diary for years needs
+ * both: one for "I lost my credentials but want to keep going", one for "I
+ * want to not be here any more".
+ *
+ * The work happens in functions/src/index.ts's deleteAccount, because
+ * firestore.rules denies delete on users and entries unconditionally
+ * (append-only, ARCHITECTURE.md §5) and only the Admin SDK can go around
+ * that. It requires a current OTP code when OTP is enabled, but never the
+ * passphrase — see that function's doc comment.
+ */
+function DeleteAccountSection() {
+  const { otpEnabled } = useOtp();
+  const router = useRouter();
+
+  const [open, setOpen] = useState(false);
+  const [confirmPhrase, setConfirmPhrase] = useState("");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+
+    if (confirmPhrase !== DELETE_CONFIRM_PHRASE) {
+      setError(`확인 문구를 정확히 입력해주세요: "${DELETE_CONFIRM_PHRASE}"`);
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await deleteAccount(otpEnabled ? code : undefined);
+      // The auth user no longer exists server-side; signing out clears the
+      // now-void local session (and, via SeedContext, any staged seed,
+      // derived keys and locally stored drafts) before navigating away.
+      await signOut();
+      router.replace("/");
+    } catch (err) {
+      if (err instanceof IncorrectOtpCodeError) {
+        setError("OTP 코드가 올바르지 않습니다.");
+      } else if (err instanceof OtpLockedOutError) {
+        setError("시도 횟수를 초과했습니다. 1분 후 다시 시도하세요.");
+      } else {
+        console.error("deleteAccount failed", err);
+        setError("계정을 삭제하지 못했습니다. 다시 시도해주세요.");
+      }
+      setSubmitting(false);
+    }
+  }
+
+  return (
+    <section className="w-full max-w-sm space-y-4 card-danger">
+      <div>
+        <h2 className="text-lg font-semibold text-red-700 dark:text-red-500">계정 삭제</h2>
+        <p className="mt-2 muted">
+          작성한 모든 일기와 계정 자체를 서버에서 완전히 지웁니다. 위의 &ldquo;초기화&rdquo;는
+          계정을 남긴 채 기존 일기만 읽을 수 없게 만들지만, 이쪽은{" "}
+          <strong>저장된 데이터와 로그인 자체를 함께 삭제</strong>합니다. 되돌릴 수 없습니다.
+        </p>
+        <p className="mt-2 muted">
+          남기고 싶은 일기가 있다면 먼저{" "}
+          <Link href="/entries" className="link">
+            지난 일기
+          </Link>{" "}
+          화면에서 잠금을 해제하고 내보내두세요. 삭제 후에는 어떤 방법으로도 되살릴 수 없습니다.
+        </p>
+      </div>
+
+      {!open ? (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          className="btn-danger-outline w-full"
+        >
+          계정 삭제 시작
+        </button>
+      ) : (
+        <form onSubmit={handleSubmit} className="space-y-3">
+          <p className="muted">
+            계속하려면 아래에 <code className="font-mono">{DELETE_CONFIRM_PHRASE}</code>를
+            입력하세요.
+          </p>
+          <input
+            type="text"
+            required
+            aria-label="확인 문구"
+            value={confirmPhrase}
+            onChange={(e) => setConfirmPhrase(e.target.value)}
+            placeholder={DELETE_CONFIRM_PHRASE}
+            className="field"
+          />
+          {otpEnabled && (
+            <input
+              type="text"
+              required
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              aria-label="OTP 코드"
+              value={code}
+              onChange={(e) => setCode(e.target.value)}
+              placeholder="OTP 코드"
+              className="field-code"
+            />
+          )}
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          <button type="submit" disabled={submitting} className="btn-danger w-full">
+            {submitting ? "삭제 중..." : "계정과 모든 일기 영구 삭제"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setOpen(false)}
+            className="w-full text-center text-xs link"
+          >
+            취소
           </button>
         </form>
       )}

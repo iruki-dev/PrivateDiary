@@ -444,7 +444,7 @@ describe("users/{uid}.preferences", () => {
     );
   });
 
-  it("allows setting both preference fields at once", async () => {
+  it("allows setting every preference field at once", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
@@ -457,9 +457,70 @@ describe("users/{uid}.preferences", () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       updateDoc(doc(alice, "users/alice"), {
-        preferences: { privateWritingMode: true, privateWritingPeekAllowed: false },
+        preferences: {
+          privateWritingMode: true,
+          privateWritingPeekAllowed: false,
+          autoLockMinutes: 5,
+          draftAutosave: true,
+        },
       })
     );
+  });
+
+  it("accepts every auto-lock value the UI offers, including 0 (never)", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    for (const minutes of [0, 1, 5, 15, 30, 60]) {
+      await assertSucceeds(
+        updateDoc(doc(alice, "users/alice"), { "preferences.autoLockMinutes": minutes })
+      );
+    }
+  });
+
+  it("rejects an auto-lock value outside the offered set", async () => {
+    // The client feeds this straight back into a security decision, so a
+    // value this codebase would never produce must not be storable — an
+    // out-of-range one would amount to disabling auto-lock unnoticed.
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "preferences.autoLockMinutes": 100000 })
+    );
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "preferences.autoLockMinutes": 7 }));
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "preferences.autoLockMinutes": -1 }));
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "preferences.autoLockMinutes": "15" })
+    );
+  });
+
+  it("rejects a non-boolean draftAutosave", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "preferences.draftAutosave": 1 }));
   });
 
   it("rejects a non-boolean preference value", async () => {
@@ -816,10 +877,35 @@ describe("hardening: a session-only attacker on an OTP-enabled account", () => {
     await assertSucceeds(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 8 }));
   });
 
-  it("CAN still change display preferences — they carry no security weight", async () => {
+  // Preferences were exempt from this gate while they were display-only.
+  // autoLockMinutes (lib/preferences.ts) decides how long an unlocked
+  // session stays readable, so the exemption had to go: a stolen session
+  // must not be able to switch auto-lock off and wait for a moment of
+  // physical access to the victim's unlocked screen.
+  it("CANNOT change auto-lock without OTP — it is a security control now", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), { "preferences.autoLockMinutes": 0 })
+    );
+  });
+
+  it("CANNOT change any other preference without OTP either", async () => {
+    // Gated as a whole rather than field-by-field: a rule that had to
+    // classify each preference as security-relevant or not would silently
+    // fail open the next time a field is added.
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), { "preferences.privateWritingMode": true })
+    );
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), { "preferences.draftAutosave": true })
+    );
+  });
+
+  it("CAN change preferences once OTP has been verified", async () => {
     await seedUserDoc();
     await assertSucceeds(
-      updateDoc(doc(attacker(), "users/alice"), { "preferences.privateWritingMode": true })
+      updateDoc(doc(verified(), "users/alice"), { "preferences.autoLockMinutes": 5 })
     );
   });
 

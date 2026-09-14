@@ -1,0 +1,102 @@
+# Continuous integration for PrivateDiary.
+#
+# The point of a pipeline here is narrower than usual: this app's security
+# properties live almost entirely in two places that are cheap to run and
+# catastrophic to get wrong — lib/crypto (round-trips, tamper detection,
+# wrong-credential rejection) and firestore.rules (who can read or write
+# what). Both are covered by real test suites, so both run on every push.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm lint
+
+      - run: pnpm test
+
+      # `next build` runs the project's TypeScript check itself, and the
+      # LayoutProps/PageProps helpers the app uses only exist once Next has
+      # generated .next/types — so building first is what makes the
+      # standalone tsc pass meaningful rather than a guaranteed failure.
+      - name: Build
+        run: pnpm build
+        env:
+          # The real values are public client config, not secrets, but CI
+          # has none — Firebase's SDK only needs them to be present and
+          # well-formed at build time, since nothing here talks to Firebase.
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.example.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-placeholder.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "0"
+          NEXT_PUBLIC_FIREBASE_APP_ID: "1:0:web:0"
+
+      - run: pnpm exec tsc --noEmit
+
+  rules:
+    name: Firestore security rules
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      # The Firestore emulator is a Java process; without a JDK on the
+      # runner `firebase emulators:exec` fails before any test runs.
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm test:rules
+
+  functions:
+    name: Cloud Functions typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: functions
+    steps:
+      - uses: actions/checkout@v5
+
+      # functions/ is its own npm-managed deployment unit (Cloud Functions
+      # convention) — deliberately outside the pnpm workspace, so it needs
+      # its own install and its own compile step.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - run: npm ci
+
+      - run: npm run build

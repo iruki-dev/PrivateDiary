@@ -28,12 +28,11 @@ import { generateSecret, generateURI, verify } from "otplib";
  * seed, a passphrase, Shamir shares, or plaintext — it only gates WHETHER
  * the (still fully client-side-decrypted) ciphertext can be fetched at all.
  *
- * `enforceAppCheck: APP_CHECK_ENFORCE` (README.md's "DDoS 방지" section):
- * off by default so deploying this code alone can't lock out real users
- * before the client actually has a working App Check token (that needs a
- * reCAPTCHA v3 site key from Google's console, a manual per-domain step —
- * see lib/firebase/appCheck.ts). Flip APP_CHECK_ENFORCE=true in
- * functions/.env once that key is live and redeploy; no code change needed.
+ * There is no App Check enforcement here any more: it was tried and
+ * removed wholesale (ARCHITECTURE.md §3.10) after the Firestore Web SDK
+ * turned out not to attach the minted token to its requests at all, which
+ * left the Functions half guarding a door whose window was open. Abuse
+ * defence for this module is now the failure lockout below.
  */
 
 initializeApp();
@@ -43,7 +42,6 @@ const OTP_SECRETS_COLLECTION = "otpSecrets";
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_MS = 60_000;
 const OTP_SESSION_MS = 12 * 60 * 60 * 1000; // 12h — how long a successful verify stays valid
-const APP_CHECK_ENFORCE = process.env.APP_CHECK_ENFORCE === "true";
 
 interface OtpSecretDoc {
   secret: string;
@@ -156,7 +154,7 @@ async function verifyStoredOtp(
  * there is no credential to prove yet, and an unconfirmed secret grants
  * nothing until confirmOtpSetup succeeds against it.
  */
-export const startOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
+export const startOtpSetup = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
 
@@ -186,7 +184,7 @@ export const startOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CH
 });
 
 /** Step 2 of setup: proves the user actually scanned the QR by requiring one valid code. */
-export const confirmOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
+export const confirmOtpSetup = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -198,7 +196,7 @@ export const confirmOtpSetup = onCall({ invoker: "public", enforceAppCheck: APP_
 });
 
 /** Verifies a code for the current session and stamps the auth token so Firestore rules allow reads. */
-export const verifyOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
+export const verifyOtp = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -233,7 +231,7 @@ export const verifyOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_
  * verifyOtp does, reusing firestore.rules' otpSatisfied() as-is — no
  * separate rule path needed for the bypass.
  */
-export const verifyShamirOtpBypass = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
+export const verifyShamirOtpBypass = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const proof = requireProof(request.data);
@@ -274,7 +272,7 @@ export const verifyShamirOtpBypass = onCall({ invoker: "public", enforceAppCheck
  * no "revoke every session except mine" — so the user re-authenticates
  * after disabling OTP. That is the intended trade.
  */
-export const disableOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK_ENFORCE }, async (request) => {
+export const disableOtp = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
   const code = requireCode(request.data);
@@ -284,4 +282,69 @@ export const disableOtp = onCall({ invoker: "public", enforceAppCheck: APP_CHECK
   await mergeClaims(uid, { otpEnabled: false, otpVerified: false, otpVerifiedAt: null });
   await getAuth().revokeRefreshTokens(uid);
   return { success: true, sessionsRevoked: true };
+});
+
+/**
+ * Permanently deletes the account and everything attached to it: every
+ * entry, the users/{uid} document (public keys, both wrapped seeds, Shamir
+ * configuration, preferences), the TOTP secret, and the Firebase Auth user
+ * itself.
+ *
+ * This is the one operation that structurally CANNOT be done from the
+ * client. firestore.rules denies delete on both `users` and `entries`
+ * outright — `entries` is append-only by design (ARCHITECTURE.md §5) so
+ * that nothing holding a session can quietly rewrite history, and that same
+ * rule necessarily also blocks the legitimate case of a user who wants
+ * their data gone. Only the Admin SDK, which bypasses rules, can reconcile
+ * "append-only for the app" with "erasable by its owner", and doing it
+ * here keeps the rules themselves absolute.
+ *
+ * Note what is NOT required: the passphrase or the Shamir shares. Those
+ * prove you can READ the diary, and destruction does not need read access —
+ * demanding them would mean someone who forgot their passphrase could never
+ * close their account, which is the opposite of the point. OTP, when
+ * enabled, IS required: it is the account's gate against a stolen session,
+ * and deletion is the most destructive thing a stolen session could do.
+ *
+ * "초기화" (resetKeys, ARCHITECTURE.md §3.6 rule 5) remains the lighter
+ * option: it issues a new seed, leaving the old ciphertext stored but
+ * permanently unreadable. This removes the ciphertext too.
+ */
+export const deleteAccount = onCall({ invoker: "public" }, async (request) => {
+  requireAuth(request.auth?.uid);
+  const uid = request.auth.uid;
+
+  const secretRef = getFirestore().collection(OTP_SECRETS_COLLECTION).doc(uid);
+  const secret = await secretRef.get();
+  if (secret.exists && (secret.data() as OtpSecretDoc).confirmed) {
+    // Throws (and counts toward the lockout) unless the caller proves the
+    // authenticator currently registered on this account.
+    await verifyStoredOtp(uid, requireCode(request.data));
+  }
+
+  // Paged rather than one query + one batch: Firestore caps a write batch
+  // at 500 operations, and a long-running diary will have far more entries
+  // than that. Each page re-queries from the start because the previous
+  // page no longer exists.
+  const entries = getFirestore().collection("entries").where("uid", "==", uid);
+  let deletedEntries = 0;
+  for (;;) {
+    const page = await entries.limit(400).get();
+    if (page.empty) break;
+    const batch = getFirestore().batch();
+    for (const doc of page.docs) batch.delete(doc.ref);
+    await batch.commit();
+    deletedEntries += page.size;
+  }
+
+  await getFirestore().collection("users").doc(uid).delete();
+  await secretRef.delete();
+
+  // Last: once the auth user is gone the caller's session is void, so
+  // anything after this would be unreachable on a retry. Doing it last
+  // also means a failure partway through leaves an account that can sign
+  // in and try again, rather than orphaned data with no owner.
+  await getAuth().deleteUser(uid);
+
+  return { success: true, deletedEntries };
 });

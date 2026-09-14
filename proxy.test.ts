@@ -29,6 +29,35 @@ describe("proxy CSP policy", () => {
     expect(scriptSrc).not.toContain("wasm-unsafe-eval");
   });
 
+  it("allows no third-party script host — nothing in this app loads one", () => {
+    // App Check/reCAPTCHA was the only reason google.com/gstatic.com were
+    // ever in script-src, and it is gone (ARCHITECTURE.md §3.10). A host
+    // allowlist left behind after its only consumer is removed is a
+    // standing permission nobody is watching.
+    const csp = proxy(new NextRequest("http://localhost:3000/")).headers.get(
+      "Content-Security-Policy"
+    )!;
+    const scriptSrc = csp.split(";").map((d) => d.trim()).find((d) => d.startsWith("script-src"))!;
+
+    expect(scriptSrc).not.toContain("google");
+    expect(scriptSrc).not.toContain("gstatic");
+  });
+
+  it("connect-src reaches only Firebase Auth, Firestore and the OTP callables", () => {
+    const csp = proxy(new NextRequest("http://localhost:3000/")).headers.get(
+      "Content-Security-Policy"
+    )!;
+    const connectSrc = csp
+      .split(";")
+      .map((d) => d.trim())
+      .find((d) => d.startsWith("connect-src"))!;
+
+    expect(connectSrc).toContain("https://firestore.googleapis.com");
+    expect(connectSrc).toContain("https://identitytoolkit.googleapis.com");
+    expect(connectSrc).toContain("https://*.cloudfunctions.net");
+    expect(connectSrc).not.toContain("firebaseappcheck");
+  });
+
   it("issues a fresh, unpredictable nonce on every request", () => {
     const a = proxy(new NextRequest("http://localhost:3000/"));
     const b = proxy(new NextRequest("http://localhost:3000/"));

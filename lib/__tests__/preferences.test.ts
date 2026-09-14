@@ -1,0 +1,81 @@
+import { describe, expect, it } from "vitest";
+import {
+  AUTO_LOCK_CHOICES,
+  AUTO_LOCK_MINUTE_VALUES,
+  DEFAULT_PREFERENCES,
+  normalizePreferences,
+} from "../preferences";
+
+describe("defaults", () => {
+  it("auto-locks out of the box — the app must not stay unlocked forever by default", () => {
+    expect(DEFAULT_PREFERENCES.autoLockMinutes).toBeGreaterThan(0);
+  });
+
+  it("keeps draft autosave OFF by default — it is the one thing that writes plaintext to disk", () => {
+    expect(DEFAULT_PREFERENCES.draftAutosave).toBe(false);
+  });
+
+  it("offers the default auto-lock value as one of the choices", () => {
+    expect(AUTO_LOCK_MINUTE_VALUES).toContain(DEFAULT_PREFERENCES.autoLockMinutes);
+  });
+
+  it("offers an explicit never option", () => {
+    expect(AUTO_LOCK_CHOICES.some((choice) => choice.minutes === 0)).toBe(true);
+  });
+});
+
+describe("normalizePreferences", () => {
+  it("returns the defaults for a missing or non-object value", () => {
+    expect(normalizePreferences(undefined)).toEqual(DEFAULT_PREFERENCES);
+    expect(normalizePreferences(null)).toEqual(DEFAULT_PREFERENCES);
+    expect(normalizePreferences("nope")).toEqual(DEFAULT_PREFERENCES);
+  });
+
+  it("fills in fields an older account never stored", () => {
+    // Accounts predate autoLockMinutes/draftAutosave entirely.
+    expect(normalizePreferences({ privateWritingMode: true })).toEqual({
+      ...DEFAULT_PREFERENCES,
+      privateWritingMode: true,
+    });
+  });
+
+  it("keeps every valid stored value", () => {
+    const stored = {
+      privateWritingMode: true,
+      privateWritingPeekAllowed: false,
+      autoLockMinutes: 1,
+      draftAutosave: true,
+    };
+    expect(normalizePreferences(stored)).toEqual(stored);
+  });
+
+  it("accepts 0 (never auto-lock) as a real choice, not as junk", () => {
+    expect(normalizePreferences({ autoLockMinutes: 0 }).autoLockMinutes).toBe(0);
+  });
+
+  it("refuses an auto-lock value outside the offered set", () => {
+    // firestore.rules rejects such a write; this is the client-side half of
+    // the same check, so a document that somehow holds one can't turn into
+    // an effectively-disabled auto-lock at runtime.
+    for (const bad of [100000, 7, -1, Number.NaN, Number.POSITIVE_INFINITY, "15", null]) {
+      expect(normalizePreferences({ autoLockMinutes: bad }).autoLockMinutes).toBe(
+        DEFAULT_PREFERENCES.autoLockMinutes
+      );
+    }
+  });
+
+  it("refuses wrongly-typed booleans", () => {
+    const result = normalizePreferences({
+      privateWritingMode: "yes",
+      privateWritingPeekAllowed: 1,
+      draftAutosave: "true",
+    });
+    expect(result.privateWritingMode).toBe(DEFAULT_PREFERENCES.privateWritingMode);
+    expect(result.privateWritingPeekAllowed).toBe(DEFAULT_PREFERENCES.privateWritingPeekAllowed);
+    expect(result.draftAutosave).toBe(DEFAULT_PREFERENCES.draftAutosave);
+  });
+
+  it("drops unknown keys rather than passing them through to Firestore", () => {
+    expect(normalizePreferences({ somethingElse: true })).toEqual(DEFAULT_PREFERENCES);
+  });
+});
