@@ -23,12 +23,7 @@ export function proxy(request: NextRequest) {
 
   const csp = [
     "default-src 'self'",
-    // 'strict-dynamic' alone should let App Check's reCAPTCHA v3 script
-    // (injected by an already-trusted, nonce'd script — lib/firebase/appCheck.ts)
-    // load regardless of host, but the explicit google.com/gstatic.com
-    // sources stay as the documented fallback for browsers that don't
-    // support strict-dynamic (same pattern Google's own CSP guide uses).
-    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""} https://www.google.com https://www.gstatic.com`,
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     // KNOWN, ACCEPTED WEAKENING. Tailwind's runtime-injected styles and
     // next/font's inline <style> have no nonce threaded through them, so
     // nonce-only style-src breaks the app's rendering outright. The
@@ -37,14 +32,14 @@ export function proxy(request: NextRequest) {
     // injected <style> can restyle the page but cannot execute, exfiltrate
     // via CSS (no external url() — style-src stays 'self'), or reframe it.
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: https://www.gstatic.com",
+    "img-src 'self' data:",
     "font-src 'self'",
-    // App Check/reCAPTCHA v3 (README.md "DDoS 방지"): www.google.com for the
-    // reCAPTCHA verify call, {content-,}firebaseappcheck.googleapis.com for
-    // exchanging that for an App Check token. No-ops until
-    // NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY is actually set.
-    "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.cloudfunctions.net https://www.google.com https://firebaseappcheck.googleapis.com https://content-firebaseappcheck.googleapis.com",
-    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.google.com",
+    "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.cloudfunctions.net",
+    // accounts.google.com: Google Sign-In (lib/firebase/auth.ts's
+    // signInWithGoogle). *.firebaseapp.com: Firebase Auth's own hidden
+    // iframe for cross-domain auth-state sync, needed regardless of which
+    // sign-in method is used.
+    "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",

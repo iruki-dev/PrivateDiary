@@ -48,7 +48,6 @@ lib/
                       # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
     config.ts, auth.ts, users.ts, entries.ts
     otp.ts             # functions/의 OTP callable 래퍼. 여기도 크립토 없음 — 접근 게이트일 뿐.
-    appCheck.ts          # App Check(reCAPTCHA v3) 초기화 — "DDoS 방지" 참조. 크립토 없음.
 
   passphraseStrength.ts   # zxcvbn-ts 강도 추정 (lib/crypto 밖 — 암호화 연산이 아닌 UX 휴리스틱)
 
@@ -155,15 +154,13 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 
 ## DDoS 방지
 
-두 겹으로 대응한다 — 네트워크 볼륨 공격 자체는 Firestore/Cloud Functions가 Google 인프라(Cloud Run + Google Front End) 위에서 이미 흡수하므로, 앱 코드가 실제로 손댈 수 있는 지점은 "공개된 Firebase 설정값을 그대로 긁어다 스크립트로 두드리는" 종류의 남용이다.
+네트워크 볼륨 공격 자체는 Firestore/Cloud Functions가 Google 인프라(Cloud Run + Google Front End) 위에서 이미 흡수하므로, 앱 코드가 실제로 손댈 수 있는 지점은 "공개된 Firebase 설정값을 그대로 긁어다 스크립트로 두드리는" 종류의 남용이다.
 
-1. **Firebase App Check (reCAPTCHA v3)** — `lib/firebase/appCheck.ts` / `lib/firebase/config.ts`에서 초기화. reCAPTCHA v3는 챌린지 없이 백그라운드에서 점수만 매기므로 실사용자는 아무것도 느끼지 않는다("사용자 경험을 해치지 않는" DDoS 방지의 핵심). 다만 **아래 두 단계는 코드로 할 수 없는, 사람이 콘솔에서 직접 해야 하는 작업이다**:
-   - Firebase 콘솔 > App Check > 앱 등록에서 이 웹 앱에 대한 reCAPTCHA v3 사이트 키를 발급받아 `NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY`로 설정(Vercel 환경변수 포함).
-   - Firebase 콘솔 > App Check > API 탭에서 Cloud Firestore의 "Enforce"를 켠다. (Cloud Functions 쪽은 코드 레벨 `enforceAppCheck` 옵션으로 이미 제어된다 — 아래 2번.)
-   - 로컬 개발(`next dev`)은 사이트 키 없이도 App Check 디버그 토큰을 자동으로 써서 그대로 동작한다.
-2. **Cloud Functions `enforceAppCheck`** — `functions/src/index.ts`의 모든 callable에 `enforceAppCheck: APP_CHECK_ENFORCE`를 걸어뒀다. 기본값은 `false`(`functions/.env.example`) — 클라이언트가 실제 유효한 App Check 토큰을 발급받기 전에 이 코드만 배포되어도 전체 OTP 기능이 즉시 막히는 걸 막기 위한 안전장치다. 위 1번(사이트 키 + 클라이언트 배포)이 끝난 뒤 `functions/.env`에 `APP_CHECK_ENFORCE=true`를 넣고 `firebase deploy --only functions`.
-3. **Firestore 규칙의 항목 크기 상한** — `firestore.rules`의 `isValidEntrySize()`가 `entries` 쓰기의 `ciphertext`를 500,000자로 제한한다. 남용 트래픽의 속도(rate)가 아니라 한 건당 크기(size)만 막는 저비용 방어선 — 실제 남용 트래픽 차단은 위 App Check가 담당한다.
-4. CSP(`proxy.ts`)에 reCAPTCHA v3/App Check가 쓰는 `www.google.com` / `www.gstatic.com` / `firebaseappcheck.googleapis.com`을 이미 허용해뒀다 — 사이트 키를 설정하기 전까지는 아무 요청도 나가지 않으므로 지금 당장의 동작에는 영향이 없다.
+**Firebase App Check(reCAPTCHA)는 도입했다가 완전히 제거했다.** classic reCAPTCHA v3는 App Check 콘솔에서 신규 등록 자체가 막혀 있어 reCAPTCHA Enterprise로 전환했고, 사이트 키·Enterprise API 활성화·App Check 등록까지 전부 정확히 맞췄지만, **Firestore 웹 SDK가 발급된 App Check 토큰을 요청에 아예 붙이지 않는 현상**을 프로덕션에서 직접 확인했다(네트워크 탭에 `X-Firebase-AppCheck` 헤더 자체가 없음) — [firebase/flutterfire#18672](https://github.com/firebase/flutterfire/issues/18672)에 동일 증상이 보고된, 이 글 작성 시점 기준 미해결 Firebase JS SDK 버그로 보인다. Cloud Functions 쪽(별개의 직접 HTTPS 경로라 이 버그의 영향을 안 받음)은 정상 동작했지만, Firestore 없이는 봇 방지 효과가 절반뿐이고 Enterprise 설정 자체의 운영 부담(결제 계정 연결, API 활성화, 사이트 키/등록 관리)도 있어 — 남는 코드/설정을 전부 걷어내고 아래 방어선만 남기기로 했다.
+
+1. **Firestore 규칙의 항목 크기 상한** — `firestore.rules`의 `isValidEntry()`가 `entries` 쓰기의 `ciphertext`를 500,000자로 제한한다. 남용 트래픽의 속도(rate)가 아니라 한 건당 크기(size)만 막는 저비용 방어선.
+2. **OTP 브루트포스 잠금** — `functions/src/index.ts`의 `verifyStoredOtp`가 5회 실패 시 60초 잠금을 건다(Firestore 트랜잭션으로 원자적 — 동시 요청도 우회 못 함).
+3. Firebase Authentication/Firestore 자체의 요청 한도(quota)가 기본 방어선으로 남아있다 — App Check가 있었다면 그 앞단에서 더 저렴하게 걸러졌을 종류의 남용이 지금은 Firebase 자체 한도까지 도달한다는 뜻이지만, 이 앱 규모(개인용)에서는 감수할 만한 트레이드오프로 판단했다.
 
 ## Firestore 규칙 / Cloud Functions 배포
 
@@ -181,7 +178,7 @@ pnpm exec firebase deploy --only firestore:rules,firestore:indexes,functions --p
 ## Vercel 배포
 
 1. GitHub 저장소를 Vercel 프로젝트에 연결 (vercel.com에서 "Import Project").
-2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두). `NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY`는 App Check를 쓸 때만 필요("DDoS 방지" 참조) — 비워두면 지금처럼 App Check 없이 동작한다.
+2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두).
 3. **Firebase 콘솔 > Authentication > Settings > Authorized domains에 Vercel 배포 도메인을 추가해야 로그인이 동작한다** (`*.vercel.app` 프리뷰 도메인 포함, 커스텀 도메인 사용 시 그것도 추가).
 4. Next.js 앱(Vercel에 배포되는 쪽) 자체는 여전히 전부 클라이언트 사이드 Firebase SDK 호출만 하므로 Vercel 쪽에는 시크릿 환경변수가 전혀 없다. 서버 로직(OTP 검증)은 Vercel이 아니라 Firebase Cloud Functions에서 별도로 돌아간다 — 위 "Firestore 규칙 / Cloud Functions 배포" 참조.
 
