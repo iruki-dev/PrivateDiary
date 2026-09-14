@@ -1,16 +1,25 @@
-import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
+import { initializeAppCheck, ReCaptchaEnterpriseProvider } from "firebase/app-check";
 import type { FirebaseApp } from "firebase/app";
 
 /**
  * Firebase App Check: rejects Firestore/Functions requests that don't carry
- * a token proving they came from this actual web app (reCAPTCHA v3 runs
- * invisibly — no challenge, no friction — and only scores the request), so
- * it blocks scripted/bot abuse of the public Firebase config without
- * costing real users anything. This is the primary "don't hurt UX" DDoS
- * mitigation for this app; see README.md's "DDoS 방지" section for the
- * remaining manual steps (creating a reCAPTCHA v3 site key and flipping the
- * per-API "Enforce" toggle in the App Check console — neither can be done
- * from code).
+ * a token proving they came from this actual web app (reCAPTCHA Enterprise
+ * runs invisibly — no challenge, no friction — and only scores the
+ * request), so it blocks scripted/bot abuse of the public Firebase config
+ * without costing real users anything. This is the primary "don't hurt UX"
+ * DDoS mitigation for this app; see README.md's "DDoS 방지" section for the
+ * remaining manual steps (creating a reCAPTCHA Enterprise site key,
+ * registering it under App Check's "reCAPTCHA Enterprise" provider with its
+ * secret key, and flipping the per-API "Enforce" toggle in the App Check
+ * console — none of that can be done from code).
+ *
+ * Enterprise, not classic reCAPTCHA v3 (ReCaptchaV3Provider): classic
+ * reCAPTCHA is marked deprecated in the App Check console itself as of this
+ * writing, in favor of Enterprise — see this decision's discussion. The
+ * client-side API is otherwise identical (same invisible-badge model, same
+ * constructor shape); Enterprise additionally needs a billing-enabled
+ * Google Cloud project for the reCAPTCHA Enterprise API, which the classic
+ * product didn't require.
  *
  * Safe to call with no site key configured (dev, or before the console
  * setup is done): initializeAppCheck then just never succeeds in minting
@@ -19,7 +28,7 @@ import type { FirebaseApp } from "firebase/app";
  * turned on (functions/src/index.ts, functions/.env's APP_CHECK_ENFORCE).
  */
 export function initAppCheck(app: FirebaseApp): void {
-  const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY;
+  const siteKey = process.env.NEXT_PUBLIC_RECAPTCHA_SITE_KEY;
 
   if (process.env.NODE_ENV !== "production" && !siteKey) {
     // Lets `next dev` mint debug tokens (registered per-developer in the App
@@ -32,7 +41,7 @@ export function initAppCheck(app: FirebaseApp): void {
   if (!siteKey) return;
 
   initializeAppCheck(app, {
-    provider: new ReCaptchaV3Provider(siteKey),
+    provider: new ReCaptchaEnterpriseProvider(siteKey),
     isTokenAutoRefreshEnabled: true,
   });
 }

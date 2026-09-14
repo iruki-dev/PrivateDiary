@@ -48,7 +48,7 @@ lib/
                       # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
     config.ts, auth.ts, users.ts, entries.ts
     otp.ts             # functions/의 OTP callable 래퍼. 여기도 크립토 없음 — 접근 게이트일 뿐.
-    appCheck.ts          # App Check(reCAPTCHA v3) 초기화 — "DDoS 방지" 참조. 크립토 없음.
+    appCheck.ts          # App Check(reCAPTCHA Enterprise) 초기화 — "DDoS 방지" 참조. 크립토 없음.
 
   passphraseStrength.ts   # zxcvbn-ts 강도 추정 (lib/crypto 밖 — 암호화 연산이 아닌 UX 휴리스틱)
 
@@ -157,13 +157,15 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 
 두 겹으로 대응한다 — 네트워크 볼륨 공격 자체는 Firestore/Cloud Functions가 Google 인프라(Cloud Run + Google Front End) 위에서 이미 흡수하므로, 앱 코드가 실제로 손댈 수 있는 지점은 "공개된 Firebase 설정값을 그대로 긁어다 스크립트로 두드리는" 종류의 남용이다.
 
-1. **Firebase App Check (reCAPTCHA v3)** — `lib/firebase/appCheck.ts` / `lib/firebase/config.ts`에서 초기화. reCAPTCHA v3는 챌린지 없이 백그라운드에서 점수만 매기므로 실사용자는 아무것도 느끼지 않는다("사용자 경험을 해치지 않는" DDoS 방지의 핵심). 다만 **아래 두 단계는 코드로 할 수 없는, 사람이 콘솔에서 직접 해야 하는 작업이다**:
-   - Firebase 콘솔 > App Check > 앱 등록에서 이 웹 앱에 대한 reCAPTCHA v3 사이트 키를 발급받아 `NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY`로 설정(Vercel 환경변수 포함).
-   - Firebase 콘솔 > App Check > API 탭에서 Cloud Firestore의 "Enforce"를 켠다. (Cloud Functions 쪽은 코드 레벨 `enforceAppCheck` 옵션으로 이미 제어된다 — 아래 2번.)
+1. **Firebase App Check (reCAPTCHA Enterprise)** — `lib/firebase/appCheck.ts` / `lib/firebase/config.ts`에서 초기화. 챌린지 없이 백그라운드에서 점수만 매기므로 실사용자는 아무것도 느끼지 않는다("사용자 경험을 해치지 않는" DDoS 방지의 핵심). 클래식 reCAPTCHA v3(`ReCaptchaV3Provider`)가 아니라 Enterprise(`ReCaptchaEnterpriseProvider`)를 쓰는 이유: 이 글 작성 시점 기준 App Check 콘솔 자체가 클래식 reCAPTCHA를 지원 중단(deprecated) 표시하고 있다. 클라이언트 쪽 API 모양은 동일(같은 인비저블 배지, 같은 생성자 시그니처)하지만, Enterprise는 결제 계정이 연결된 Google Cloud 프로젝트가 추가로 필요하다. 다만 **아래 단계들은 코드로 할 수 없는, 사람이 콘솔에서 직접 해야 하는 작업이다**:
+   - Google Cloud Console > 보안 > reCAPTCHA Enterprise에서 이 웹 앱용 키를 새로 만든다(`google.com/recaptcha/admin`의 클래식 발급 화면이 아니다). 여기서 사이트 키와 보안 비밀 키 두 값이 나온다.
+   - **사이트 키**만 `NEXT_PUBLIC_RECAPTCHA_SITE_KEY`로 설정(Vercel 환경변수 포함) — 클라이언트 번들에 그대로 노출되는 값이라 여기 들어가는 게 맞다.
+   - **보안 비밀 키**는 절대 `NEXT_PUBLIC_*`에 넣지 않는다. Firebase 콘솔 > App Check > Apps 탭 > 이 웹 앱 > 공급자로 "reCAPTCHA Enterprise" 선택 > 거기 한 곳에만 입력한다(Firebase가 서버 쪽에서 보관·검증용으로 쓴다).
+   - Firebase 콘솔 > App Check > API 탭에서 Cloud Firestore의 "Enforce"를 켠다. (Cloud Functions 쪽은 코드 레벨 `enforceAppCheck` 옵션으로 이미 제어된다 — 아래 2번.) **반드시 위 등록이 끝나서 브라우저 콘솔에 App Check 400 에러가 더 이상 없는 걸 확인한 뒤에만** 켤 것 — 등록 전에 켜면 App Check 토큰 발급 자체가 실패하는 상태에서 모든 Firestore 요청이 막혀 실사용자 화면까지 깨진다.
    - 로컬 개발(`next dev`)은 사이트 키 없이도 App Check 디버그 토큰을 자동으로 써서 그대로 동작한다.
-2. **Cloud Functions `enforceAppCheck`** — `functions/src/index.ts`의 모든 callable에 `enforceAppCheck: APP_CHECK_ENFORCE`를 걸어뒀다. 기본값은 `false`(`functions/.env.example`) — 클라이언트가 실제 유효한 App Check 토큰을 발급받기 전에 이 코드만 배포되어도 전체 OTP 기능이 즉시 막히는 걸 막기 위한 안전장치다. 위 1번(사이트 키 + 클라이언트 배포)이 끝난 뒤 `functions/.env`에 `APP_CHECK_ENFORCE=true`를 넣고 `firebase deploy --only functions`.
+2. **Cloud Functions `enforceAppCheck`** — `functions/src/index.ts`의 모든 callable에 `enforceAppCheck: APP_CHECK_ENFORCE`를 걸어뒀다. 기본값은 `false`(`functions/.env.example`) — 클라이언트가 실제 유효한 App Check 토큰을 발급받기 전에 이 코드만 배포되어도 전체 OTP 기능이 즉시 막히는 걸 막기 위한 안전장치다. 위 1번(사이트 키·보안 비밀 키 등록 + 클라이언트 배포)이 끝난 뒤 `functions/.env`에 `APP_CHECK_ENFORCE=true`를 넣고 `firebase deploy --only functions`.
 3. **Firestore 규칙의 항목 크기 상한** — `firestore.rules`의 `isValidEntrySize()`가 `entries` 쓰기의 `ciphertext`를 500,000자로 제한한다. 남용 트래픽의 속도(rate)가 아니라 한 건당 크기(size)만 막는 저비용 방어선 — 실제 남용 트래픽 차단은 위 App Check가 담당한다.
-4. CSP(`proxy.ts`)에 reCAPTCHA v3/App Check가 쓰는 `www.google.com` / `www.gstatic.com` / `firebaseappcheck.googleapis.com`을 이미 허용해뒀다 — 사이트 키를 설정하기 전까지는 아무 요청도 나가지 않으므로 지금 당장의 동작에는 영향이 없다.
+4. CSP(`proxy.ts`)에 reCAPTCHA/App Check가 쓰는 `www.google.com` / `www.gstatic.com` / `firebaseappcheck.googleapis.com`을 이미 허용해뒀다 — 클래식 reCAPTCHA(`recaptcha/api.js`)와 Enterprise(`recaptcha/enterprise.js`)가 같은 호스트를 쓰므로 공급자를 바꿔도 CSP는 그대로다. 사이트 키를 설정하기 전까지는 아무 요청도 나가지 않으므로 지금 당장의 동작에는 영향이 없다.
 
 ## Firestore 규칙 / Cloud Functions 배포
 
@@ -181,7 +183,7 @@ pnpm exec firebase deploy --only firestore:rules,firestore:indexes,functions --p
 ## Vercel 배포
 
 1. GitHub 저장소를 Vercel 프로젝트에 연결 (vercel.com에서 "Import Project").
-2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두). `NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY`는 App Check를 쓸 때만 필요("DDoS 방지" 참조) — 비워두면 지금처럼 App Check 없이 동작한다.
+2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두). `NEXT_PUBLIC_RECAPTCHA_SITE_KEY`는 App Check를 쓸 때만 필요("DDoS 방지" 참조) — 비워두면 지금처럼 App Check 없이 동작한다.
 3. **Firebase 콘솔 > Authentication > Settings > Authorized domains에 Vercel 배포 도메인을 추가해야 로그인이 동작한다** (`*.vercel.app` 프리뷰 도메인 포함, 커스텀 도메인 사용 시 그것도 추가).
 4. Next.js 앱(Vercel에 배포되는 쪽) 자체는 여전히 전부 클라이언트 사이드 Firebase SDK 호출만 하므로 Vercel 쪽에는 시크릿 환경변수가 전혀 없다. 서버 로직(OTP 검증)은 Vercel이 아니라 Firebase Cloud Functions에서 별도로 돌아간다 — 위 "Firestore 규칙 / Cloud Functions 배포" 참조.
 

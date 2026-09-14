@@ -32,9 +32,10 @@ import { isAuthTimeFresh, REAUTH_REQUIRED_MESSAGE } from "./authFreshness";
  * `enforceAppCheck: APP_CHECK_ENFORCE` (README.md's "DDoS 방지" section):
  * off by default so deploying this code alone can't lock out real users
  * before the client actually has a working App Check token (that needs a
- * reCAPTCHA v3 site key from Google's console, a manual per-domain step —
- * see lib/firebase/appCheck.ts). Flip APP_CHECK_ENFORCE=true in
- * functions/.env once that key is live and redeploy; no code change needed.
+ * reCAPTCHA Enterprise site key registered under App Check's "reCAPTCHA
+ * Enterprise" provider with its secret key — see lib/firebase/appCheck.ts).
+ * Flip APP_CHECK_ENFORCE=true in functions/.env once that's live and
+ * redeploy; no code change needed.
  */
 
 initializeApp();

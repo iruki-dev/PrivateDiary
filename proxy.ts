@@ -23,11 +23,14 @@ export function proxy(request: NextRequest) {
 
   const csp = [
     "default-src 'self'",
-    // 'strict-dynamic' alone should let App Check's reCAPTCHA v3 script
-    // (injected by an already-trusted, nonce'd script — lib/firebase/appCheck.ts)
-    // load regardless of host, but the explicit google.com/gstatic.com
-    // sources stay as the documented fallback for browsers that don't
-    // support strict-dynamic (same pattern Google's own CSP guide uses).
+    // 'strict-dynamic' alone should let App Check's reCAPTCHA Enterprise
+    // script (injected by an already-trusted, nonce'd script —
+    // lib/firebase/appCheck.ts) load regardless of host, but the explicit
+    // google.com/gstatic.com sources stay as the documented fallback for
+    // browsers that don't support strict-dynamic (same pattern Google's own
+    // CSP guide uses). Same host (www.google.com) serves both
+    // recaptcha/api.js (classic) and recaptcha/enterprise.js — nothing here
+    // needed to change when lib/firebase/appCheck.ts switched providers.
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""} https://www.google.com https://www.gstatic.com`,
     // KNOWN, ACCEPTED WEAKENING. Tailwind's runtime-injected styles and
     // next/font's inline <style> have no nonce threaded through them, so
@@ -39,10 +42,10 @@ export function proxy(request: NextRequest) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https://www.gstatic.com",
     "font-src 'self'",
-    // App Check/reCAPTCHA v3 (README.md "DDoS 방지"): www.google.com for the
-    // reCAPTCHA verify call, {content-,}firebaseappcheck.googleapis.com for
-    // exchanging that for an App Check token. No-ops until
-    // NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY is actually set.
+    // App Check/reCAPTCHA Enterprise (README.md "DDoS 방지"): www.google.com
+    // for the reCAPTCHA verify call, {content-,}firebaseappcheck.googleapis.com
+    // for exchanging that for an App Check token. No-ops until
+    // NEXT_PUBLIC_RECAPTCHA_SITE_KEY is actually set.
     "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.cloudfunctions.net https://www.google.com https://firebaseappcheck.googleapis.com https://content-firebaseappcheck.googleapis.com",
     "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com https://www.google.com",
     "object-src 'none'",
