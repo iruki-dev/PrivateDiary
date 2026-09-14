@@ -44,6 +44,9 @@ next-env.d.ts
 # design doc kept local-only, not committed
 ARCHITECTURE.md
 
+# pentest report kept local-only, not committed — contains exploit detail
+SECURITY-REVIEW-PENTEST.md
+
 # firebase emulator
 *-debug.log
 .firebase/

@@ -44,6 +44,25 @@ export interface UserPreferences {
    * inherited from a default.
    */
   draftAutosave: boolean;
+  /**
+   * PENTEST FINDING F-2: max `entries` documents this account can create
+   * per rolling 24h window, enforced server-side by
+   * functions/src/entryRateLimit.ts (a Firestore trigger using the Admin
+   * SDK — the one thing that can delete an `entries` document after the
+   * fact, bypassing append-only exactly like deleteAccount already does).
+   * Firestore rules can only gate WHO may raise or disable (0) this value,
+   * not the count itself — see firestore.rules' isValidSecurityPreferences.
+   *
+   * The default (DEFAULT_PREFERENCES below) is a real, enforced cap even
+   * for an account that never visited this setting — unlike draftAutosave,
+   * this protection has to apply to everyone by default, since the whole
+   * point is bounding what a session-only attacker (who will never
+   * voluntarily turn on a limit against themselves) can inject. 0 means no
+   * limit, matching the "사용 안 함" convention autoLockMinutes already uses
+   * — an explicit choice the account owner has to prove a master
+   * credential to make (SECURITY_PREFERENCE_KEYS below).
+   */
+  dailyEntryLimit: number;
 }
 
 /** Keys stored under `users/{uid}.preferences` — ungated, cosmetic only. */
@@ -62,6 +81,7 @@ export const DISPLAY_PREFERENCE_KEYS = [
 export const SECURITY_PREFERENCE_KEYS = [
   "autoLockMinutes",
   "draftAutosave",
+  "dailyEntryLimit",
 ] as const satisfies readonly (keyof UserPreferences)[];
 
 export const DEFAULT_PREFERENCES: UserPreferences = {
@@ -72,6 +92,11 @@ export const DEFAULT_PREFERENCES: UserPreferences = {
   // readable all afternoon.
   autoLockMinutes: 15,
   draftAutosave: false,
+  // 100/day: far past any real diary's normal use (even several entries a
+  // day), while still bounding how much undeletable junk a session-only
+  // attacker (PENTEST F-2) can inject into an append-only collection
+  // before functions/src/entryRateLimit.ts starts deleting the excess.
+  dailyEntryLimit: 100,
 };
 
 /**
@@ -93,6 +118,26 @@ export const AUTO_LOCK_CHOICES: { minutes: number; label: string }[] = [
 export const AUTO_LOCK_MINUTE_VALUES: readonly number[] = AUTO_LOCK_CHOICES.map((c) => c.minutes);
 
 /**
+ * The dailyEntryLimit values the UI offers. firestore.rules pins the
+ * stored value to exactly this set, same reasoning as AUTO_LOCK_CHOICES:
+ * functions/src/entryRateLimit.ts reads this value straight back as an
+ * enforcement decision, so a value this codebase would never produce must
+ * not be storable. 0 is the explicit "사용 안 함" (unlimited) choice.
+ */
+export const DAILY_ENTRY_LIMIT_CHOICES: { limit: number; label: string }[] = [
+  { limit: 10, label: "하루 10개" },
+  { limit: 25, label: "하루 25개" },
+  { limit: 50, label: "하루 50개" },
+  { limit: 100, label: "하루 100개" },
+  { limit: 200, label: "하루 200개" },
+  { limit: 0, label: "제한 없음" },
+];
+
+export const DAILY_ENTRY_LIMIT_VALUES: readonly number[] = DAILY_ENTRY_LIMIT_CHOICES.map(
+  (c) => c.limit
+);
+
+/**
  * Coerces whatever came back from Firestore into a complete, valid
  * preferences object.
  *
@@ -111,6 +156,7 @@ export function normalizePreferences(stored: unknown): UserPreferences {
     typeof record[key] === "boolean" ? (record[key] as boolean) : (DEFAULT_PREFERENCES[key] as boolean);
 
   const minutes = record.autoLockMinutes;
+  const dailyLimit = record.dailyEntryLimit;
 
   return {
     privateWritingMode: bool("privateWritingMode"),
@@ -120,5 +166,9 @@ export function normalizePreferences(stored: unknown): UserPreferences {
         ? minutes
         : DEFAULT_PREFERENCES.autoLockMinutes,
     draftAutosave: bool("draftAutosave"),
+    dailyEntryLimit:
+      typeof dailyLimit === "number" && DAILY_ENTRY_LIMIT_VALUES.includes(dailyLimit)
+        ? dailyLimit
+        : DEFAULT_PREFERENCES.dailyEntryLimit,
   };
 }

@@ -682,6 +682,52 @@ describe("users/{uid}.security", () => {
       updateDoc(doc(bob, "users/alice"), { "security.autoLockMinutes": 0 })
     );
   });
+
+  // PENTEST FINDING F-2: `dailyEntryLimit` caps how many `entries` a session
+  // can create per rolling 24h window (enforced server-side by
+  // functions/src/entryRateLimit.ts, which a client can never see or
+  // influence — see the entryRateLimits/{uid} deny-all block below). What
+  // rules CAN and must enforce is that CHANGING the limit needs the same
+  // master-credential proof as autoLockMinutes/draftAutosave — otherwise a
+  // session-only attacker who wants to mass-inject junk entries could just
+  // raise (or disable) their own limit first.
+  it("accepts every dailyEntryLimit value the UI offers, including 0 (unlimited)", async () => {
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    for (const limit of [0, 10, 25, 50, 100, 200]) {
+      await assertSucceeds(
+        updateDoc(doc(alice, "users/alice"), { "security.dailyEntryLimit": limit })
+      );
+    }
+  });
+
+  it("rejects a dailyEntryLimit value outside the offered set, even with a recent sign-in", async () => {
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.dailyEntryLimit": 1_000_000 }));
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.dailyEntryLimit": -1 }));
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.dailyEntryLimit": "100" }));
+  });
+
+  it("CANNOT raise dailyEntryLimit as a session-only attacker (no OTP, no recent auth)", async () => {
+    await seedUserDoc();
+    const attacker = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(updateDoc(doc(attacker, "users/alice"), { "security.dailyEntryLimit": 200 }));
+  });
+});
+
+// PENTEST FINDING F-2: the counter document backing the daily entry-creation
+// limit — see users/{uid}.security's dailyEntryLimit tests above and
+// functions/src/entryRateLimit.ts. Same reasoning and shape as otpSecrets:
+// only the Cloud Functions trigger (Admin SDK) ever touches this, so a
+// client forging a low count to dodge its own limit is structurally
+// impossible, not just discouraged.
+describe("entryRateLimits/{uid}", () => {
+  it("denies all client read/write, including the account owner", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(getDoc(doc(alice, "entryRateLimits/alice")));
+    await assertFails(setDoc(doc(alice, "entryRateLimits/alice"), { windowStart: new Date(), count: 1 }));
+  });
 });
 
 describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simulated here directly)", () => {
@@ -987,6 +1033,29 @@ describe("hardening: a session-only attacker on an OTP-enabled account", () => {
   it("CAN still bump lastEntrySeq — the write path must work without OTP", async () => {
     await seedUserDoc({ lastEntrySeq: 7 });
     await assertSucceeds(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 8 }));
+  });
+
+  // PENTEST FINDING F-1 (fixed): forward-only used to mean "any value >=
+  // current", which let this exact session-only attacker blind-write
+  // lastEntrySeq straight to maxEntrySeq() in one request — permanently and
+  // unrecoverably bricking the account's ability to save another entry,
+  // since every legitimate write computes entrySeq = lastEntrySeq + 1 and
+  // isValidEntry() caps entrySeq at the same maxEntrySeq(). Confirmed
+  // exploitable (this exact assertSucceeds failed before the fix) via this
+  // emulator before isValidLastEntrySeqStep() capped the step to +1.
+  it("CANNOT blind-jump lastEntrySeq to the cap — the write-brick this pentest found", async () => {
+    await seedUserDoc({ lastEntrySeq: 7 });
+    await assertFails(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 1_000_000 }));
+  });
+
+  it("CANNOT advance lastEntrySeq by more than 1 in a single write", async () => {
+    await seedUserDoc({ lastEntrySeq: 7 });
+    await assertFails(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 9 }));
+  });
+
+  it("a same-value lastEntrySeq write (two devices racing for the same next seq) still succeeds", async () => {
+    await seedUserDoc({ lastEntrySeq: 7 });
+    await assertSucceeds(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 7 }));
   });
 
   // autoLockMinutes/draftAutosave (lib/preferences.ts) decide how long an

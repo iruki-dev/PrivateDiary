@@ -15,7 +15,7 @@ import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
-import { AUTO_LOCK_CHOICES } from "@/lib/preferences";
+import { AUTO_LOCK_CHOICES, DAILY_ENTRY_LIMIT_CHOICES } from "@/lib/preferences";
 import { clearAllDrafts } from "@/lib/drafts";
 import {
   deleteAccount,
@@ -209,8 +209,15 @@ function PrivateWritingSection() {
  * below as ReauthRequiredError rather than a bare failure.
  */
 function SessionSection() {
-  const { loading, autoLockMinutes, draftAutosave, setAutoLockMinutes, setDraftAutosave } =
-    usePreferences();
+  const {
+    loading,
+    autoLockMinutes,
+    draftAutosave,
+    dailyEntryLimit,
+    setAutoLockMinutes,
+    setDraftAutosave,
+    setDailyEntryLimit,
+  } = usePreferences();
   const [error, setError] = useState<string | null>(null);
 
   if (loading) {
@@ -229,6 +236,15 @@ function SessionSection() {
       await setAutoLockMinutes(minutes);
     } catch (err) {
       setError(reauthMessage(err, "자동 잠금 설정을 저장하지 못했습니다."));
+    }
+  }
+
+  async function handleDailyEntryLimitChange(limit: number) {
+    setError(null);
+    try {
+      await setDailyEntryLimit(limit);
+    } catch (err) {
+      setError(reauthMessage(err, "일일 작성 한도를 저장하지 못했습니다."));
     }
   }
 
@@ -268,6 +284,30 @@ function SessionSection() {
         >
           {AUTO_LOCK_CHOICES.map((choice) => (
             <option key={choice.minutes} value={choice.minutes}>
+              {choice.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="space-y-2">
+        <label htmlFor="daily-entry-limit" className="block text-sm font-medium">
+          일일 작성 한도
+        </label>
+        <p className="muted">
+          하루에 저장할 수 있는 일기 개수를 제한합니다. 세션(로그인 상태)만 탈취한 공격자가
+          지울 수 없는 일기를 대량으로 끼워 넣는 것을 막기 위한 서버 측 방어이며, 계정을 처음
+          만들면 기본값이 이미 적용되어 있습니다. 값을 바꾸려면 암호나 백업 코드 수준의
+          본인 확인이 필요합니다.
+        </p>
+        <select
+          id="daily-entry-limit"
+          value={dailyEntryLimit}
+          onChange={(event) => void handleDailyEntryLimitChange(Number(event.target.value))}
+          className="field"
+        >
+          {DAILY_ENTRY_LIMIT_CHOICES.map((choice) => (
+            <option key={choice.limit} value={choice.limit}>
               {choice.label}
             </option>
           ))}

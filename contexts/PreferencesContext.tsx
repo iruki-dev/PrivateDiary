@@ -28,6 +28,8 @@ interface PreferencesContextValue extends UserPreferences {
   setPrivateWritingPeekAllowed: (value: boolean) => Promise<void>;
   setAutoLockMinutes: (value: number) => Promise<void>;
   setDraftAutosave: (value: boolean) => Promise<void>;
+  /** PENTEST FINDING F-2: caps `entries` created per rolling 24h window (functions/src/entryRateLimit.ts). Same reauth requirement as setAutoLockMinutes. */
+  setDailyEntryLimit: (value: number) => Promise<void>;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | undefined>(undefined);
@@ -98,6 +100,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     setPrivateWritingPeekAllowed: (v) => update({ privateWritingPeekAllowed: v }),
     setAutoLockMinutes: (v) => update({ autoLockMinutes: v }),
     setDraftAutosave: (v) => update({ draftAutosave: v }),
+    setDailyEntryLimit: (v) => update({ dailyEntryLimit: v }),
   };
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

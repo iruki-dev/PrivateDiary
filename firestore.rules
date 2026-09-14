@@ -127,11 +127,34 @@ service cloud.firestore {
     // security decision, and a number this codebase would never produce
     // (say 100000) would silently mean "never lock". 0 IS in the set —
     // that is the explicit "사용 안 함" choice.
+    //
+    // PENTEST FINDING F-2 (mitigated here + functions/src/entryRateLimit.ts):
+    // `dailyEntryLimit` caps how many `entries` documents can be created for
+    // this account per rolling 24h window. Firestore rules alone cannot
+    // enforce the cap itself — a create on `entries/{entryId}` can't be made
+    // to depend on a paired, atomic counter bump on a DIFFERENT document
+    // (rules evaluate each document write independently; there is no way to
+    // require "this create is only valid if the same batch also increments
+    // X exactly once"), so the actual enforcement is a Cloud Functions
+    // Firestore trigger (Admin SDK, which — like deleteAccount — can do the
+    // one thing rules structurally cannot: delete an `entries` document
+    // after the fact, the same bypass-of-append-only deleteAccount already
+    // relies on, here scoped to just the entries that push the account over
+    // its own configured limit). What DOES belong here, and is what this
+    // field's presence in `security` (rather than the ungated `preferences`)
+    // actually buys: changing the limit — raising it, or turning it off
+    // entirely (0) — requires proving a master credential exactly like
+    // autoLockMinutes/draftAutosave, via credentialMutationAllowed() below.
+    // Without that, a session-only attacker who wants to mass-inject
+    // undeletable junk `entries` (PENTEST F-2) could simply raise their own
+    // limit first and remove the one constraint the trigger enforces.
     function isValidSecurityPreferences(sec) {
-      return sec.keys().hasOnly(['autoLockMinutes', 'draftAutosave'])
+      return sec.keys().hasOnly(['autoLockMinutes', 'draftAutosave', 'dailyEntryLimit'])
           && (!('draftAutosave' in sec) || sec.draftAutosave is bool)
           && (!('autoLockMinutes' in sec)
-              || (sec.autoLockMinutes is int && sec.autoLockMinutes in [0, 1, 5, 15, 30, 60]));
+              || (sec.autoLockMinutes is int && sec.autoLockMinutes in [0, 1, 5, 15, 30, 60]))
+          && (!('dailyEntryLimit' in sec)
+              || (sec.dailyEntryLimit is int && sec.dailyEntryLimit in [0, 10, 25, 50, 100, 200]));
     }
 
     // security-patch-v2 / H1: the real ceiling on how many entries a real
@@ -282,16 +305,45 @@ service cloud.firestore {
     // so a hand-crafted write bypassing the app entirely still can't
     // reproduce the old shape.
     //
-    // `lastEntrySeq` is additionally forced to move forward only: letting
-    // it rewind would let a stale or hostile client hand out entry
-    // sequence numbers that collide with entries already written.
+    // `lastEntrySeq` is additionally forced to move forward BY AT MOST ONE
+    // per write, not just forward-only.
+    //
+    // PENTEST FINDING F-1 (fixed here): plain forward-only (`>=`) let a
+    // session-only attacker — no passphrase, no Shamir shares, no OTP,
+    // ungated via isOtpUngatedChange() below because this field has to stay
+    // writable without an unlock step (§3.2 rule 5) — blind-write
+    // `lastEntrySeq` straight to maxEntrySeq() (1,000,000) in ONE request,
+    // without ever reading the document first (any value that high is
+    // always >= whatever it currently is). The very next legitimate entry
+    // then computes entrySeq = lastEntrySeq + 1 = 1,000,001, which
+    // isValidEntry() rejects for exceeding maxEntrySeq() — so the account
+    // can never write another entry, ever. Because this field is
+    // forward-only, not even the real owner, fully re-authenticated, can
+    // undo it: there is no path back down. Confirmed exploitable against
+    // this exact rule shape via the rules-unit-testing emulator before
+    // this fix.
+    //
+    // The real write path (lib/firebase/entries.ts's writeEntry) only ever
+    // advances this by exactly 1 per entry — it reads the current counter,
+    // computes counter+1, and stamps that same value onto both the new
+    // entry's entrySeq and this field, in one batch. Capping the allowed
+    // step to +1 costs that legitimate flow nothing (a same-value write,
+    // i.e. two racing devices computing the same next value, also still
+    // satisfies `<=`) while turning the attacker's single blind write into
+    // something that would need on the order of a million individual writes
+    // to reach the same cap — no longer a one-shot, unrecoverable brick.
+    function isValidLastEntrySeqStep() {
+      return !('lastEntrySeq' in request.resource.data)
+          || !('lastEntrySeq' in resource.data)
+          || (request.resource.data.lastEntrySeq >= resource.data.lastEntrySeq
+              && request.resource.data.lastEntrySeq <= resource.data.lastEntrySeq + 1);
+    }
+
     function isKeyRotationRequest() {
       return isValidUserDoc(request.resource.data)
           && request.resource.data.createdAt == resource.data.createdAt
           && request.resource.data.publicKeys == resource.data.publicKeys
-          && (!('lastEntrySeq' in request.resource.data)
-              || !('lastEntrySeq' in resource.data)
-              || request.resource.data.lastEntrySeq >= resource.data.lastEntrySeq);
+          && isValidLastEntrySeqStep();
     }
 
     // security-patch-v2 / C1: otpSatisfied() ALONE used to gate every
@@ -430,6 +482,18 @@ service cloud.firestore {
     // bypasses these rules entirely) ever reads or writes this — explicit
     // deny-all here is defense in depth, not the only thing stopping clients.
     match /otpSecrets/{uid} {
+      allow read, write: if false;
+    }
+    // PENTEST FINDING F-2: the rolling 24h entry-count window backing
+    // `security.dailyEntryLimit` (see isValidSecurityPreferences() above and
+    // functions/src/entryRateLimit.ts). Same shape/reasoning as otpSecrets
+    // just above — only the Cloud Functions Firestore trigger (Admin SDK)
+    // ever reads or writes this, so a client (honest or hostile) can
+    // neither forge a low count to dodge the limit nor read another
+    // account's write volume. Deny-all here is defense in depth, not the
+    // only thing stopping clients — the trigger itself never trusts
+    // anything the client could have written here.
+    match /entryRateLimits/{uid} {
       allow read, write: if false;
     }
   }

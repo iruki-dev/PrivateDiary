@@ -3,8 +3,15 @@ import { initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore, Timestamp, FieldValue } from "firebase-admin/firestore";
 import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/https";
+import { onDocumentCreated } from "firebase-functions/v2/firestore";
+import { logger } from "firebase-functions/v2";
 import { generateSecret, generateURI, verify } from "otplib";
 import { isAuthTimeFresh, REAUTH_REQUIRED_MESSAGE } from "./authFreshness";
+import {
+  decideRateLimit,
+  resolveDailyEntryLimit,
+  type RateLimitCounterState,
+} from "./entryRateLimit";
 
 /**
  * TOTP (OTP app) as a server-enforced access gate — NOT a cryptographic
@@ -497,3 +504,90 @@ export const deleteAccount = onCall({ invoker: "public" }, async (request) => {
 
   return { success: true, deletedEntries };
 });
+
+const ENTRY_RATE_LIMITS_COLLECTION = "entryRateLimits";
+
+/**
+ * PENTEST FINDING F-2: bounds how many `entries` a single account can
+ * accumulate per rolling 24h window — see entryRateLimit.ts's module doc
+ * for the full threat this closes (a session-only attacker injecting
+ * unbounded, undeletable junk/forged entries, since `entries` create only
+ * checks shape + ownership, and update/delete are denied outright by
+ * design).
+ *
+ * Fires after every entry commits (a trigger can't block the write
+ * itself — see entryRateLimit.ts's module doc on why this is a rolling,
+ * eventually-consistent bound rather than a synchronous hard quota).
+ * Bumps `entryRateLimits/{uid}` (deny-all to every client, exactly like
+ * `otpSecrets/{uid}`) inside a transaction — the read-modify-write must be
+ * atomic for the same reason verifyStoredOtp's lockout counter needs a
+ * transaction: concurrent creates (a burst of injected entries) must not
+ * all read the same stale count and each independently think they're
+ * still under the limit.
+ *
+ * If this push takes the account over its OWN configured
+ * `security.dailyEntryLimit` (credential-gated — see firestore.rules'
+ * isValidSecurityPreferences), the newly created entry is deleted via the
+ * Admin SDK — the one thing that can undo `entries`' append-only rule,
+ * exactly like deleteAccount already relies on for account deletion. This
+ * does not try to distinguish "attacker's junk" from "the account owner's
+ * own 101st entry today" — it doesn't need to: the point is bounding
+ * volume, and an account never comes close to its default limit (100/day)
+ * through genuine use.
+ */
+export const enforceEntryRateLimit = onDocumentCreated(
+  "entries/{entryId}",
+  async (event) => {
+    const snapshot = event.data;
+    if (!snapshot) return;
+    const uid = (snapshot.data() as { uid?: unknown } | undefined)?.uid;
+    if (typeof uid !== "string" || uid.length === 0) return;
+
+    const db = getFirestore();
+    const rateLimitRef = db.collection(ENTRY_RATE_LIMITS_COLLECTION).doc(uid);
+    const userRef = db.collection("users").doc(uid);
+    const now = Date.now();
+
+    const overLimit = await db.runTransaction(async (tx) => {
+      // Both reads first — Firestore transactions require all reads before
+      // any write.
+      const [rateLimitSnap, userSnap] = await Promise.all([tx.get(rateLimitRef), tx.get(userRef)]);
+
+      const storedLimit = (
+        userSnap.data() as { security?: { dailyEntryLimit?: unknown } } | undefined
+      )?.security?.dailyEntryLimit;
+      const effectiveLimit = resolveDailyEntryLimit(storedLimit);
+
+      const previous = rateLimitSnap.exists
+        ? (rateLimitSnap.data() as { windowStart: FirebaseFirestore.Timestamp; count: number })
+        : null;
+      const previousState: RateLimitCounterState | null = previous
+        ? { windowStartMs: previous.windowStart.toMillis(), count: previous.count }
+        : null;
+
+      const { next, overLimit: decisionOverLimit } = decideRateLimit(
+        previousState,
+        now,
+        effectiveLimit
+      );
+
+      tx.set(rateLimitRef, {
+        windowStart: Timestamp.fromMillis(next.windowStartMs),
+        count: next.count,
+      });
+
+      return decisionOverLimit;
+    });
+
+    if (overLimit) {
+      logger.warn("enforceEntryRateLimit: deleting entry over the account's daily limit", {
+        uid,
+        entryId: event.params.entryId,
+      });
+      // Admin SDK bypass of append-only — see this function's doc comment
+      // and deleteAccount's, which relies on the same bypass for the same
+      // structural reason (rules alone cannot do this).
+      await snapshot.ref.delete();
+    }
+  }
+);

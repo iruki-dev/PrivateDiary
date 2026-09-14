@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   AUTO_LOCK_CHOICES,
   AUTO_LOCK_MINUTE_VALUES,
+  DAILY_ENTRY_LIMIT_CHOICES,
+  DAILY_ENTRY_LIMIT_VALUES,
   DEFAULT_PREFERENCES,
   DISPLAY_PREFERENCE_KEYS,
   SECURITY_PREFERENCE_KEYS,
@@ -24,6 +26,22 @@ describe("defaults", () => {
 
   it("offers an explicit never option", () => {
     expect(AUTO_LOCK_CHOICES.some((choice) => choice.minutes === 0)).toBe(true);
+  });
+
+  // PENTEST FINDING F-2: this cap has to protect an account that never
+  // visited /settings, since the whole point is bounding what a
+  // session-only attacker (who will never voluntarily limit themselves)
+  // can inject — unlike draftAutosave, this one can't default to "off".
+  it("enforces a real daily entry limit by default — a session-only attacker must not get unlimited injection for free", () => {
+    expect(DEFAULT_PREFERENCES.dailyEntryLimit).toBeGreaterThan(0);
+  });
+
+  it("offers the default daily entry limit as one of the choices", () => {
+    expect(DAILY_ENTRY_LIMIT_VALUES).toContain(DEFAULT_PREFERENCES.dailyEntryLimit);
+  });
+
+  it("offers an explicit unlimited option", () => {
+    expect(DAILY_ENTRY_LIMIT_CHOICES.some((choice) => choice.limit === 0)).toBe(true);
   });
 });
 
@@ -48,6 +66,7 @@ describe("normalizePreferences", () => {
       privateWritingPeekAllowed: false,
       autoLockMinutes: 1,
       draftAutosave: true,
+      dailyEntryLimit: 25,
     };
     expect(normalizePreferences(stored)).toEqual(stored);
   });
@@ -63,6 +82,22 @@ describe("normalizePreferences", () => {
     for (const bad of [100000, 7, -1, Number.NaN, Number.POSITIVE_INFINITY, "15", null]) {
       expect(normalizePreferences({ autoLockMinutes: bad }).autoLockMinutes).toBe(
         DEFAULT_PREFERENCES.autoLockMinutes
+      );
+    }
+  });
+
+  it("accepts 0 (unlimited entries) as a real choice, not as junk", () => {
+    expect(normalizePreferences({ dailyEntryLimit: 0 }).dailyEntryLimit).toBe(0);
+  });
+
+  it("refuses a dailyEntryLimit value outside the offered set", () => {
+    // Same reasoning as autoLockMinutes above: functions/src/entryRateLimit.ts
+    // reads this value straight back as an enforcement decision, so a junk
+    // value must fall back to the safe default rather than being trusted —
+    // an unbounded or huge value here would amount to no limit at all.
+    for (const bad of [1_000_000, 15, -1, Number.NaN, Number.POSITIVE_INFINITY, "100", null]) {
+      expect(normalizePreferences({ dailyEntryLimit: bad }).dailyEntryLimit).toBe(
+        DEFAULT_PREFERENCES.dailyEntryLimit
       );
     }
   });
@@ -94,6 +129,7 @@ describe("DISPLAY_PREFERENCE_KEYS / SECURITY_PREFERENCE_KEYS", () => {
     "privateWritingPeekAllowed",
     "autoLockMinutes",
     "draftAutosave",
+    "dailyEntryLimit",
   ];
 
   it("together cover every UserPreferences key exactly once", () => {
@@ -102,7 +138,11 @@ describe("DISPLAY_PREFERENCE_KEYS / SECURITY_PREFERENCE_KEYS", () => {
     expect(new Set(combined).size).toBe(combined.length);
   });
 
-  it("puts the two exposure controls, and only those, in the security list", () => {
-    expect([...SECURITY_PREFERENCE_KEYS].sort()).toEqual(["autoLockMinutes", "draftAutosave"]);
+  it("puts the three exposure controls, and only those, in the security list", () => {
+    expect([...SECURITY_PREFERENCE_KEYS].sort()).toEqual([
+      "autoLockMinutes",
+      "dailyEntryLimit",
+      "draftAutosave",
+    ]);
   });
 });
