@@ -97,15 +97,41 @@ service cloud.firestore {
                       || isB64(methods.shamir.otpBypassVerifier, 64))));
     }
 
-    // Pure display preferences (ARCHITECTURE.md §3.9) — never read by
-    // anything security-relevant (not lib/crypto, not functions/), so this
-    // validation only guards document shape, not any access decision.
-    // Account-level (not per-device) on purpose: the user asked for these
-    // to follow them across devices rather than living in localStorage.
+    // Pure display preferences (ARCHITECTURE.md §3.9, lib/preferences.ts) —
+    // never read by lib/crypto or functions/, so this validates shape only,
+    // not any access decision. Stays in isOtpUngatedChange()'s exempt list
+    // below: unlike `security` (right after this), nothing here changes how
+    // exposed an unlocked session or a stored draft is.
     function isValidPreferences(prefs) {
       return prefs.keys().hasOnly(['privateWritingMode', 'privateWritingPeekAllowed'])
           && (!('privateWritingMode' in prefs) || prefs.privateWritingMode is bool)
           && (!('privateWritingPeekAllowed' in prefs) || prefs.privateWritingPeekAllowed is bool);
+    }
+
+    // security-patch-v2 merge / preferences split: `autoLockMinutes` and
+    // `draftAutosave` (lib/preferences.ts) started out bundled into the
+    // cosmetic `preferences` map above, gated only by otpSatisfied() — but
+    // that gate is vacuously true for the many accounts that never enabled
+    // OTP (see credentialMutationAllowed() below), which would have left
+    // these two exposure controls exactly as unprotected against a
+    // session-only attacker as C1 found wrappedSeed/publicKeys/
+    // decryptionMethods to be. Splitting them into their own top-level
+    // `security` field — gated by credentialMutationAllowed(), same as
+    // those credential-bearing fields — closes that gap instead of
+    // reproducing it under a new name. `preferences` itself reverts to
+    // being purely cosmetic and stays ungated.
+    //
+    // `autoLockMinutes` is pinned to the exact set the UI offers rather
+    // than a range, for the same reason isValidWrappedSeed pins the PBKDF2
+    // iteration floor: the client feeds this value straight back into a
+    // security decision, and a number this codebase would never produce
+    // (say 100000) would silently mean "never lock". 0 IS in the set —
+    // that is the explicit "사용 안 함" choice.
+    function isValidSecurityPreferences(sec) {
+      return sec.keys().hasOnly(['autoLockMinutes', 'draftAutosave'])
+          && (!('draftAutosave' in sec) || sec.draftAutosave is bool)
+          && (!('autoLockMinutes' in sec)
+              || (sec.autoLockMinutes is int && sec.autoLockMinutes in [0, 1, 5, 15, 30, 60]));
     }
 
     // security-patch-v2 / H1: the real ceiling on how many entries a real
@@ -125,7 +151,7 @@ service cloud.firestore {
     }
 
     function isValidUserDoc(data) {
-      return data.keys().hasOnly(['publicKeys', 'wrappedSeed', 'decryptionMethods', 'preferences', 'lastEntrySeq', 'createdAt'])
+      return data.keys().hasOnly(['publicKeys', 'wrappedSeed', 'decryptionMethods', 'preferences', 'security', 'lastEntrySeq', 'createdAt'])
           && data.publicKeys.keys().hasOnly(['x25519', 'mlkem768'])
           && isB64(data.publicKeys.mlkem768, 2048)
           && data.publicKeys.x25519 is map
@@ -134,6 +160,7 @@ service cloud.firestore {
           && isValidWrappedSeed(data.wrappedSeed)
           && (!('decryptionMethods' in data) || isValidDecryptionMethods(data.decryptionMethods))
           && (!('preferences' in data) || isValidPreferences(data.preferences))
+          && (!('security' in data) || isValidSecurityPreferences(data.security))
           && (!('lastEntrySeq' in data)
               || (data.lastEntrySeq is int && data.lastEntrySeq >= 0 && data.lastEntrySeq <= maxEntrySeq()));
     }
@@ -175,17 +202,28 @@ service cloud.firestore {
     // that function also gates `entries/{entryId}` reads, and a normal,
     // long-lived-but-never-reauthenticated session reading its own diary
     // is completely expected — only WRITES that grant or replace a master
-    // credential need this.
+    // credential (or, since the preferences split below, a security
+    // control) need this.
     function isRecentAuth() {
       return request.auth.token.auth_time is number
           && request.time.toMillis() - (request.auth.token.auth_time * 1000) <= 300000; // 5 min
     }
 
     // The two fields on users/{uid} that carry no security weight and so
-    // stay writable without passing the OTP gate:
+    // stay writable without passing either gate below:
     //
-    //  - `preferences` — display-only (§3.9), never read by lib/crypto or
-    //    functions/.
+    //  - `preferences` — purely cosmetic (privateWritingMode,
+    //    privateWritingPeekAllowed; ARCHITECTURE.md §3.9). `autoLockMinutes`
+    //    and `draftAutosave` used to live here too, on the same "no
+    //    security weight" reasoning — but they decide how long an unlocked
+    //    session stays readable and whether drafts touch disk in
+    //    plaintext, so leaving them exempt would have let a session-only
+    //    attacker switch a victim's auto-lock off (or drafts on) and wait.
+    //    They now live in their own `security` field instead (see
+    //    isValidSecurityPreferences above), gated by
+    //    credentialMutationAllowed() below exactly like wrappedSeed/
+    //    publicKeys/decryptionMethods — closing the same C1-shaped hole
+    //    for these two fields that C1 closed for those.
     //  - `lastEntrySeq` — the entry-sequence hint the write path bumps on
     //    every save. Writing a diary entry must keep working without any
     //    unlock step (ARCHITECTURE.md §3.2 rule 5), and the OTP gate is
@@ -194,10 +232,6 @@ service cloud.firestore {
     //    costs nothing: the number is a hint, the authoritative binding is
     //    the AES-GCM AAD on each entry, and app/entries/page.tsx
     //    cross-checks it against the entries actually present.
-    //
-    // Everything else in this document — wrappedSeed, publicKeys,
-    // decryptionMethods — is a credential-bearing field, and changing any
-    // of them requires otpSatisfied().
     function isOtpUngatedChange() {
       return request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['preferences', 'lastEntrySeq']);
@@ -212,8 +246,12 @@ service cloud.firestore {
     //      to {}) change together.
     //   3. Enabling/disabling one decryption method: only `decryptionMethods`
     //      (a single sub-field of it, via dotted-path updates) changes.
-    //   4. A display-preference change (§3.9): only `preferences` changes.
-    //   5. An entry-sequence bump from the write path: only `lastEntrySeq`.
+    //   4. A display-preference change (§3.9): only `preferences` changes —
+    //      reachable via isOtpUngatedChange() without either gate below.
+    //   5. A security-preference change (§3.11, §3.12): only `security`
+    //      changes — reachable only via credentialMutationAllowed() below,
+    //      same as a credential-bearing field.
+    //   6. An entry-sequence bump from the write path: only `lastEntrySeq`.
     // In every case createdAt is immutable and the document shape stays
     // valid. This only ever narrows what an authenticated uid can do to ITS
     // OWN doc — the outer `request.auth.uid == uid` check is what actually
@@ -298,9 +336,9 @@ service cloud.firestore {
     //
     // Sizes are base64 lengths with headroom: ML-KEM-768 ciphertext 1088B
     // -> ~1452 chars; wrapped content key 48B -> 64; X25519 public key and
-    // 12-byte IVs well under their caps. 500,000 chars of ciphertext is
-    // roughly a 375KB plaintext entry, far past anything a real diary
-    // entry needs.
+    // 12-byte IVs well under their caps. 560,000 chars of ciphertext is
+    // roughly a 375KB plaintext entry plus §3.15's padding overhead, far
+    // past anything a real diary entry needs.
     //
     // What rules deliberately do NOT enforce is global uniqueness of
     // entrySeq — that needs a transactional counter read, which security
@@ -314,17 +352,43 @@ service cloud.firestore {
                                   'ephemeralX25519PublicKey', 'aad', 'createdAt'])
           && data.uid is string
           && data.entrySeq is int && data.entrySeq > 0 && data.entrySeq <= maxEntrySeq()
-          && isB64(data.ciphertext, 500000)
+          // Ceiling raised from 500,000 with length padding (§3.15): the
+          // same entry now stores up to ~12% larger, and an unchanged cap
+          // would have started rejecting entries that used to fit.
+          && isB64(data.ciphertext, 560000)
+          // Floor, not an exact check. A padded record is at least
+          // MIN_PADDED_ENTRY_LENGTH (1024) + the 16-byte GCM tag = 1040
+          // bytes, which is 1388 base64 chars; anything materially shorter
+          // was not padded at all. Rules cannot verify real padding — the
+          // bytes are opaque here — but they can refuse the obvious case,
+          // so "every stored entry is padded" is structural rather than a
+          // promise the client makes to itself.
+          && data.ciphertext.size() >= 1380
           && isB64(data.iv, 32)
           && isB64(data.wrappedContentKey, 128)
           && isB64(data.wrappedContentKeyIv, 32)
           && isB64(data.kemCiphertext, 2048)
           && isB64(data.ephemeralX25519PublicKey, 64)
           && data.createdAt is timestamp
-          && data.aad.keys().hasOnly(['uid', 'entrySeq', 'createdAt'])
+          && data.aad.keys().hasOnly(['uid', 'entrySeq', 'createdAt', 'fmt'])
           && data.aad.uid == data.uid
           && data.aad.entrySeq == data.entrySeq
-          && data.aad.createdAt is string && data.aad.createdAt.size() <= 40;
+          && data.aad.createdAt is string && data.aad.createdAt.size() <= 40
+          // REQUIRED on every new entry (ARCHITECTURE.md §3.15). This is a
+          // ratchet: existing unpadded entries keep working (they are only
+          // ever read, and `entries` is append-only), but nothing can write
+          // an unpadded one again — not a stale client, not a tampered one.
+          //
+          // DEPLOY ORDER MATTERS because of that: ship the client that
+          // writes `fmt` BEFORE deploying these rules, or in-flight clients
+          // lose the ability to save. Same constraint in reverse if the
+          // client is ever rolled back.
+          //
+          // The tag is inside the AEAD's AAD as well, which is what makes
+          // it meaningful rather than decorative: strip it from the stored
+          // document and the entry stops decrypting instead of quietly
+          // being read as unpadded.
+          && 'fmt' in data.aad && data.aad.fmt == 'padded-v1';
     }
 
     match /entries/{entryId} {

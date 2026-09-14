@@ -7,6 +7,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { OtpGate } from "@/components/OtpGate";
+import { EntryBrowser } from "@/components/EntryBrowser";
 import { LoadingScreen, LoadingState } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import {
@@ -18,12 +19,10 @@ import { ShamirNotConfiguredError } from "@/lib/firebase/otp";
 import {
   bytesToBase64,
   computeShamirOtpBypassProof,
-  decryptEntry,
   textToRecoverySecret,
   InvalidShamirSharesError,
   WrongPassphraseError,
 } from "@/lib/crypto";
-import { assertNativeIntegrity, EnvironmentTamperedError } from "@/lib/security/nativeIntegrity";
 
 type UnlockMode = "passphrase" | "shamir";
 
@@ -32,6 +31,11 @@ type UnlockMode = "passphrase" | "shamir";
  * secret — only the content is), but plaintext is only ever computed after
  * the seed is unlocked in this session (ARCHITECTURE.md §3.3, Phase 5:
  * "미입력 상태에서는 암호문 존재 여부만 노출하고 본문은 절대 노출하지 않음").
+ *
+ * This page owns the GATES — auth, OTP, and which credential unlocks the
+ * seed. Everything past them (search, grouping, incremental decryption,
+ * export) lives in components/EntryBrowser.tsx, which only ever runs with
+ * private keys already in hand.
  *
  * The passphrase and Shamir shares are co-equal master credentials
  * (ARCHITECTURE.md §3.7, contexts/SeedContext.tsx) — either reaches the
@@ -58,6 +62,8 @@ export default function EntriesPage() {
     privateKeys,
     unlock,
     unlockWithShamirShares,
+    lock,
+    lockReason,
     decryptionMethods,
   } = useSeed();
   const { loading: otpLoading, otpEnabled, otpVerified, verifyViaShamirBypass } = useOtp();
@@ -73,14 +79,6 @@ export default function EntriesPage() {
   // decryption failure via the AAD binding; this catches the case that
   // binding structurally cannot — entries that are simply missing.
   const [integrity, setIntegrity] = useState<EntrySequenceIntegrity | null>(null);
-
-  const [decrypted, setDecrypted] = useState<Record<string, string>>({});
-  const [decryptErrors, setDecryptErrors] = useState<Record<string, string>>({});
-  // Which `metadata` array (by reference) decryption has finished for, so
-  // "decrypting" below can be derived during render instead of tracked as
-  // its own state set synchronously inside an effect.
-  const [decryptedForMetadata, setDecryptedForMetadata] = useState<StoredEntry[] | null>(null);
-  const decrypting = !!privateKeys && metadata.length > 0 && decryptedForMetadata !== metadata;
 
   const [unlockMode, setUnlockMode] = useState<UnlockMode>("passphrase");
   const [passphrase, setPassphrase] = useState("");
@@ -121,63 +119,11 @@ export default function EntriesPage() {
     };
   }, [user, canReadEntries]);
 
-  useEffect(() => {
-    // Depending on `metadata` (not just `privateKeys`) matters when this
-    // page remounts while already unlocked — e.g. navigating away and back
-    // via NavBar. `privateKeys` is unchanged (it lives in SeedContext, not
-    // local state), so it alone wouldn't re-trigger this effect; the async
-    // metadata fetch above resolving AFTER this effect's first run on mount
-    // would otherwise leave every entry permanently undecrypted (rendering
-    // as blank boxes) until a full page reload reset everything.
-    if (!privateKeys || metadata.length === 0 || decryptedForMetadata === metadata) return;
-    let cancelled = false;
-    (async () => {
-      const plaintexts: Record<string, string> = {};
-      const errors: Record<string, string> = {};
-      // lib/security/nativeIntegrity.ts: checked once before decrypting
-      // this batch rather than never at all — a tampered environment
-      // could be reading `plaintexts` (or the private keys used to
-      // produce it) regardless of what this component does with the
-      // result, so this refuses to even attempt decryption instead of
-      // handing plaintext to it.
-      try {
-        assertNativeIntegrity();
-      } catch (err) {
-        if (!cancelled && err instanceof EnvironmentTamperedError) {
-          const message = "브라우저 환경이 변조된 것으로 감지되어 복호화를 중단했습니다.";
-          setDecryptErrors(Object.fromEntries(metadata.map((entry) => [entry.id, message])));
-          setDecryptedForMetadata(metadata);
-        }
-        return;
-      }
-      for (const entry of metadata) {
-        // security-patch-v2 / H2: payload is null when
-        // lib/firebase/entries.ts's listEntries() couldn't even decode
-        // this entry's stored fields (not a decryption failure — there's
-        // no ciphertext to feed decryptEntry in the first place). Still
-        // surfaced per-entry, same as a real TamperedCiphertextError,
-        // rather than only being visible as a gap in dev console output.
-        if (!entry.payload) {
-          errors[entry.id] = "손상된 항목 — 저장된 데이터를 읽을 수 없습니다.";
-          continue;
-        }
-        try {
-          plaintexts[entry.id] = await decryptEntry(privateKeys, entry.payload);
-        } catch {
-          errors[entry.id] = "복호화 실패 — 암호문이 변조되었을 수 있습니다.";
-        }
-      }
-      if (!cancelled) {
-        setDecrypted(plaintexts);
-        setDecryptErrors(errors);
-        setDecryptedForMetadata(metadata);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [privateKeys, metadata, decryptedForMetadata]);
-
+  // Incremental decryption (native-integrity check, chunking, per-entry
+  // failure isolation including the payload: null case from
+  // lib/firebase/entries.ts's listEntries()) now lives in
+  // hooks/useDecryptedEntries.ts, used by components/EntryBrowser.tsx below
+  // — this page only owns the gates above that decision.
   function switchMode(mode: UnlockMode) {
     setUnlockError(null);
     setUnlockMode(mode);
@@ -270,15 +216,52 @@ export default function EntriesPage() {
     </>
   );
 
+  // The reading view earns a second column on wide screens (calendar +
+  // statistics beside the list); every gate before it stays a single
+  // narrow column, where a 5xl-wide passphrase form would look lost.
+  const browsing =
+    !otpLoading &&
+    seedStatus === "unlocked" &&
+    canReadEntries &&
+    !!privateKeys &&
+    metadataLoaded &&
+    metadata.length > 0;
+
+  const emptyState = (
+    <div className="card space-y-3 text-center">
+      <p className="muted">아직 작성한 일기가 없습니다.</p>
+      <Link href="/write" className="btn-primary">
+        첫 일기 쓰기
+      </Link>
+    </div>
+  );
+
   return (
     <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
-      <div className="w-full max-w-xl space-y-6">
+      <div className={`w-full space-y-6 ${browsing ? "max-w-xl lg:max-w-5xl" : "max-w-xl"}`}>
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">지난 일기</h1>
-          <Link href="/write" className="text-sm link">
-            오늘의 일기 쓰기
-          </Link>
+          <div className="flex items-center gap-3">
+            {seedStatus === "unlocked" && (
+              <button type="button" onClick={() => lock("manual")} className="text-sm link">
+                잠그기
+              </button>
+            )}
+            <Link href="/write" className="text-sm link">
+              오늘의 일기 쓰기
+            </Link>
+          </div>
         </div>
+
+        {/* Explains a session that locked itself out from under the reader
+            (contexts/SeedContext.tsx's inactivity timer) — otherwise the
+            list just vanishes back into a passphrase prompt with no reason
+            given, which reads like a bug. */}
+        {seedStatus === "locked" && lockReason === "idle" && (
+          <p role="status" className="muted text-xs">
+            일정 시간 사용하지 않아 자동으로 잠갔습니다. 설정에서 시간을 바꿀 수 있습니다.
+          </p>
+        )}
 
         {otpLoading && <LoadingState />}
 
@@ -293,65 +276,18 @@ export default function EntriesPage() {
           </div>
         )}
 
-        {!otpLoading && seedStatus === "unlocked" && canReadEntries && (
+        {!otpLoading && seedStatus === "unlocked" && canReadEntries && privateKeys && (
           <>
             {!metadataLoaded && <LoadingState label="불러오는 중..." />}
 
-            {metadataLoaded && integrity && !integrity.ok && (
-              <div role="alert" className="card space-y-1 border-amber-500/50">
-                <p className="text-sm font-semibold text-amber-600 dark:text-amber-400">
-                  일기 목록이 온전하지 않습니다
-                </p>
-                {integrity.missingTailCount > 0 && (
-                  <p className="muted text-xs">
-                    저장된 기록보다 {integrity.missingTailCount}개의 일기가 적게 조회되었습니다.
-                  </p>
-                )}
-                {integrity.missingSeqs.length > 0 && (
-                  <p className="muted text-xs">
-                    누락된 순번: {integrity.missingSeqs.join(", ")}
-                  </p>
-                )}
-                {integrity.duplicateSeqs.length > 0 && (
-                  <p className="muted text-xs">
-                    중복된 순번: {integrity.duplicateSeqs.join(", ")}
-                  </p>
-                )}
-                <p className="muted text-xs">
-                  각 일기의 내용 자체는 여전히 변조 검증을 통과했습니다. 목록에서 일기가 빠졌거나
-                  중복된 것으로, 서버 측 삭제·누락일 수 있습니다.
-                </p>
-              </div>
-            )}
+            {metadataLoaded && metadata.length === 0 && emptyState}
 
-            {metadataLoaded && metadata.length === 0 && (
-              <div className="card space-y-3 text-center">
-                <p className="muted">아직 작성한 일기가 없습니다.</p>
-                <Link href="/write" className="btn-primary">
-                  첫 일기 쓰기
-                </Link>
-              </div>
-            )}
-
-            {metadataLoaded && metadata.length > 0 && decrypting && (
-              <LoadingState label="복호화하는 중..." />
-            )}
-
-            {metadataLoaded && metadata.length > 0 && !decrypting && (
-              <ul className="space-y-4">
-                {metadata.map((entry) => (
-                  <li key={entry.id} className="card">
-                    <p className="text-xs text-zinc-400">
-                      {entry.createdAt?.toDate?.().toLocaleString("ko-KR") ?? "저장 중..."}
-                    </p>
-                    {decryptErrors[entry.id] ? (
-                      <p className="mt-2 error-text">{decryptErrors[entry.id]}</p>
-                    ) : (
-                      <p className="mt-2 whitespace-pre-wrap text-sm">{decrypted[entry.id]}</p>
-                    )}
-                  </li>
-                ))}
-              </ul>
+            {metadataLoaded && metadata.length > 0 && (
+              <EntryBrowser
+                entries={metadata}
+                integrity={integrity}
+                privateKeys={privateKeys}
+              />
             )}
           </>
         )}
@@ -399,14 +335,7 @@ export default function EntriesPage() {
           <OtpGate>
             {!metadataLoaded && <LoadingState label="불러오는 중..." />}
 
-            {metadataLoaded && metadata.length === 0 && (
-              <div className="card space-y-3 text-center">
-                <p className="muted">아직 작성한 일기가 없습니다.</p>
-                <Link href="/write" className="btn-primary">
-                  첫 일기 쓰기
-                </Link>
-              </div>
-            )}
+            {metadataLoaded && metadata.length === 0 && emptyState}
 
             {metadataLoaded && metadata.length > 0 && (
               <form onSubmit={handleUnlock} className="space-y-3 card">

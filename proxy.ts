@@ -23,6 +23,11 @@ export function proxy(request: NextRequest) {
 
   const csp = [
     "default-src 'self'",
+    // Nonce-only, with 'strict-dynamic' so a nonce'd script may load its
+    // own dependencies. No host allowlist: since App Check was removed
+    // (ARCHITECTURE.md §3.10) nothing in this app loads a third-party
+    // script at all, and an allowlist that matches nothing is just an
+    // invitation to assume something is allowed that isn't.
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
     // KNOWN, ACCEPTED WEAKENING. Tailwind's runtime-injected styles and
     // next/font's inline <style> have no nonce threaded through them, so
@@ -34,11 +39,14 @@ export function proxy(request: NextRequest) {
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
+    // Firestore + Auth + the OTP callables (functions/). Nothing else:
+    // the reCAPTCHA/App Check endpoints that used to be listed here went
+    // away with App Check itself (ARCHITECTURE.md §3.10).
     "connect-src 'self' https://firestore.googleapis.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://www.googleapis.com https://*.cloudfunctions.net",
     // accounts.google.com: Google Sign-In (lib/firebase/auth.ts's
-    // signInWithGoogle). *.firebaseapp.com: Firebase Auth's own hidden
-    // iframe for cross-domain auth-state sync, needed regardless of which
-    // sign-in method is used.
+    // signInWithGoogle) popup/redirect flow. *.firebaseapp.com: Firebase
+    // Auth's own hidden iframe for cross-domain auth-state sync, needed
+    // regardless of which sign-in method is used.
     "frame-src 'self' https://*.firebaseapp.com https://accounts.google.com",
     "object-src 'none'",
     "base-uri 'self'",

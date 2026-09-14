@@ -2,26 +2,32 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useAuth } from "./AuthContext";
-import { getUserPreferences, setUserPreferences, type UserPreferences } from "@/lib/firebase/users";
+import { getUserPreferences, setUserPreferences } from "@/lib/firebase/users";
+import { DEFAULT_PREFERENCES, type UserPreferences } from "@/lib/preferences";
 
 /**
- * Pure display preferences (ARCHITECTURE.md §3.9) — e.g. whether /write
- * blurs while typing. Deliberately account-level (users/{uid}.preferences)
- * rather than localStorage: the user asked for these to follow them across
- * devices. Kept as its own context rather than folded into SeedContext
- * because it has nothing to do with the master seed/keys — just like
- * OtpContext, it only needs to know who's signed in (AuthContext).
+ * Account-level preferences (users/{uid}.preferences) — how /write behaves
+ * while typing, how long an unlocked session survives, whether drafts are
+ * kept on the device. All of them follow the account across devices.
+ *
+ * Kept as its own context rather than folded into SeedContext because it
+ * has nothing to do with the master seed/keys — just like OtpContext, it
+ * only needs to know who's signed in (AuthContext). SeedContext sits
+ * BELOW this provider precisely so it can read autoLockMinutes from here
+ * (contexts/Providers.tsx).
+ *
+ * While the fetch is in flight, `loading` is true and the values are the
+ * defaults — which is the safe reading for every one of them (auto-lock
+ * on, drafts off, blur off but /write waits on `loading` before
+ * rendering). Nothing here should ever fail open.
  */
-
-const DEFAULT_PREFERENCES: UserPreferences = {
-  privateWritingMode: false,
-  privateWritingPeekAllowed: true,
-};
 
 interface PreferencesContextValue extends UserPreferences {
   loading: boolean;
   setPrivateWritingMode: (value: boolean) => Promise<void>;
   setPrivateWritingPeekAllowed: (value: boolean) => Promise<void>;
+  setAutoLockMinutes: (value: number) => Promise<void>;
+  setDraftAutosave: (value: boolean) => Promise<void>;
 }
 
 const PreferencesContext = createContext<PreferencesContextValue | undefined>(undefined);
@@ -71,6 +77,15 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.error("setUserPreferences failed", err);
         setPreferences(previous);
+        // Rethrown (not just logged) so a caller writing a security-
+        // relevant field (lib/preferences.ts's SECURITY_PREFERENCE_KEYS —
+        // gated by firestore.rules' credentialMutationAllowed()) can tell
+        // a real failure, e.g. ReauthRequiredError on a non-OTP account
+        // whose session isn't recent enough, from success and say so
+        // (app/settings/page.tsx's SessionSection). Callers that don't
+        // care (the purely cosmetic setters) can just ignore the
+        // rejection — `void setX(...)`, same as before.
+        throw err;
       }
     },
     [user, preferences]
@@ -81,6 +96,8 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
     loading,
     setPrivateWritingMode: (v) => update({ privateWritingMode: v }),
     setPrivateWritingPeekAllowed: (v) => update({ privateWritingPeekAllowed: v }),
+    setAutoLockMinutes: (v) => update({ autoLockMinutes: v }),
+    setDraftAutosave: (v) => update({ draftAutosave: v }),
   };
 
   return <PreferencesContext.Provider value={value}>{children}</PreferencesContext.Provider>;

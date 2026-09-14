@@ -11,6 +11,12 @@ import {
 import { db } from "./config";
 import { ReauthRequiredError } from "./reauth";
 import {
+  DISPLAY_PREFERENCE_KEYS,
+  SECURITY_PREFERENCE_KEYS,
+  normalizePreferences,
+  type UserPreferences,
+} from "@/lib/preferences";
+import {
   bytesToBase64,
   publicKeysFromStorage,
   publicKeysToStorage,
@@ -53,30 +59,37 @@ interface DecryptionMethodsDocData {
 }
 
 /**
- * Pure display preferences (ARCHITECTURE.md §3.9) — never read by
- * lib/crypto or functions/, kept account-level (not localStorage) because
- * that's what was actually asked for: these should follow the user across
- * devices rather than being per-device.
+ * Account-level preferences. The shape, defaults and validation live in
+ * lib/preferences.ts (no Firebase import, so firestore.rules has one
+ * auditable counterpart and the rules can be mirrored in unit tests);
+ * re-exported here because this is where callers already import them from.
  */
-export interface UserPreferences {
-  privateWritingMode: boolean;
-  privateWritingPeekAllowed: boolean;
-}
+export type { UserPreferences } from "@/lib/preferences";
 
 interface UserDocData {
   publicKeys: HybridPublicKeysStorage;
   wrappedSeed: WrappedSeedStorage;
   decryptionMethods?: DecryptionMethodsDocData;
-  preferences?: Partial<UserPreferences>;
+  /** Cosmetic-only fields (lib/preferences.ts's DISPLAY_PREFERENCE_KEYS) — no reauth to write. */
+  preferences?: Partial<Pick<UserPreferences, (typeof DISPLAY_PREFERENCE_KEYS)[number]>>;
+  /**
+   * Exposure-relevant fields (lib/preferences.ts's SECURITY_PREFERENCE_KEYS)
+   * — a separate top-level field from `preferences` specifically so
+   * firestore.rules can gate it like a credential-bearing field
+   * (credentialMutationAllowed()) while `preferences` stays ungated. See
+   * lib/preferences.ts's module doc for the full reasoning.
+   */
+  security?: Partial<Pick<UserPreferences, (typeof SECURITY_PREFERENCE_KEYS)[number]>>;
   /**
    * Highest entrySeq handed out so far (ARCHITECTURE.md §3.4). Lives here
    * rather than being recomputed from the `entries` collection because
    * writing an entry must keep working without any unlock step (§3.2 rule
    * 5) while `entries` READS are behind the OTP gate — deriving the next
    * sequence number by querying entries made every write depend on a gate
-   * that is deliberately read-only. firestore.rules lets this one field
-   * (and `preferences`) move without otpSatisfied(), and forces it
-   * forward-only so a stale client can't reissue a number already used.
+   * that is deliberately read-only. firestore.rules' isOtpUngatedChange()
+   * lets this field (and `preferences`) move without either
+   * otpSatisfied() or isRecentAuth(), and forces it forward-only so a
+   * stale client can't reissue a number already used.
    *
    * Optional: accounts created before this field existed don't have it —
    * see lib/firebase/entries.ts's getNextEntrySeq fallback.
@@ -283,22 +296,61 @@ export async function disableShamirMethod(uid: string): Promise<void> {
   );
 }
 
-const DEFAULT_PREFERENCES: UserPreferences = {
-  privateWritingMode: false,
-  privateWritingPeekAllowed: true,
-};
-
-/** Missing fields fall back to their default — covers accounts that never set a given preference yet. */
+/**
+ * Missing or invalid fields fall back to their default — covers accounts
+ * that never set a given preference, and refuses to trust a stored value
+ * outside what the UI can produce (see normalizePreferences). Reads both
+ * `preferences` and `security` and merges them into one object; callers
+ * don't need to know they're stored separately.
+ */
 export async function getUserPreferences(uid: string): Promise<UserPreferences> {
   const snapshot = await getDoc(doc(db, "users", uid));
-  const stored = (snapshot.data() as UserDocData | undefined)?.preferences;
-  return { ...DEFAULT_PREFERENCES, ...stored };
+  const data = snapshot.data() as UserDocData | undefined;
+  return normalizePreferences({ ...data?.preferences, ...data?.security });
 }
 
-/** Merges `patch` into `preferences` via dotted-path updates, leaving unrelated fields (and other preferences) untouched. */
+function isSecurityPreferenceKey(key: string): key is (typeof SECURITY_PREFERENCE_KEYS)[number] {
+  return (SECURITY_PREFERENCE_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * Merges `patch` into the account's preferences, split across the two
+ * Firestore fields by key (lib/preferences.ts's DISPLAY_PREFERENCE_KEYS /
+ * SECURITY_PREFERENCE_KEYS) so each half gets the write path its own
+ * field's firestore.rules gate needs:
+ *
+ *   - Display keys (privateWritingMode, privateWritingPeekAllowed) write
+ *     straight to `preferences.*` — no reauth, same as always.
+ *   - Security keys (autoLockMinutes, draftAutosave) write to `security.*`
+ *     through runCredentialMutation(), so a stale non-OTP session gets
+ *     ReauthRequiredError instead of a bare permission-denied — see that
+ *     function's doc comment.
+ *
+ * In practice the UI only ever sends one key at a time (each toggle/select
+ * in /settings calls this with a single-key patch), but a mixed patch is
+ * handled correctly: each half only fires if the patch actually touches
+ * that field, and a security-key failure doesn't roll back an
+ * already-applied display-key write — Firestore has no cross-document
+ * transaction here to make that atomic anyway, and the two fields have no
+ * consistency requirement between them.
+ */
 export async function setUserPreferences(uid: string, patch: Partial<UserPreferences>): Promise<void> {
-  const dottedPatch = Object.fromEntries(
-    Object.entries(patch).map(([key, value]) => [`preferences.${key}`, value])
-  );
-  await updateDoc(doc(db, "users", uid), dottedPatch);
+  const displayPatch: Record<string, unknown> = {};
+  const securityPatch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(patch)) {
+    if (isSecurityPreferenceKey(key)) {
+      securityPatch[`security.${key}`] = value;
+    } else {
+      displayPatch[`preferences.${key}`] = value;
+    }
+  }
+
+  const writes: Promise<void>[] = [];
+  if (Object.keys(displayPatch).length > 0) {
+    writes.push(updateDoc(doc(db, "users", uid), displayPatch));
+  }
+  if (Object.keys(securityPatch).length > 0) {
+    writes.push(runCredentialMutation(() => updateDoc(doc(db, "users", uid), securityPatch)));
+  }
+  await Promise.all(writes);
 }

@@ -10,6 +10,8 @@ import {
   type ReactNode,
 } from "react";
 import { useAuth } from "./AuthContext";
+import { usePreferences } from "./PreferencesContext";
+import { clearAllDrafts } from "@/lib/drafts";
 import {
   getUserKeyRecord,
   resetUserKeyRecord,
@@ -99,6 +101,9 @@ import {
 
 export type SeedStatus = "unknown" | "not-issued" | "locked" | "unlocked";
 
+/** Why the session stopped being unlocked, so the UI can say so. */
+export type LockReason = "manual" | "idle";
+
 interface PendingShamir {
   shares: Uint8Array[];
   wrappedSeed: ShamirWrappedSeed;
@@ -116,7 +121,9 @@ interface SeedContextValue {
   /** Unlocks using K of the enabled Shamir shares instead of the passphrase. Throws InvalidShamirSharesError on failure. */
   unlockWithShamirShares: (shares: Uint8Array[]) => Promise<void>;
   /** Wipes private keys from memory; returns to "locked". */
-  lock: () => void;
+  lock: (reason?: LockReason) => void;
+  /** Why the last lock happened, or null if the session was never unlocked (or has since been). */
+  lockReason: LockReason | null;
   /** Re-reads users/{uid} from Firestore (e.g. right after key issuance). */
   refresh: () => Promise<void>;
   /**
@@ -169,6 +176,10 @@ export function SeedProvider({ children }: { children: ReactNode }) {
   const [decryptionMethods, setDecryptionMethods] = useState<DecryptionMethodsConfig | null>(
     null
   );
+  const [lockReason, setLockReason] = useState<LockReason | null>(null);
+  // From the account (users/{uid}.preferences), not this device —
+  // SeedProvider sits below PreferencesProvider for exactly this.
+  const { autoLockMinutes } = usePreferences();
   const wrappedSeedRef = useRef<WrappedSeed | null>(null);
   const shamirWrappedSeedRef = useRef<ShamirWrappedSeed | null>(null);
   const publicKeysRef = useRef<HybridPublicKeysRaw | null>(null);
@@ -233,6 +244,10 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     } else if (authStatus === "signed-out") {
       wipePrivateKeys();
       clearStagedSeed();
+      // Signing out must not leave the previous account's half-written
+      // entry readable on a shared machine (lib/drafts.ts).
+      clearAllDrafts();
+      setLockReason(null);
       wrappedSeedRef.current = null;
       shamirWrappedSeedRef.current = null;
       publicKeysRef.current = null;
@@ -247,6 +262,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     const derived = deriveHybridKeyPair(seed);
     setPrivateKeys(derived.privateKeys);
     setStatus("unlocked");
+    setLockReason(null);
   }, []);
 
   // Every function below that touches the raw seed or private keys calls
@@ -284,10 +300,17 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     [deriveAndUnlock]
   );
 
-  const lock = useCallback(() => {
-    wipePrivateKeys();
-    setStatus((prev) => (prev === "unlocked" ? "locked" : prev));
-  }, [wipePrivateKeys]);
+  const lock = useCallback(
+    (reason: LockReason = "manual") => {
+      wipePrivateKeys();
+      // A staged seed is the same plaintext secret held for a /settings
+      // flow in progress; locking must not leave it sitting in memory.
+      clearStagedSeed();
+      setStatus((prev) => (prev === "unlocked" ? "locked" : prev));
+      setLockReason(reason);
+    },
+    [wipePrivateKeys, clearStagedSeed]
+  );
 
   const changePassphrase = useCallback(
     async (oldPassphrase: string, newPassphrase: string) => {
@@ -409,6 +432,68 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     setDecryptionMethods({ shamir: null });
   }, [user, clearStagedSeed]);
 
+  /**
+   * Auto-lock on inactivity. Before this, an unlocked session held the
+   * derived private keys in memory until the tab was closed — so a diary
+   * left open on a desk stayed readable indefinitely, which is a strange
+   * gap in an app that otherwise asks for a six-word passphrase and an OTP
+   * code. The timeout is an account preference (lib/preferences.ts), so it
+   * applies on every device the account is signed in on; firestore.rules
+   * requires otpSatisfied() to change it, so a session-only attacker
+   * cannot quietly switch it off.
+   *
+   * Polls wall-clock time instead of arming one setTimeout: a laptop that
+   * sleeps through the timeout has its timers deferred, and a single timer
+   * would then hand the session a fresh full window on wake. Comparing
+   * Date.now() locks immediately instead. The visibilitychange listener
+   * covers the same case for a backgrounded tab, where intervals are
+   * throttled hard.
+   *
+   * Locking also discards any staged seed, which can interrupt a
+   * /settings flow in progress (e.g. backup codes displayed but not yet
+   * confirmed) — accepted deliberately. The alternative is keeping a
+   * plaintext seed in memory past the moment the user asked for it to be
+   * gone, just because a panel happens to be open; an interrupted reissue
+   * can simply be redone, and nothing was written to Firestore.
+   */
+  useEffect(() => {
+    if (status !== "unlocked" || autoLockMinutes <= 0) return;
+    const timeoutMs = autoLockMinutes * 60_000;
+    let lastActivity = Date.now();
+
+    const markActive = () => {
+      lastActivity = Date.now();
+    };
+    const lockIfIdle = () => {
+      if (Date.now() - lastActivity >= timeoutMs) lock("idle");
+    };
+
+    // Reading a long entry counts as activity, hence wheel/touchmove
+    // alongside the obvious input events — otherwise someone who is
+    // actively using the app but not typing gets locked out mid-sentence.
+    const activityEvents = ["pointerdown", "keydown", "wheel", "touchmove", "focus"] as const;
+    for (const name of activityEvents) {
+      window.addEventListener(name, markActive, { passive: true, capture: true });
+    }
+    // Only checks on return. Deliberately does NOT mark activity on hide:
+    // switching to another tab is not use of this one, and treating it as
+    // such would let a tab parked in the background renew its own session
+    // indefinitely — the wrong direction for a lock.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") lockIfIdle();
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    const interval = window.setInterval(lockIfIdle, Math.min(15_000, timeoutMs));
+
+    return () => {
+      for (const name of activityEvents) {
+        window.removeEventListener(name, markActive, { capture: true });
+      }
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.clearInterval(interval);
+    };
+  }, [status, autoLockMinutes, lock]);
+
   return (
     <SeedContext.Provider
       value={{
@@ -418,6 +503,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         unlock,
         unlockWithShamirShares,
         lock,
+        lockReason,
         refresh,
         changePassphrase,
         resetPassphraseWithShamirShares,

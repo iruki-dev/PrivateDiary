@@ -28,7 +28,13 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  /* next/font loads and self-hosts Geist in app/layout.tsx, which exposes
+     it as --font-geist-sans on <html>. The Next.js starter template's
+     `font-family: Arial, Helvetica, sans-serif` here silently overrode it,
+     so the app downloaded both Geist weights on every load and then
+     rendered every character in Arial. The explicit fallbacks cover the
+     window before the webfont resolves. */
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
   /* Prevents an accidental horizontal scrollbar on mobile if any child
      briefly overflows (e.g. during a layout shift on load). */
   overflow-x: hidden;

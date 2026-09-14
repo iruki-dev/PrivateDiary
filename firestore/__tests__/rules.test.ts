@@ -31,6 +31,14 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 // touch a real project even if emulator env vars are misconfigured.
 const PROJECT_ID = "demo-privatediary";
 
+/**
+ * Stand-in for a real entry ciphertext, long enough to clear the padding
+ * floor firestore.rules enforces (ARCHITECTURE.md §3.15). A genuine padded
+ * entry is at least 1024 + 16 bytes = 1388 base64 characters; a short
+ * placeholder like "ct" is now rejected outright, which is the point.
+ */
+const PADDED_CIPHERTEXT = "c".repeat(1400);
+
 let testEnv: RulesTestEnvironment;
 
 // Mirrors lib/crypto/codec.ts's publicKeysToStorage() exactly — x25519 is a
@@ -463,7 +471,7 @@ describe("users/{uid}.preferences", () => {
     );
   });
 
-  it("allows setting both preference fields at once", async () => {
+  it("allows setting every cosmetic preference field at once", async () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       const db = ctx.firestore() as unknown as Firestore;
       await setDoc(doc(db, "users/alice"), {
@@ -478,6 +486,29 @@ describe("users/{uid}.preferences", () => {
       updateDoc(doc(alice, "users/alice"), {
         preferences: { privateWritingMode: true, privateWritingPeekAllowed: false },
       })
+    );
+  });
+
+  // autoLockMinutes/draftAutosave used to live in `preferences` too. They
+  // now live in the separate `security` field (see the describe block
+  // below) precisely so they can be gated differently — `preferences`
+  // rejects them outright as unexpected keys now.
+  it("rejects autoLockMinutes/draftAutosave under preferences — they belong under security now", async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "preferences.autoLockMinutes": 5 })
+    );
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "preferences.draftAutosave": true })
     );
   });
 
@@ -530,6 +561,94 @@ describe("users/{uid}.preferences", () => {
   });
 });
 
+/**
+ * `security` (autoLockMinutes, draftAutosave — lib/preferences.ts's
+ * SECURITY_PREFERENCE_KEYS) split out of the cosmetic `preferences` map
+ * specifically so it can be gated like a credential-bearing field. These
+ * tests are the correctness half (valid writes succeed when properly
+ * authenticated, invalid shapes are rejected); the attack half — a
+ * session-only caller WITHOUT the right auth trying the same writes — is
+ * covered in the "hardening" / "security-patch-v2 / C1" blocks below,
+ * matching how wrappedSeed/decryptionMethods already split that coverage.
+ */
+describe("users/{uid}.security", () => {
+  function seedUserDoc() {
+    return testEnv.withSecurityRulesDisabled(async (ctx) => {
+      const db = ctx.firestore() as unknown as Firestore;
+      await setDoc(doc(db, "users/alice"), {
+        publicKeys: validPublicKeys(),
+        wrappedSeed: validWrappedSeed(),
+        createdAt: new Date(2024, 0, 1),
+      });
+    });
+  }
+
+  it("allows setting both security fields at once with a recent sign-in", async () => {
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), {
+        security: { autoLockMinutes: 5, draftAutosave: true },
+      })
+    );
+  });
+
+  it("allows setting security fields with a verified OTP session (no auth_time needed)", async () => {
+    await seedUserDoc();
+    const alice = testEnv
+      .authenticatedContext("alice", { otpEnabled: true, otpVerified: true, otpVerifiedAt: Date.now() })
+      .firestore() as unknown as Firestore;
+    await assertSucceeds(
+      updateDoc(doc(alice, "users/alice"), { "security.autoLockMinutes": 1 })
+    );
+  });
+
+  it("accepts every auto-lock value the UI offers, including 0 (never)", async () => {
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    for (const minutes of [0, 1, 5, 15, 30, 60]) {
+      await assertSucceeds(
+        updateDoc(doc(alice, "users/alice"), { "security.autoLockMinutes": minutes })
+      );
+    }
+  });
+
+  it("rejects an auto-lock value outside the offered set, even with a recent sign-in", async () => {
+    // The client feeds this straight back into a security decision, so a
+    // value this codebase would never produce must not be storable — an
+    // out-of-range one would amount to disabling auto-lock unnoticed. This
+    // is a value-shape check independent of the auth gate above.
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.autoLockMinutes": 100000 }));
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.autoLockMinutes": 7 }));
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.autoLockMinutes": -1 }));
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.autoLockMinutes": "15" }));
+  });
+
+  it("rejects a non-boolean draftAutosave, even with a recent sign-in", async () => {
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(updateDoc(doc(alice, "users/alice"), { "security.draftAutosave": 1 }));
+  });
+
+  it("rejects an unexpected key under security", async () => {
+    await seedUserDoc();
+    const alice = recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(alice, "users/alice"), { "security.somethingElse": true })
+    );
+  });
+
+  it("rejects another user setting this account's security field, even with their own recent sign-in", async () => {
+    await seedUserDoc();
+    const bob = recentlyAuthenticatedContext("bob").firestore() as unknown as Firestore;
+    await assertFails(
+      updateDoc(doc(bob, "users/alice"), { "security.autoLockMinutes": 0 })
+    );
+  });
+});
+
 describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simulated here directly)", () => {
   async function seedUserAndEntry() {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
@@ -542,8 +661,8 @@ describe("otpSatisfied() gate (functions/src/index.ts sets these claims — simu
       await setDoc(doc(db, "entries/entry1"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
     });
@@ -612,13 +731,13 @@ describe("entries/{entryId}", () => {
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
+        ciphertext: PADDED_CIPHERTEXT,
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
@@ -630,8 +749,8 @@ describe("entries/{entryId}", () => {
       addDoc(collection(alice, "entries"), {
         uid: "bob",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
@@ -643,44 +762,44 @@ describe("entries/{entryId}", () => {
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: "1",
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
   });
 
-  it("rejects an entry whose ciphertext exceeds the 500,000-char size cap", async () => {
+  it("rejects an entry whose ciphertext exceeds the 560,000-char size cap", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertFails(
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "x".repeat(500_001),
+        ciphertext: "x".repeat(560_001),
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
   });
 
-  it("allows an entry whose ciphertext is right at the 500,000-char size cap", async () => {
+  it("allows an entry whose ciphertext is right at the 560,000-char size cap", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "x".repeat(500_000),
+        ciphertext: "x".repeat(560_000),
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );
@@ -693,8 +812,8 @@ describe("entries/{entryId}", () => {
       const ref = await addDoc(collection(db, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
       entryId = ref.id;
@@ -713,8 +832,8 @@ describe("entries/{entryId}", () => {
       await addDoc(collection(db, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
     });
@@ -733,8 +852,8 @@ describe("entries/{entryId}", () => {
       const ref = await addDoc(collection(db, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "ct",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        ciphertext: PADDED_CIPHERTEXT,
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       });
       entryId = ref.id;
@@ -835,10 +954,42 @@ describe("hardening: a session-only attacker on an OTP-enabled account", () => {
     await assertSucceeds(updateDoc(doc(attacker(), "users/alice"), { lastEntrySeq: 8 }));
   });
 
-  it("CAN still change display preferences — they carry no security weight", async () => {
+  // autoLockMinutes/draftAutosave (lib/preferences.ts) decide how long an
+  // unlocked session stays readable and whether drafts touch disk, so they
+  // live in the separate `security` field and are gated exactly like
+  // wrappedSeed/decryptionMethods — see credentialMutationAllowed(). A
+  // stolen session must not be able to switch auto-lock off (or drafts on)
+  // and wait for a moment of physical access to the victim's screen.
+  it("CANNOT change auto-lock without OTP — it is a security control now", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), { "security.autoLockMinutes": 0 })
+    );
+  });
+
+  it("CANNOT change draftAutosave without OTP either", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(attacker(), "users/alice"), { "security.draftAutosave": true })
+    );
+  });
+
+  // Unlike `security`, `preferences` stays purely cosmetic and ungated —
+  // this is the ONE thing a session-only attacker on an OTP-enabled
+  // account can still touch, deliberately: it carries no security weight
+  // (ARCHITECTURE.md §3.9), and demanding OTP for it would just be
+  // friction with no corresponding protection.
+  it("CAN still change purely cosmetic preferences without OTP", async () => {
     await seedUserDoc();
     await assertSucceeds(
       updateDoc(doc(attacker(), "users/alice"), { "preferences.privateWritingMode": true })
+    );
+  });
+
+  it("CAN change security fields once OTP has been verified", async () => {
+    await seedUserDoc();
+    await assertSucceeds(
+      updateDoc(doc(verified(), "users/alice"), { "security.autoLockMinutes": 5 })
     );
   });
 
@@ -858,13 +1009,13 @@ describe("hardening: entries/{entryId} shape validation", () => {
     return {
       uid: "alice",
       entrySeq: 1,
-      ciphertext: "ct",
+      ciphertext: PADDED_CIPHERTEXT,
       iv: "iv",
       wrappedContentKey: "wck",
       wrappedContentKeyIv: "wckiv",
       kemCiphertext: "kemct",
       ephemeralX25519PublicKey: "eph",
-      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
       createdAt: new Date(),
       ...overrides,
     };
@@ -873,6 +1024,44 @@ describe("hardening: entries/{entryId} shape validation", () => {
   it("accepts a well-formed entry", async () => {
     const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
     await assertSucceeds(addDoc(collection(alice, "entries"), validEntry()));
+  });
+
+  // Length padding (ARCHITECTURE.md §3.15) is a ratchet: entries written
+  // before it stay readable, but nothing can write an unpadded one again.
+  // These three are what make that true at the server rather than being a
+  // promise the client makes to itself.
+  it("rejects an entry whose aad carries no format tag — padding is mandatory now", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({ aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" } })
+      )
+    );
+  });
+
+  it("rejects an unrecognized format tag", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(
+        collection(alice, "entries"),
+        validEntry({
+          aad: {
+            uid: "alice",
+            entrySeq: 1,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            fmt: "padded-v99",
+          },
+        })
+      )
+    );
+  });
+
+  it("rejects a ciphertext too short to have been padded at all", async () => {
+    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
+    await assertFails(
+      addDoc(collection(alice, "entries"), validEntry({ ciphertext: "c".repeat(1379) }))
+    );
   });
 
   it("rejects a half-formed junk document (entries can never be deleted once written)", async () => {
@@ -887,7 +1076,7 @@ describe("hardening: entries/{entryId} shape validation", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
-        validEntry({ aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" } })
+        validEntry({ aad: { uid: "bob", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" } })
       )
     );
   });
@@ -897,7 +1086,7 @@ describe("hardening: entries/{entryId} shape validation", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
-        validEntry({ aad: { uid: "alice", entrySeq: 99, createdAt: "2026-01-01T00:00:00.000Z" } })
+        validEntry({ aad: { uid: "alice", entrySeq: 99, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" } })
       )
     );
   });
@@ -907,7 +1096,7 @@ describe("hardening: entries/{entryId} shape validation", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
-        validEntry({ entrySeq: 0, aad: { uid: "alice", entrySeq: 0, createdAt: "2026-01-01T00:00:00.000Z" } })
+        validEntry({ entrySeq: 0, aad: { uid: "alice", entrySeq: 0, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" } })
       )
     );
   });
@@ -990,6 +1179,33 @@ describe("security-patch-v2 / C1: credentialMutationAllowed() on NON-OTP account
     );
   });
 
+  // `security` (autoLockMinutes/draftAutosave) is deliberately NOT in that
+  // ungated list — see users/{uid}.security's describe block above for why
+  // bundling it into `preferences` would have reopened this exact C1 hole
+  // for those two fields.
+  it("cannot change security.autoLockMinutes without a recent sign-in (same hole, closed for the newer field)", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(staleSession(), "users/alice"), { "security.autoLockMinutes": 0 })
+    );
+  });
+
+  it("cannot change security.draftAutosave without a recent sign-in", async () => {
+    await seedUserDoc();
+    await assertFails(
+      updateDoc(doc(staleSession(), "users/alice"), { "security.draftAutosave": true })
+    );
+  });
+
+  it("a genuinely recent sign-in CAN still change security fields (the legitimate flow keeps working)", async () => {
+    await seedUserDoc();
+    await assertSucceeds(
+      updateDoc(doc(recentlyAuthenticatedContext("alice").firestore() as unknown as Firestore, "users/alice"), {
+        "security.autoLockMinutes": 1,
+      })
+    );
+  });
+
   it("does not change OTP-enabled accounts: a fresh sign-in alone still does not bypass otpSatisfied()", async () => {
     await seedUserDoc();
     const otpAttacker = testEnv
@@ -1017,17 +1233,21 @@ describe("security-patch-v2 / C1: credentialMutationAllowed() on NON-OTP account
 });
 
 describe("security-patch-v2 / H1: entrySeq / lastEntrySeq upper bound", () => {
+  // Padded/tagged the same way as the top-level validEntry() (ARCHITECTURE.md
+  // §3.15) — a plain "ct" placeholder is now rejected outright by
+  // isValidEntry()'s padding floor, independent of anything this block
+  // actually tests (entrySeq bounds).
   function validEntry(overrides: Record<string, unknown> = {}) {
     return {
       uid: "alice",
       entrySeq: 1,
-      ciphertext: "ct",
+      ciphertext: PADDED_CIPHERTEXT,
       iv: "iv",
       wrappedContentKey: "wck",
       wrappedContentKeyIv: "wckiv",
       kemCiphertext: "kemct",
       ephemeralX25519PublicKey: "eph",
-      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+      aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
       createdAt: new Date(),
       ...overrides,
     };
@@ -1038,9 +1258,16 @@ describe("security-patch-v2 / H1: entrySeq / lastEntrySeq upper bound", () => {
     await assertFails(
       addDoc(
         collection(alice, "entries"),
+        // fmt included so this fails specifically on the entrySeq bound,
+        // not incidentally on the unrelated padding requirement.
         validEntry({
           entrySeq: 1_000_000_000,
-          aad: { uid: "alice", entrySeq: 1_000_000_000, createdAt: "2026-01-01T00:00:00.000Z" },
+          aad: {
+            uid: "alice",
+            entrySeq: 1_000_000_000,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            fmt: "padded-v1",
+          },
         })
       )
     );
@@ -1053,7 +1280,12 @@ describe("security-patch-v2 / H1: entrySeq / lastEntrySeq upper bound", () => {
         collection(alice, "entries"),
         validEntry({
           entrySeq: 1_000_000,
-          aad: { uid: "alice", entrySeq: 1_000_000, createdAt: "2026-01-01T00:00:00.000Z" },
+          aad: {
+            uid: "alice",
+            entrySeq: 1_000_000,
+            createdAt: "2026-01-01T00:00:00.000Z",
+            fmt: "padded-v1",
+          },
         })
       )
     );
@@ -1097,13 +1329,17 @@ describe("security-patch-v2 / H2: isB64 / isB64Url actually check the alphabet",
       addDoc(collection(alice, "entries"), {
         uid: "alice",
         entrySeq: 1,
-        ciphertext: "SGVsbG8rL3dvcmxkPT0=",
+        // A real base64 string containing '+', '/' AND '=' padding — the
+        // exact alphabet H2 fixed isB64 to accept — long enough to also
+        // clear §3.15's padding floor (>=1380 chars) so this test isn't
+        // incidentally rejected by an unrelated rule.
+        ciphertext: `${"A".repeat(1376)}+/A=`,
         iv: "iv",
         wrappedContentKey: "wck",
         wrappedContentKeyIv: "wckiv",
         kemCiphertext: "kemct",
         ephemeralX25519PublicKey: "eph",
-        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z" },
+        aad: { uid: "alice", entrySeq: 1, createdAt: "2026-01-01T00:00:00.000Z", fmt: "padded-v1" },
         createdAt: new Date(),
       })
     );

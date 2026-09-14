@@ -1,7 +1,8 @@
 import { randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { aesGcmDecrypt, aesGcmEncrypt } from "./aesGcm";
 import { decapsulateContentKey, encapsulateContentKey } from "./hybridKem";
-import { AES_GCM_IV_LENGTH, CONTENT_KEY_LENGTH } from "./constants";
+import { AES_GCM_IV_LENGTH, CONTENT_KEY_LENGTH, ENTRY_FORMAT_PADDED } from "./constants";
+import { padEntryPlaintext, unpadEntryPlaintext } from "./padding";
 import { TamperedCiphertextError } from "./errors";
 import { wipeBytes } from "./memory";
 import type {
@@ -15,11 +16,17 @@ import type {
  * Fixed key order so the same AAD object always serializes to the same
  * bytes on both the encrypt and decrypt side (AES-GCM AAD must match
  * exactly). `entrySeq` is what §3.4's rollback/substitution defense binds on.
+ *
+ * `fmt` is appended only when present, which is what keeps entries written
+ * before length padding (§3.15) decryptable: their stored AAD has no `fmt`,
+ * so they serialize to byte-for-byte what they were encrypted under. On
+ * everything written since, `fmt` IS part of these bytes, so removing it
+ * from the stored document breaks the tag instead of silently downgrading
+ * the entry to an unpadded read.
  */
 function canonicalAadBytes(aad: EntryAAD): Uint8Array {
-  return utf8ToBytes(
-    JSON.stringify({ uid: aad.uid, entrySeq: aad.entrySeq, createdAt: aad.createdAt })
-  );
+  const base = { uid: aad.uid, entrySeq: aad.entrySeq, createdAt: aad.createdAt };
+  return utf8ToBytes(JSON.stringify(aad.fmt ? { ...base, fmt: aad.fmt } : base));
 }
 
 /**
@@ -39,11 +46,19 @@ export async function encryptEntry(
 ): Promise<EncryptedEntryPayload> {
   const contentKey = randomBytes(CONTENT_KEY_LENGTH);
   const iv = randomBytes(AES_GCM_IV_LENGTH);
-  const aadBytes = canonicalAadBytes(aad);
 
-  const ciphertext = await aesGcmEncrypt(contentKey, iv, utf8ToBytes(plaintext), aadBytes);
+  // Everything written from here on is length-padded (§3.15). The caller
+  // does not get a say: an unpadded entry leaks its own size to anyone who
+  // can read the database, and there is no situation where that is the
+  // right trade for a diary. The format tag is stamped onto the AAD here
+  // rather than trusted from the caller for the same reason.
+  const stampedAad: EntryAAD = { ...aad, fmt: ENTRY_FORMAT_PADDED };
+  const aadBytes = canonicalAadBytes(stampedAad);
+  const record = padEntryPlaintext(utf8ToBytes(plaintext));
+
+  const ciphertext = await aesGcmEncrypt(contentKey, iv, record, aadBytes);
   const capsule = await encapsulateContentKey(recipientPublicKeys, contentKey);
-  wipeBytes(contentKey);
+  wipeBytes(contentKey, record);
 
   return {
     ciphertext,
@@ -52,7 +67,7 @@ export async function encryptEntry(
     wrappedContentKeyIv: capsule.wrappedContentKeyIv,
     kemCiphertext: capsule.kemCiphertext,
     ephemeralX25519PublicKey: capsule.ephemeralX25519PublicKey,
-    aad,
+    aad: stampedAad,
   };
 }
 
@@ -76,10 +91,21 @@ export async function decryptEntry(
 
   const aadBytes = canonicalAadBytes(entry.aad);
   try {
-    const plaintext = await aesGcmDecrypt(contentKey, entry.iv, entry.ciphertext, aadBytes);
-    wipeBytes(contentKey);
-    return new TextDecoder().decode(plaintext);
+    const decrypted = await aesGcmDecrypt(contentKey, entry.iv, entry.ciphertext, aadBytes);
+    // `fmt` reached us through the AAD, so the branch taken here was
+    // authenticated by the tag check that just passed — an entry cannot be
+    // steered down the wrong one. Its absence means an entry written
+    // before §3.15, whose plaintext is raw UTF-8.
+    const plaintext =
+      entry.aad.fmt === ENTRY_FORMAT_PADDED ? unpadEntryPlaintext(decrypted) : decrypted;
+    const text = new TextDecoder().decode(plaintext);
+    wipeBytes(contentKey, decrypted, plaintext);
+    return text;
   } catch {
+    // Covers both an AEAD failure and a record whose authenticated length
+    // prefix is nonsense (unpadEntryPlaintext's RangeError). Either way the
+    // stored entry is not something this code wrote, which is exactly what
+    // TamperedCiphertextError means.
     wipeBytes(contentKey);
     throw new TamperedCiphertextError();
   }

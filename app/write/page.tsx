@@ -9,6 +9,7 @@ import { writeEntry } from "@/lib/firebase/entries";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { usePreferences } from "@/contexts/PreferencesContext";
+import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts";
 
 /** Minimal outline eye glyph — no icon library in this codebase, and this is the only icon needed. */
 function EyeIcon({ className }: { className?: string }) {
@@ -51,6 +52,7 @@ export default function WritePage() {
     loading: preferencesLoading,
     privateWritingMode: privateMode,
     privateWritingPeekAllowed: peekAllowed,
+    draftAutosave,
   } = usePreferences();
   // Hold-to-reveal, not a toggle: true only while the icon below is
   // actively pressed. Resets to hidden on every mount/reload, which is
@@ -61,11 +63,42 @@ export default function WritePage() {
   const [revealing, setRevealing] = useState(false);
   const obscured = privateMode && !revealing;
 
+  // Crash safety for in-progress writing (lib/drafts.ts). Off by default
+  // and opt-in from /settings, because it is the one thing in this app
+  // that puts plaintext on disk.
+  const [restoredDraftAt, setRestoredDraftAt] = useState<Date | null>(null);
+  const draftLoadAttemptedRef = useRef(false);
+
   useEffect(() => {
     if (authStatus === "signed-in" && seedStatus === "not-issued") {
       router.replace("/signup");
     }
   }, [authStatus, seedStatus, router]);
+
+  // Restore a draft left behind by a crash or a closed tab. Runs once per
+  // mount: after this, `text` is whatever the user is currently typing, and
+  // re-running would clobber it with a stale copy.
+  useEffect(() => {
+    if (!user || !draftAutosave || draftLoadAttemptedRef.current) return;
+    draftLoadAttemptedRef.current = true;
+    const draft = loadDraft(user.uid);
+    if (!draft) return;
+    // Reading localStorage is a browser-only side effect keyed to the
+    // signed-in uid, so it can't be derived during render.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setText(draft.text);
+    setRestoredDraftAt(draft.savedAt);
+  }, [user, draftAutosave]);
+
+  // Debounced so a fast typist isn't writing to localStorage on every
+  // keystroke. The cleanup cancels the pending write, which also means the
+  // empty-text write scheduled on mount never lands if a draft restores
+  // first — otherwise restoring would immediately erase what it restored.
+  useEffect(() => {
+    if (!user || !draftAutosave) return;
+    const timer = setTimeout(() => saveDraft(user.uid, text), 800);
+    return () => clearTimeout(timer);
+  }, [user, draftAutosave, text]);
 
   // Warns before closing/refreshing the tab with unsaved text — losing a
   // half-written diary entry to an accidental tab close is a real, common
@@ -87,6 +120,10 @@ export default function WritePage() {
     try {
       await writeEntry(user.uid, publicKeys, text);
       setText("");
+      // The entry is encrypted and stored; the plaintext copy on this
+      // device has no reason to outlive that by even a moment.
+      clearDraft(user.uid);
+      setRestoredDraftAt(null);
       setSuccess(true);
       textareaRef.current?.focus();
     } catch (err) {
@@ -100,6 +137,14 @@ export default function WritePage() {
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await submit();
+  }
+
+  function discardDraft() {
+    if (!user) return;
+    clearDraft(user.uid);
+    setText("");
+    setRestoredDraftAt(null);
+    textareaRef.current?.focus();
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -129,6 +174,24 @@ export default function WritePage() {
             지난 일기 보기
           </Link>
         </div>
+        {restoredDraftAt && (
+          <div
+            role="status"
+            className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
+          >
+            <p className="muted text-xs">
+              저장하지 않고 닫은 글을 이 기기에서 불러왔습니다 (
+              {new Intl.DateTimeFormat("ko-KR", {
+                dateStyle: "short",
+                timeStyle: "short",
+              }).format(restoredDraftAt)}
+              ).
+            </p>
+            <button type="button" onClick={discardDraft} className="text-xs link">
+              버리기
+            </button>
+          </div>
+        )}
         <div className="space-y-1">
           <div className="relative">
             <textarea

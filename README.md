@@ -15,6 +15,15 @@ pnpm exec tsc --noEmit   # 타입 체크
 pnpm build        # 프로덕션 빌드
 ```
 
+위 명령은 그대로 `.github/workflows/ci.yml`에서도 돌아간다 — push/PR마다 lint · 단위 테스트 ·
+빌드 · 타입체크, Firestore 보안 규칙 테스트(에뮬레이터 + JDK), `functions/` 빌드 + 단위 테스트,
+`functions/`의 OTP 흐름 통합 테스트(auth·firestore·functions 에뮬레이터 전체 — 재생 공격 방지·
+동시 요청 잠금의 원자성처럼 순수 단위 테스트로는 닿지 않는 부분)까지 각각 별도 job으로 실행된다.
+
+> `pnpm exec tsc --noEmit`은 `pnpm build`를 한 번 돌린 뒤에 실행해야 한다. `app/layout.tsx`가
+> 쓰는 `LayoutProps<"/">`는 Next.js가 빌드 중 `.next/types/`에 생성하는 전역 헬퍼라, 갓
+> 체크아웃한 트리에서는 아직 존재하지 않는다.
+
 ## 디렉터리 구조
 
 ```
@@ -41,15 +50,28 @@ lib/
                             # WrongPassphraseError와 동일한 패턴)
     hybridKem.ts             # encapsulateContentKey / decapsulateContentKey (X25519+ML-KEM-768)
     entry.ts                  # encryptEntry / decryptEntry (일기 항목 단위)
-    codec.ts                   # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
+    padding.ts                 # 항목 길이 패딩 (Padmé + 길이 접두사) — 암호문 크기로 새던
+                                # 평문 길이를 가린다. 순수 바이트 조작만 하고 크립토는 없다.
+    codec.ts                    # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
     __tests__/                  # Vitest 단위 테스트
 
   firebase/          # Firebase Auth(이메일/비밀번호 + Google) / Firestore 클라이언트 연동.
                       # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
     config.ts, auth.ts, users.ts, entries.ts
-    otp.ts             # functions/의 OTP callable 래퍼. 여기도 크립토 없음 — 접근 게이트일 뿐.
+    otp.ts             # functions/의 OTP callable 래퍼(계정 삭제 포함). 여기도 크립토 없음 — 접근 게이트일 뿐.
 
-  passphraseStrength.ts   # zxcvbn-ts 강도 추정 (lib/crypto 밖 — 암호화 연산이 아닌 UX 휴리스틱)
+  entries/           # 복호화가 끝난 뒤의 읽기 UX 로직. 크립토·Firebase·React를 일절
+                      # import하지 않는 순수 함수 모듈이라 단위 테스트로 검증된다.
+    search.ts          # 클라이언트 검색(NFC 정규화, AND 결합, 하이라이트 범위, 스니펫) + 월별 그룹핑
+    calendar.ts         # 달력 그리드 · 일자별 개수 · 연속 기록 · "이날의 기록" — createdAt만 사용
+    export.ts            # 복호화된 일기를 Markdown/JSON 아카이브로 직렬화
+
+  preferences.ts          # 계정 설정의 형태·기본값·검증. `preferences`(표시 설정, 게이트 없음)와
+                           # `security`(자동 잠금·임시 저장, credentialMutationAllowed() 게이트)로
+                           # 나뉘어 저장된다 — 두 필드 모두 이 한 파일에서 정의. Firebase를
+                           # import하지 않아 firestore.rules와 1:1로 대조·테스트된다.
+  passphraseStrength.ts    # zxcvbn-ts 강도 추정 (lib/crypto 밖 — 암호화 연산이 아닌 UX 휴리스틱)
+  drafts.ts                 # 작성 중인 일기의 기기 로컬 임시 저장 — 이 앱에서 유일하게 평문을 디스크에 쓰는 곳 (기본값 꺼짐)
 
   security/          # 브라우저/로컬 환경 자체가 변조되었을 가능성을 감지하는 모듈.
                       # lib/crypto와 달리 암호 연산을 하지 않고, window/navigator를 읽는다
@@ -63,17 +85,21 @@ lib/
 
 hooks/
   usePageTitle.ts              # 탭 제목
+  useDecryptedEntries.ts        # 일기 목록을 청크 단위로 점진 복호화 (아래 "지난 일기" 참조)
 
 contexts/
   AuthContext.tsx    # Firebase 로그인 상태만 추적
-  PreferencesContext.tsx  # 계정 단위 표시 설정(프라이빗 작성 모드 등) — users/{uid}.preferences.
-                           # AuthContext 바로 아래 위치 — 시드/OTP 상태와 무관
+  PreferencesContext.tsx  # 계정 단위 설정 — users/{uid}.preferences (프라이빗 작성 모드, 자동 잠금
+                           # 시간, 임시 저장 여부). AuthContext 바로 아래이자 SeedContext 위에
+                           # 위치해야 한다 — SeedContext가 여기서 자동 잠금 시간을 읽는다
   OtpContext.tsx      # OTP 활성화 여부/이번 세션 인증 여부를 ID 토큰 커스텀 클레임에서 추적.
                        # AuthContext와 SeedContext 사이에 위치 (로그인 이후, 시드 상태 이전 게이트)
   SeedContext.tsx     # 시드 상태(미발급/잠김/해제됨) + 백업 코드 설정 여부를 추적.
                        # unlock/lock/changePassphrase/resetKeys 외에, 백업 코드 설정/재발급을
                        # 위한 stage/prepare/confirm 3단계 API와 resetPassphraseWithShamirShares
-                       # 보유 (암호·백업 코드 어느 쪽으로도 서로를 관리 가능 — 아래 참조)
+                       # 보유 (암호·백업 코드 어느 쪽으로도 서로를 관리 가능 — 아래 참조).
+                       # 계정 설정의 자동 잠금 시간에 따라 유휴 시 스스로 lock()도 호출한다
+                       # ("자동 잠금" 참조)
   SecurityContext.tsx # lib/security의 검사를 주기적으로 돌리고 배너(SecurityWarningBanner)에
                        # 상태를 제공. Provider 트리 맨 바깥 — 로그인 여부와 무관하게 항상 감시
 
@@ -85,13 +111,25 @@ components/
   PassphraseStrengthMeter.tsx
   SecurityWarningBanner.tsx         # 모든 페이지 상단에 렌더 — 변조 감지 시 차단 안내(닫기 불가),
                                     # 그 외 약한 신호는 개별적으로 닫을 수 있는 경고
+  EntryBrowser.tsx                   # 잠금 해제 후의 읽기 화면 전체 (달력 · 검색 · 필터 · 정렬 · 통계 · 내보내기)
+  EntryCalendar.tsx                   # 월 달력 — 일기가 있는 날만 클릭 가능, 모바일에서는 접힌다
+  EntryStats.tsx                       # 전체/이번 달/기록한 날/연속 기록
+  EntryCard.tsx                         # 일기 한 건 — 긴 글은 접고, 검색 중에는 일치 지점 주변만 보여준다
+  HighlightedText.tsx                    # 검색어 일치 구간을 <mark>로 표시
+  ExportEntriesCard.tsx                   # 복호화된 일기를 파일로 내려받기 (평문 경고 포함)
 
 app/                  # Next.js App Router 페이지
   login/, signup/, settings/, write/, entries/
+  manifest.ts          # 웹 앱 매니페스트 (홈 화면 설치 — "설치형 앱(PWA)" 참조)
+  icon.svg, apple-icon.png, favicon.ico   # 앱 아이콘
+
+.github/workflows/ci.yml   # lint · 단위 테스트 · 빌드 · 타입체크 / Firestore 규칙 테스트 /
+                           # functions 빌드+단위 테스트 / functions OTP 통합 테스트(실 에뮬레이터)
 
 functions/             # Firebase Cloud Functions — 이 프로젝트에서 유일한 서버 로직.
-                        # OTP 코드 검증만 담당하고 시드·개인키·평문은 절대 다루지 않는다.
-                        # startOtpSetup / confirmOtpSetup / verifyOtp / disableOtp
+                        # OTP 코드 검증과 계정 삭제만 담당하고 시드·개인키·평문은 절대 다루지 않는다.
+                        # startOtpSetup / confirmOtpSetup / verifyOtp / verifyShamirOtpBypass /
+                        # disableOtp / deleteAccount
                         # (자세한 설계 근거는 functions/src/index.ts 모듈 주석 참조)
 
 firestore.rules, firestore.indexes.json, firebase.json, .firebaserc
@@ -148,19 +186,112 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 
 - 작성자 본인의 확인은 그 아이콘을 **누르고 있는 동안만** 잠깐 보여주는 방식(hold-to-reveal, 토글 아님)이다. 마우스/터치(pointer 이벤트)와 키보드(스페이스/엔터) 모두 지원한다.
 - `/settings`에 두 번째 토글("확인 아이콘")이 있다 — 이걸 끄면 `/write`가 그 아이콘을 렌더링하지 않으므로, 프라이빗 모드가 켜진 동안은 **작성자 본인도** 어떤 방법으로도 흐림을 해제할 수 없다.
-- 두 설정 모두 `users/{uid}.preferences`(Firestore, `contexts/PreferencesContext.tsx`)에 저장되어 계정에 로그인한 모든 기기에 동일하게 적용된다 — 기기별로 다르게 켜둘 수 없다. lib/crypto가 다루는 어떤 것도 이 필드를 참조하지 않으므로(`firestore.rules`의 `isValidPreferences()`는 형태만 검증), Firestore에 저장한다고 해서 §1.1의 "서버는 평문/키를 절대 보지 않는다" 원칙이 흔들리지 않는다 — 여긴 애초에 지킬 비밀이 없다.
+- 두 설정 모두 `users/{uid}.preferences`(Firestore, `contexts/PreferencesContext.tsx`, 형태·기본값·검증은 `lib/preferences.ts`)에 저장되어 계정에 로그인한 모든 기기에 동일하게 적용된다. lib/crypto가 다루는 어떤 것도 이 필드를 참조하지 않으므로, Firestore에 저장한다고 해서 §1.1의 "서버는 평문/키를 절대 보지 않는다" 원칙이 흔들리지 않는다.
+- **다만 `preferences` 전체가 이제 OTP 게이트 뒤에 있다** — 같은 필드에 자동 잠금 시간이 함께 들어왔기 때문이다("자동 잠금" 참조). 그래서 `/settings`의 이 토글도 OTP를 통과해야 바꿀 수 있다.
 - `/write`의 실제 `<textarea>` 값·`writeEntry` 호출 경로는 전혀 바뀌지 않는다 — CSS `filter: blur()`만 씌우는 순수 표시 계층이라, 암호화되어 나가는 내용과는 무관하다.
 - 알아둘 한계: CSS 블러는 DOM 안의 실제 글자를 가리는 게 아니라 시각적으로만 흐리게 만든다. 브라우저 개발자 도구로 DOM을 열어보거나 화면 낭독기를 쓰면 원문이 그대로 노출된다 — "곁눈질 방지" 용도이지 암호학적 보호가 아니다.
 
-## DDoS 방지
+## 지난 일기 읽기 (달력 · 검색 · 통계)
 
-네트워크 볼륨 공격 자체는 Firestore/Cloud Functions가 Google 인프라(Cloud Run + Google Front End) 위에서 이미 흡수하므로, 앱 코드가 실제로 손댈 수 있는 지점은 "공개된 Firebase 설정값을 그대로 긁어다 스크립트로 두드리는" 종류의 남용이다.
+`/entries`의 잠금 해제 이후 화면은 `components/EntryBrowser.tsx`가 담당한다. 서버는 암호문만 갖고 있으므로 **검색·정렬·필터를 서버가 대신 해줄 방법이 구조적으로 없다**(ARCHITECTURE.md §9). 전부 이 탭의 메모리 안에서, 잠금이 풀려 있는 동안만 이루어진다.
 
-**Firebase App Check(reCAPTCHA)는 도입했다가 완전히 제거했다.** classic reCAPTCHA v3는 App Check 콘솔에서 신규 등록 자체가 막혀 있어 reCAPTCHA Enterprise로 전환했고, 사이트 키·Enterprise API 활성화·App Check 등록까지 전부 정확히 맞췄지만, **Firestore 웹 SDK가 발급된 App Check 토큰을 요청에 아예 붙이지 않는 현상**을 프로덕션에서 직접 확인했다(네트워크 탭에 `X-Firebase-AppCheck` 헤더 자체가 없음) — [firebase/flutterfire#18672](https://github.com/firebase/flutterfire/issues/18672)에 동일 증상이 보고된, 이 글 작성 시점 기준 미해결 Firebase JS SDK 버그로 보인다. Cloud Functions 쪽(별개의 직접 HTTPS 경로라 이 버그의 영향을 안 받음)은 정상 동작했지만, Firestore 없이는 봇 방지 효과가 절반뿐이고 Enterprise 설정 자체의 운영 부담(결제 계정 연결, API 활성화, 사이트 키/등록 관리)도 있어 — 남는 코드/설정을 전부 걷어내고 아래 방어선만 남기기로 했다.
+**달력과 통계** (`lib/entries/calendar.ts`, `components/EntryCalendar.tsx`)
+- 넓은 화면에서는 왼쪽에 달력과 통계가 고정(sticky)되고 오른쪽에서 목록이 스크롤된다. 좁은 화면에서는 달력이 "달력" 버튼 뒤로 접힌다 — 휴대폰에서 월 그리드가 항상 펼쳐져 있으면 정작 일기가 화면 밖으로 밀려난다.
+- 일기가 있는 날만 누를 수 있고, 누르면 그 날짜로 목록이 걸러진다. 일기가 없는 날은 버튼이 아니라 그냥 글자라, 키보드로 탭 이동할 때 아무 데도 가지 않는 칸 서른 개를 지나칠 필요가 없다.
+- 통계는 전체/이번 달/기록한 날/연속 기록/최장 연속. **연속 기록은 오늘 아직 안 썼으면 어제부터 센다** — 그러지 않으면 한 달째 이어온 기록이 매일 아침 0으로 보이고, 그 숫자가 힘이 되어야 할 바로 그 순간에 꺼져버린다.
+- **"이날의 기록"** — 작년·재작년 같은 날짜에 쓴 일기가 있으면 그것만 모아 보여준다. 몇 년씩 쓰는 일기장의 본전이 나오는 지점이다.
 
-1. **Firestore 규칙의 항목 크기 상한** — `firestore.rules`의 `isValidEntry()`가 `entries` 쓰기의 `ciphertext`를 500,000자로 제한한다. 남용 트래픽의 속도(rate)가 아니라 한 건당 크기(size)만 막는 저비용 방어선.
-2. **OTP 브루트포스 잠금** — `functions/src/index.ts`의 `verifyStoredOtp`가 5회 실패 시 60초 잠금을 건다(Firestore 트랜잭션으로 원자적 — 동시 요청도 우회 못 함).
-3. Firebase Authentication/Firestore 자체의 요청 한도(quota)가 기본 방어선으로 남아있다 — App Check가 있었다면 그 앞단에서 더 저렴하게 걸러졌을 종류의 남용이 지금은 Firebase 자체 한도까지 도달한다는 뜻이지만, 이 앱 규모(개인용)에서는 감수할 만한 트레이드오프로 판단했다.
+> **보안상 중요한 점**: 달력·통계·연속 기록은 **전부 `createdAt`만으로** 계산된다. 그 타임스탬프는 이미 Firestore에 평문으로 저장되어 있고 목록 화면이 늘 표시해오던 값이라, 시각화한다고 해서 DB를 볼 수 있는 쪽이 새로 알게 되는 건 없다 — 서버는 *언제* 썼는지는 알고 *무엇을* 썼는지는 끝까지 모른다(이 메타데이터 유출 자체는 ARCHITECTURE.md §9에 기재된 기존 성질이다). 부수 효과로 달력과 통계는 **복호화가 한 건도 끝나기 전부터 정확하다.**
+
+**검색·필터·정렬**
+- **점진 복호화** (`hooks/useDecryptedEntries.ts`) — 읽기 경로는 항목 하나당 X25519 ECDH + ML-KEM-768 decapsulation + HKDF + AES-GCM 2회를 메인 스레드에서 동기로 돌린다. 전부 복호화한 뒤에 렌더링하면 일기가 수백 건만 되어도 화면이 몇 초간 멈추고, 일기가 늘수록 영원히 나빠진다. 최신 6건씩 끊어 복호화하고 청크마다 브라우저에 제어권을 넘기므로, 실제로 보려는 최신 일기가 거의 즉시 뜨고 나머지는 뒤에서 계속 처리된다("복호화 n / N" 표시).
+- **검색** (`lib/entries/search.ts`) — 공백으로 나눈 단어를 전부 포함하는 항목만 남긴다(AND). 한글 때문에 NFC 정규화를 거친다: 같은 음절이라도 입력기에 따라 조합형(NFD)/완성형(NFC)으로 들어와 바이트가 다르므로, 정규화하지 않으면 macOS에서 쓴 "한글"이 Windows에서 쓴 "한글"을 못 찾는다. 일치 구간은 `<mark>`로 표시하고, 긴 글은 **일치 지점 주변만** 잘라 보여준다.
+- **월별 그룹 · 정렬** — 목록은 "2026년 9월" 머리글로 묶이고 최신순/오래된순을 전환할 수 있다. `serverTimestamp()`가 아직 확정되지 않은 방금 쓴 항목은 "저장 중" 그룹으로 따로 빠진다.
+- **키보드**: `/`로 검색창에 바로 포커스, `Esc`로 검색어와 날짜 필터를 한 번에 해제. 입력 중일 때는 `/`를 가로채지 않는다.
+- 복호화 실패는 **항목 단위**로 표시된다 — 변조된 암호문 한 건이 있어도 나머지 일기는 정상적으로 열린다(§3.4에서 복호화 실패 자체가 변조 신호).
+
+> **일부러 넣지 않은 것 두 가지.** (1) **필터 상태를 URL에 넣지 않는다** — `?day=2026-09-14` 같은 쿼리스트링은 브라우저 히스토리(와 그걸 동기화하는 모든 것)에 "어느 날짜를 다시 들춰봤는가"의 흔적을 남긴다. 프라이빗 작성 모드가 걱정하는 바로 그 공용 기기 시나리오다. (2) **최근 검색어를 저장하지 않는다** — "장례식"을 기억하는 검색창은 이 앱의 암호화가 막는 어떤 것보다 나쁜 유출이다. 필터는 React 상태로만 존재하고 탭과 함께 사라진다.
+
+## 내보내기
+
+`/entries`의 "내보내기"에서 복호화된 일기 전체를 Markdown(`.md`) 또는 JSON(`.json`)으로 내려받는다. 정렬은 `entrySeq` 기준 오래된 순(아카이브의 읽기 순서이며, 타임스탬프가 아직 확정되지 않은 항목도 올바른 자리에 들어간다).
+
+이 기능이 있어야 하는 이유는 이 앱의 엄격함 그 자체다. §3.6 규칙 5와 §9는 암호와 백업 코드를 모두 잃으면 일기가 영구히 사라진다고 못박고, §1.1 규칙 4는 그게 버그가 아니라 설계 목표라고 한다. **비밀번호 하나를 잊는 것만으로 사용자의 글을 정말로 파괴할 수 있는 설계라면, 스스로 사본을 들고 있을 수단을 반드시 줘야 한다** — 그러지 않으면 "당신만의 데이터"는 조용히 "삐끗하기 전까지만 당신의 데이터"가 된다.
+
+내려받는 파일은 정의상 **평문**이다(이 앱과 키 없이도 살아남는 게 목적이므로). UI에서 이 사실을 먼저 경고하고, 다운로드는 별도의 두 번째 클릭을 요구한다. 아직 복호화가 끝나지 않았으면 버튼이 비활성화되어, 빠진 일기가 있는 아카이브가 만들어지지 않는다.
+
+## 자동 잠금
+
+이전에는 한 번 잠금을 해제하면 탭을 닫을 때까지 파생 개인키가 메모리에 남아 있었다 — 여섯 단어 이상의 암호와 서버 검증 OTP까지 요구하는 설계에서 이상한 구멍이었다. 지금은 일정 시간 조작이 없으면 `contexts/SeedContext.tsx`가 스스로 `lock()`을 호출해 키를 폐기한다(기본 15분, `/settings`에서 1분 / 5분 / 15분 / 30분 / 1시간 / 사용 안 함 중 선택). `/entries`에는 수동 "잠그기" 버튼도 있다.
+
+- **단일 `setTimeout`이 아니라 실제 시각(wall-clock)을 주기적으로 비교한다.** 노트북이 잠들면 타이머가 지연되므로, 타이머 하나만 걸어두면 깨어난 순간 타임아웃이 처음부터 다시 시작되어 버린다. `Date.now()`를 비교하면 깨어나자마자 곧바로 잠긴다. 백그라운드 탭은 인터벌이 강하게 스로틀되므로 `visibilitychange`에서도 같은 검사를 한다. 반대로 탭을 숨길 때는 "사용 중"으로 치지 않는다 — 다른 탭을 보는 건 이 탭을 쓰는 게 아니고, 그렇게 세면 백그라운드에 방치된 탭이 스스로 세션을 무한정 갱신하게 된다.
+- 긴 일기를 읽는 중에 잠기지 않도록 키 입력뿐 아니라 스크롤/터치도 "사용 중"으로 센다.
+- 잠긴 뒤 `/entries`는 이유를 문장으로 알려준다 — 아무 설명 없이 목록이 암호 입력창으로 바뀌면 버그처럼 보이기 때문이다.
+- 잠금은 진행 중이던 `/settings` 흐름의 스테이징된 시드도 함께 폐기한다(예: 백업 코드를 화면에 띄워둔 채 자동 잠금이 걸린 경우). 그 상태에서 확인을 누르면 무슨 일이 일어났는지 설명하는 메시지가 뜨고, Firestore에는 아무것도 쓰이지 않았으므로 처음부터 다시 하면 된다.
+
+**설정은 계정에 저장되어 로그인한 모든 기기에 적용된다 — 다만 `preferences`가 아니라 별도의 `users/{uid}.security` 필드에.** 처음에는 `autoLockMinutes`/`draftAutosave`를 표시 설정(`preferences`)에 같이 넣고 `otpSatisfied()`만으로 막으려 했는데, 그 게이트는 OTP를 켜지 않은 계정(대다수)에서는 그냥 통과된다 — 세션만 탈취한 공격자가 피해자의 자동 잠금을 조용히 꺼두고 잠금 해제된 화면에 접근할 기회를 기다릴 수 있다는 뜻이다. 이건 이 저장소가 이미 겪은 문제였다: `wrappedSeed`/`publicKeys`/`decryptionMethods`도 한때 같은 구멍이 있었고("security-patch-v2 / C1"), 그 수정으로 나온 게 `firestore.rules`의 `isRecentAuth()`(로그인 자체가 최근 5분 이내였는지 — 토큰 자동 갱신이 아니라 실제 재로그인만 인정) + `credentialMutationAllowed()`(OTP 계정은 `otpSatisfied()`, 아니면 `isRecentAuth()`)다. `autoLockMinutes`/`draftAutosave`를 표시 설정과 분리된 `security` 필드로 옮기고 **같은 게이트**를 그대로 적용했다 — 새 보안 우회로를 만드는 대신 이미 검증된 방어선을 재사용한 것이다. `preferences`(프라이빗 작성 모드 등 순수 표시 설정)는 원래대로 게이트 없이 남는다.
+
+실무적 결과: OTP를 켠 계정은 `/settings`가 이미 `OtpGate` 뒤에 있으므로 자동 잠금 설정을 바로 바꿀 수 있다. OTP를 켜지 않은 계정은 로그인한 지 5분이 지난 세션에서 시도하면 실패하고(`ReauthRequiredError`), 화면에 다시 로그인하라는 안내가 뜬다 — 설정을 바꾸는 것도 결국 "보안 설정을 바꾸기 전에는 최근 로그인 증명이 필요하다"는 원칙을 따른다.
+
+`autoLockMinutes`는 규칙에서 UI가 제공하는 값의 집합(`[0, 1, 5, 15, 30, 60]`)으로 고정된다. 범위가 아니라 열거인 이유는 `isValidWrappedSeed`가 PBKDF2 반복 횟수에 하한을 박아둔 것과 같다 — 클라이언트가 이 값을 그대로 보안 판단에 먹이므로, 이 코드베이스가 결코 만들지 않을 값(예: 100000)이 저장될 수 있다면 그건 조용히 "잠그지 않음"이 된다.
+
+## 임시 저장 (작성 중인 일기) — 기본값 꺼짐
+
+`/settings`에서 켜면 `/write`에서 쓰던 글이 기기에 임시 저장되어, 탭이 닫히거나 브라우저가 꺼져도 남는다(`lib/drafts.ts`). 일기를 저장하는 순간과 로그아웃하는 순간 즉시 지워지고, 복구된 임시 저장본이 있으면 화면에 "버리기" 버튼과 함께 항상 보인다 — 조용한 캐시가 아니다.
+
+**기본값이 꺼짐인 이유**: 임시 저장본은 localStorage에 **평문**으로 들어간다. §1.1(서버는 평문을 못 본다)은 그대로이고 §1.3은 이미 로컬 기기를 위협 모델 밖에 두지만, 그 전까지 이 앱은 디스크에 아무것도 쓰지 않았다 — 남이 내 컴퓨터를 쓸 수 있다는 게 실제 걱정인 사람에게는 분명한 차이다. 일기 내용을 암호화 없이 기기에 쓰는 기능은 그 사실을 알고 켠 사람에게만 적용되어야지, 기본값으로 물려받는 것이어서는 안 된다. 끄면 이미 저장된 것도 함께 지우고, uid별로 분리되어 다른 계정으로 로그인해도 보이지 않는다.
+
+대안이었던 "계정의 공개키로 임시 저장본을 암호화"(쓰기 경로는 이미 공개키를 갖고 있으므로 가능)는 자기모순이다 — 다시 읽으려면 시드 잠금 해제가 필요한데, 쓰기 경로는 바로 그걸 요구하지 않도록 설계된 곳이다.
+
+## 계정 삭제
+
+`/settings` 맨 아래 "계정 삭제"는 모든 일기 문서, `users/{uid}`, TOTP 시크릿, Firebase Auth 사용자까지 전부 지운다. 바로 위의 "초기화"와는 다르다 — **초기화**는 새 시드를 발급해 기존 암호문을 *읽을 수 없게* 만들 뿐 계정은 그대로 살아 있고(암호학적 소거), **계정 삭제**는 데이터와 로그인 자체를 없앤다. 오래 쓰는 일기 앱에는 둘 다 필요하다.
+
+- 이 작업은 **클라이언트에서 구조적으로 불가능**하다. `firestore.rules`는 `users`와 `entries`의 delete를 무조건 거부한다(append-only, §5) — 세션을 쥔 누군가가 과거를 몰래 고쳐 쓰지 못하게 하는 규칙인데, 같은 규칙이 "내 데이터를 지우고 싶다"는 정당한 요청도 함께 막는다. 규칙을 느슨하게 푸는 대신, 규칙을 우회하는 Admin SDK(`functions/src/index.ts`의 `deleteAccount`)에서만 처리해 규칙 자체는 절대적으로 유지한다.
+- **암호나 백업 코드는 요구하지 않는다.** 그건 "읽을 수 있음"의 증명인데 파괴에는 읽기 권한이 필요 없고, 요구하면 암호를 잊은 사람은 계정을 영영 닫지 못하게 된다.
+- **OTP가 켜져 있으면 현재 코드를 요구한다.** 세션 탈취에 대한 방어선이 OTP이고, 탈취된 세션이 할 수 있는 가장 파괴적인 일이 바로 이것이기 때문이다.
+- **OTP가 꺼져 있는 계정은 대신 최근 로그인(`requireRecentAuth`, 위 "자동 잠금"의 `isRecentAuth()`와 같은 개념)을 요구한다.** 이 부분은 실제로 하나의 구멍을 막은 결과다 — 처음 구현에서는 OTP가 꺼져 있으면 `requireAuth()`(그냥 로그인 상태) 말고는 아무것도 요구하지 않았는데, 이는 세션만 탈취한 공격자가 확인 문구 하나 입력하는 것만으로 계정과 모든 일기를 영구히 지울 수 있었다는 뜻이다 — `wrappedSeed`를 덮어쓰는 것보다도 나쁘다(그건 최소한 복구 불가능한 계정이라도 남지만, 이건 계정 자체가 사라진다). `/settings`의 계정 삭제 화면은 이 실패를 감지하면 OTP 설정 때와 같은 재로그인 절차(비밀번호 재입력 또는 Google 재인증)를 띄우고, 성공하면 삭제를 자동으로 재시도한다.
+- 항목 삭제는 400건씩 페이지 단위로 처리한다(Firestore 배치 쓰기 상한이 500).
+- 알아둘 한계: OTP 기기를 잃어버린 상태에서는 계정 삭제도 막힌다(`disableOtp`와 같은 성질). 백업 코드로 OTP 게이트를 통과해 `/settings`까지는 올 수 있지만, 이 함수는 별도로 유효한 TOTP 코드를 요구한다.
+
+## 설치형 앱 (PWA)
+
+`app/manifest.ts` + `app/icon.svg` / `app/apple-icon.png` / `app/favicon.ico`로 홈 화면에 설치할 수 있다. 일기는 매일 쓰는 개인적 습관인데 탭 서른 개 중 하나는 그걸 담기에 나쁜 그릇이고, `display: standalone`은 주소창도 없애준다 — 화면을 옆에서 볼 때 지금 뭘 보고 있는지 가장 크게 드러나는 게 주소창이라, 프라이빗 작성 모드(§3.9)와 같은 문제의식이다.
+
+**서비스 워커는 일부러 등록하지 않았다.** 이 앱에서 오프라인 캐싱은 곧 (a) 암호문과 그걸 열 키 재료를, 또는 (b) 평문을 기기에 영구 저장한다는 뜻이다 — 임시 저장(`lib/drafts.ts`)에서 의도적으로 작게, 기기 단위로, 끌 수 있게 유지한 바로 그 트레이드오프다. 설치는 되지만 오프라인 캐시는 없는 지금 형태가 껍데기의 이점만 취하고 그 비용은 지지 않는다.
+
+## 항목 길이 패딩 (보안 패치)
+
+**막은 것.** AES-GCM은 16바이트 인증 태그 외에 아무것도 덧붙이지 않으므로, 예전에는 `entries.ciphertext`의 크기가 곧 평문의 크기였다 — **키가 전혀 없어도** DB를 읽을 수 있는 쪽이 그대로 볼 수 있는 값이다. 평문 필드인 `createdAt`과 합치면 "언제, 얼마나 길게 썼는가"의 시계열이 통째로 노출된다. 몇 달간 길게 쓰던 사람이 갑자기 두 줄짜리만 남기기 시작했다는 사실은, 이 앱의 암호화가 지키려던 바로 그 종류의 정보다.
+
+**방법** (`lib/crypto/padding.ts`, ARCHITECTURE.md §3.15). 평문을 `[4바이트 길이][평문][0x00 …]` 레코드로 감싸 버킷 크기까지 0으로 채운 뒤 암호화한다.
+- 버킷은 **Padmé**(PURB 논문, PETS 2019) — 유출을 O(log log n) 비트로 묶으면서 저장 오버헤드는 최대 ~12%. 2의 거듭제곱 버킷(최악 +100%)보다 싸고, 고정 블록 크기(길이가 커지면 사실상 정확한 길이를 노출)보다 안전하다.
+- **1KiB 하한**을 둬서 그 아래는 전부 같은 크기가 된다. Padmé는 작은 입력에서 버킷이 촘촘해지는데(10바이트 → 10바이트), 짧은 항목이야말로 길이가 가장 많은 걸 말해주는 구간이다. 1KiB면 한글 수백 자를 덮는다.
+- **길이 접두사**는 AEAD 안에 있어 함께 인증된다. 후행 0을 잘라내는 방식이었다면 평문이 0바이트로 끝날 때 조용히 손상됐을 것이다.
+
+**형식 태그를 AAD에 넣은 이유** — 이게 이 패치의 핵심 결정이다. `EntryAAD.fmt = "padded-v1"`은 인증되는 값이라, 공격자가 태그를 떼어내 패딩된 항목을 "옛 형식"으로 읽히게 만들려 하면 GCM 태그 검증이 실패한다. 평범한 문서 필드였다면 그 다운그레이드가 조용히 성공해서, 독자에게 길이 접두사와 1KiB의 NUL을 본문이라고 보여줬을 것이다. 반대로 옛 항목에 태그를 붙여 위장하는 것도 같은 이유로 실패한다. 두 방향 모두 단위 테스트와 실제 Firestore 왕복 테스트로 고정해뒀다.
+
+**규칙 레벨 래칫** — `firestore.rules`의 `isValidEntry()`가 새 항목에 `aad.fmt == 'padded-v1'`을 **요구**하고, 패딩된 최소 크기(base64 1388자)에 못 미치는 `ciphertext`를 거부한다. 규칙은 바이트가 불투명해서 "진짜 패딩됐는지"까지는 못 보지만, 명백히 패딩되지 않은 것은 막는다 — 그래야 "새로 저장되는 모든 항목은 패딩되어 있다"가 클라이언트의 약속이 아니라 구조적 사실이 된다. 상한은 500,000 → 560,000자로 함께 올렸다(패딩 오버헤드만큼 올리지 않으면 예전에 들어가던 항목이 갑자기 거부된다).
+
+**비용.** 짧은 항목 하나가 약 100바이트에서 1.4KB(base64 기준)로 늘어난다. 저장 비용 자체는 무시할 만하지만, `/entries`가 목록을 한 번에 가져오므로 **최초 로딩 전송량이 항목 수에 비례해 늘어난다** — 일기 1,000건이면 대략 0.1MB → 1.4MB. 복호화 비용은 사실상 그대로다(항목당 비용은 KEM이 지배하고 AES 쪽은 오차 범위). 이 전송량이 문제가 될 만큼 일기가 쌓이면 그때 필요한 건 패딩을 줄이는 게 아니라 서버 페이지네이션이다(ARCHITECTURE.md §8).
+
+> **배포 순서**: `fmt`를 쓰는 **클라이언트를 먼저** 배포하고, 그 다음 `firestore:rules`를 배포한다. 순서가 뒤바뀌면 아직 옛 번들을 들고 있는 탭이 저장에 실패한다. 클라이언트를 롤백할 때도 거꾸로 같은 제약이 적용된다.
+
+**소급되지 않는다.** `entries`는 append-only라 이미 저장된 문서는 수정할 수 없고, 그 규칙을 푸는 건 이 설계의 다른 보장을 무너뜨린다. **패치 이전에 쓴 항목은 계속 자기 길이를 드러낸다** — 그 항목들은 `fmt`가 없으므로 옛 형식(생 UTF-8)으로 그대로 읽히며, 이 하위 호환도 테스트로 고정되어 있다. 과거 항목까지 덮으려면 전부 복호화 → 재암호화 → 새 문서로 쓰고 옛 문서를 지우는 마이그레이션이 필요한데, 마지막 단계가 Admin SDK를 요구하고 중간 실패 시 데이터 손실 창이 생겨 지금은 넣지 않았다.
+
+## DDoS / 남용 방지 (App Check는 도입했다가 제거함)
+
+네트워크 볼륨 공격 자체는 Firestore/Cloud Functions가 Google 인프라(Cloud Run + Google Front End) 위에서 이미 흡수한다. 앱 코드가 실제로 손댈 수 있는 지점은 "공개된 Firebase 클라이언트 설정값(시크릿이 아니다)을 그대로 긁어다 스크립트로 두드리는" 종류의 남용뿐이다.
+
+이걸 막으려고 **reCAPTCHA 기반 Firebase App Check**를 1차 방어선으로 붙였다가 완전히 걷어냈다(ARCHITECTURE.md §3.10). classic reCAPTCHA v3는 App Check 콘솔에서 신규 등록이 막혀 있어 reCAPTCHA Enterprise로 전환했고, 사이트 키·Enterprise API 활성화·App Check 등록까지 전부 맞췄지만 **Firestore 웹 SDK가 발급된 App Check 토큰을 요청에 아예 붙이지 않는 현상**을 프로덕션에서 확인했다(네트워크 탭에 `X-Firebase-AppCheck` 헤더 자체가 없음) — [firebase/flutterfire#18672](https://github.com/firebase/flutterfire/issues/18672)에 같은 증상이 보고된 미해결 Firebase JS SDK 버그로 보인다. Cloud Functions 쪽(별개의 직접 HTTPS 경로라 이 버그의 영향을 안 받음)은 정상 동작했지만, Firestore가 빠지면 봇 방지 효과가 절반뿐인 데다 Enterprise 설정의 운영 부담도 있어 관련 코드(`lib/firebase/appCheck.ts`, callable의 `enforceAppCheck`, `proxy.ts`의 CSP 예외, `NEXT_PUBLIC_RECAPTCHA_V3_SITE_KEY`/`APP_CHECK_ENFORCE` 환경변수)를 전부 삭제했다.
+
+남은 방어선:
+
+1. **Firestore 규칙의 항목 크기 상한** — `firestore.rules`의 `isValidEntry()`가 `entries` 쓰기의 `ciphertext`를 560,000자로 제한한다(패딩 오버헤드를 감안해 500,000에서 올린 값 — "항목 길이 패딩" 참조). 남용 트래픽의 빈도(rate)가 아니라 건당 크기(size)만 막는 저비용 방어선.
+2. **OTP 실패 잠금** — `verifyStoredOtp`의 실패 5회/60초 잠금(Firestore 트랜잭션이라 동시 요청으로 우회 불가). 6자리 코드 추측 공격 전용.
+3. 그 외에는 Firebase Authentication/Firestore 자체의 기본 요청 한도(quota)에 의존한다 — 개인용 규모에서는 감수할 만한 트레이드오프로 판단했다.
+
+부수 효과로 CSP(`proxy.ts`)가 더 엄격해졌다: `script-src`에는 이제 제3자 호스트가 하나도 없고(이 앱은 외부 스크립트를 전혀 로드하지 않는다), `connect-src`도 Firestore·Auth·Cloud Functions만 남았다. `proxy.test.ts`가 이 상태를 회귀 테스트로 고정한다.
 
 ## Firestore 규칙 / Cloud Functions 배포
 
@@ -172,13 +303,15 @@ pnpm exec firebase deploy --only firestore:rules,firestore:indexes,functions --p
 ```
 
 - `firestore.rules`는 로컬 에뮬레이터로 이미 검증되어 있다 (`pnpm test:rules`).
+- **항목 길이 패딩 때문에 배포 순서가 중요하다** — 클라이언트(Vercel)를 먼저 올리고 그 다음 `firestore:rules`를 배포할 것. 자세한 이유는 "항목 길이 패딩" 참조.
 - **Cloud Functions는 Firebase Blaze(종량제) 요금제가 필요하다** — Spark(무료) 요금제에서는 배포되지 않는다. Firebase 콘솔에서 결제 계정을 연결해 Blaze로 전환한 뒤 배포할 것. 이 앱 규모(개인용, 월 수십~수백 건의 OTP 검증)에서는 Cloud Functions 무료 한도(월 200만 건 호출) 안에 들어올 가능성이 높다.
+- `deleteAccount`(계정 삭제)도 같은 배포 단위에 들어 있다 — 이 함수를 배포하지 않으면 `/settings`의 계정 삭제가 동작하지 않는다.
 - `functions/`는 루트와 별도로 `npm install`한다 (Cloud Functions 배포 단위 관례) — `cd functions && npm install`.
 
 ## Vercel 배포
 
 1. GitHub 저장소를 Vercel 프로젝트에 연결 (vercel.com에서 "Import Project").
-2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두).
+2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두). 이 6개가 전부이고, 그 외에 설정할 환경변수는 없다.
 3. **Firebase 콘솔 > Authentication > Settings > Authorized domains에 Vercel 배포 도메인을 추가해야 로그인이 동작한다** (`*.vercel.app` 프리뷰 도메인 포함, 커스텀 도메인 사용 시 그것도 추가).
 4. Next.js 앱(Vercel에 배포되는 쪽) 자체는 여전히 전부 클라이언트 사이드 Firebase SDK 호출만 하므로 Vercel 쪽에는 시크릿 환경변수가 전혀 없다. 서버 로직(OTP 검증)은 Vercel이 아니라 Firebase Cloud Functions에서 별도로 돌아간다 — 위 "Firestore 규칙 / Cloud Functions 배포" 참조.
 

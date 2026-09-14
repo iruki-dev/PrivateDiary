@@ -28,6 +28,12 @@ import { isAuthTimeFresh, REAUTH_REQUIRED_MESSAGE } from "./authFreshness";
  * untouched by any of this: this whole module never sees the master
  * seed, a passphrase, Shamir shares, or plaintext — it only gates WHETHER
  * the (still fully client-side-decrypted) ciphertext can be fetched at all.
+ *
+ * There is no App Check enforcement here any more: it was tried and
+ * removed wholesale (ARCHITECTURE.md §3.10) after the Firestore Web SDK
+ * turned out not to attach the minted token to its requests at all, which
+ * left the Functions half guarding a door whose window was open. Abuse
+ * defence for this module is now the failure lockout below.
  */
 
 initializeApp();
@@ -390,4 +396,89 @@ export const disableOtp = onCall({ invoker: "public" }, async (request) => {
   await mergeClaims(uid, { otpEnabled: false, otpVerified: false, otpVerifiedAt: null });
   await getAuth().revokeRefreshTokens(uid);
   return { success: true, sessionsRevoked: true };
+});
+
+/**
+ * Permanently deletes the account and everything attached to it: every
+ * entry, the users/{uid} document (public keys, both wrapped seeds, Shamir
+ * configuration, preferences), the TOTP secret, and the Firebase Auth user
+ * itself.
+ *
+ * This is the one operation that structurally CANNOT be done from the
+ * client. firestore.rules denies delete on both `users` and `entries`
+ * outright — `entries` is append-only by design (ARCHITECTURE.md §5) so
+ * that nothing holding a session can quietly rewrite history, and that same
+ * rule necessarily also blocks the legitimate case of a user who wants
+ * their data gone. Only the Admin SDK, which bypasses rules, can reconcile
+ * "append-only for the app" with "erasable by its owner", and doing it
+ * here keeps the rules themselves absolute.
+ *
+ * Note what is NOT required: the passphrase or the Shamir shares. Those
+ * prove you can READ the diary, and destruction does not need read access —
+ * demanding them would mean someone who forgot their passphrase could never
+ * close their account, which is the opposite of the point.
+ *
+ * What IS required mirrors firestore.rules' credentialMutationAllowed()
+ * (security-patch-v2 / C1), because this function performs the single most
+ * destructive credential-adjacent mutation there is — more so than
+ * overwriting wrappedSeed, since that at least leaves a recoverable
+ * account behind. An earlier version of this function required an OTP
+ * code ONLY when OTP was enabled and left non-OTP accounts (the majority)
+ * checked by nothing but requireAuth() — exactly the gap C1 closed for
+ * wrappedSeed/publicKeys/decryptionMethods, just reopened here for the one
+ * mutation with no undo at all. Now:
+ *   - OTP enabled: a valid current code, as before.
+ *   - OTP not enabled: requireRecentAuth() — proof of an actual sign-in
+ *     (not a silently-refreshed token) within the last few minutes. A pure
+ *     token-theft attacker who never had the login credential cannot
+ *     produce this on demand.
+ *
+ * "초기화" (resetKeys, ARCHITECTURE.md §3.6 rule 5) remains the lighter
+ * option: it issues a new seed, leaving the old ciphertext stored but
+ * permanently unreadable. This removes the ciphertext too.
+ */
+export const deleteAccount = onCall({ invoker: "public" }, async (request) => {
+  requireAuth(request.auth?.uid);
+  const uid = request.auth.uid;
+
+  const secretRef = getFirestore().collection(OTP_SECRETS_COLLECTION).doc(uid);
+  const secret = await secretRef.get();
+  if (secret.exists && (secret.data() as OtpSecretDoc).confirmed) {
+    // Throws (and counts toward the lockout) unless the caller proves the
+    // authenticator currently registered on this account.
+    await verifyStoredOtp(uid, requireCode(request.data));
+  } else {
+    // No OTP configured: the account has no code to prove, so this is the
+    // ONLY check standing between a stolen-but-not-fresh session and
+    // permanently destroying everything. Throws (via requireRecentAuth)
+    // with REAUTH_REQUIRED_MESSAGE if this session's ID token wasn't
+    // minted from an actual sign-in in the last few minutes.
+    requireRecentAuth(request);
+  }
+
+  // Paged rather than one query + one batch: Firestore caps a write batch
+  // at 500 operations, and a long-running diary will have far more entries
+  // than that. Each page re-queries from the start because the previous
+  // page no longer exists.
+  const entries = getFirestore().collection("entries").where("uid", "==", uid);
+  let deletedEntries = 0;
+  for (;;) {
+    const page = await entries.limit(400).get();
+    if (page.empty) break;
+    const batch = getFirestore().batch();
+    for (const doc of page.docs) batch.delete(doc.ref);
+    await batch.commit();
+    deletedEntries += page.size;
+  }
+
+  await getFirestore().collection("users").doc(uid).delete();
+  await secretRef.delete();
+
+  // Last: once the auth user is gone the caller's session is void, so
+  // anything after this would be unreachable on a retry. Doing it last
+  // also means a failure partway through leaves an account that can sign
+  // in and try again, rather than orphaned data with no owner.
+  await getAuth().deleteUser(uid);
+
+  return { success: true, deletedEntries };
 });

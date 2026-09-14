@@ -17,7 +17,14 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "PrivateDiary",
-  description: "Zero-knowledge encrypted diary",
+  description: "누구도 아닌 나만 읽을 수 있는, 제로 지식 암호화 일기.",
+  applicationName: "PrivateDiary",
+  // A diary is a daily-use app people keep on a phone home screen; this is
+  // what makes the installed shortcut open standalone instead of in a tab.
+  appleWebApp: { capable: true, title: "PrivateDiary", statusBarStyle: "black-translucent" },
+  // Nothing here should ever appear in a search result — the app is an
+  // account-gated personal vault, not a public page.
+  robots: { index: false, follow: false },
 };
 
 export const viewport: Viewport = {
@@ -60,8 +67,21 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       >
         <Providers>
           <SecurityWarningBanner />
+          {/* Keyboard users would otherwise tab through the whole nav on
+              every route before reaching the entry they were reading or the
+              textarea they were writing in. The .sr-only-focusable utility
+              in globals.css exists for exactly this and had no caller. */}
+          <a href="#main-content" className="sr-only-focusable btn-primary absolute left-4 top-4 z-50">
+            본문으로 건너뛰기
+          </a>
           <NavBar />
-          {children}
+          {/* A real flex item, not a display:contents wrapper: the pages
+              below are `flex flex-1` children of <body>, and this has to
+              pass that sizing straight through while still being a focus
+              target the skip link can land on. */}
+          <div id="main-content" tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
+            {children}
+          </div>
         </Providers>
       </body>
     </html>
