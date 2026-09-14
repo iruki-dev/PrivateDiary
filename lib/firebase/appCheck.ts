@@ -16,6 +16,23 @@ import type { FirebaseApp } from "firebase/app";
  * "Enforce" toggle in the App Check console — none of that can be done
  * from code).
  *
+ * KNOWN LIMITATION, confirmed against production: even with all of the
+ * above correctly configured, the Firestore Web SDK does not attach the
+ * minted App Check token to its requests at all (no X-Firebase-AppCheck
+ * header — verified directly in the browser network tab) — a currently
+ * open, unfixed Firebase JS SDK bug, not a config issue on this app's
+ * side (see https://github.com/firebase/flutterfire/issues/18672 for the
+ * same symptom reported elsewhere: "the app-check-internal provider is
+ * present, initialised, and holding a fresh token ... Firestore just
+ * never calls it on web"). Firestore's own "Enforce" toggle in the App
+ * Check console is therefore left OFF deliberately — turning it on with
+ * this bug present blocks every real Firestore request. This does not
+ * weaken this app's actual access control, which was always
+ * firestore.rules, not App Check (App Check is a supplementary abuse
+ * filter). Cloud Functions callables go through a different request path
+ * (direct HTTPS, not Firestore's WebChannel) and are unaffected — their
+ * own enforceAppCheck (functions/src/index.ts) is safe to enable.
+ *
  * Enterprise, not classic reCAPTCHA v3 (ReCaptchaV3Provider): as of this
  * writing, the App Check console no longer offers classic reCAPTCHA as a
  * registration option for new apps at all (not just deprecated — genuinely
