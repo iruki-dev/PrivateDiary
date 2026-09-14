@@ -9,17 +9,24 @@ import type { FirebaseApp } from "firebase/app";
  * without costing real users anything. This is the primary "don't hurt UX"
  * DDoS mitigation for this app; see README.md's "DDoS 방지" section for the
  * remaining manual steps (creating a reCAPTCHA Enterprise site key,
- * registering it under App Check's "reCAPTCHA Enterprise" provider with its
- * secret key, and flipping the per-API "Enforce" toggle in the App Check
- * console — none of that can be done from code).
+ * registering that SAME site key — not a secret key; Enterprise's App Check
+ * registration screen only asks for the site key — under App Check's
+ * "reCAPTCHA Enterprise" provider, enabling the reCAPTCHA Enterprise API
+ * itself on the linked Google Cloud project, and flipping the per-API
+ * "Enforce" toggle in the App Check console — none of that can be done
+ * from code).
  *
- * Enterprise, not classic reCAPTCHA v3 (ReCaptchaV3Provider): classic
- * reCAPTCHA is marked deprecated in the App Check console itself as of this
- * writing, in favor of Enterprise — see this decision's discussion. The
- * client-side API is otherwise identical (same invisible-badge model, same
- * constructor shape); Enterprise additionally needs a billing-enabled
- * Google Cloud project for the reCAPTCHA Enterprise API, which the classic
- * product didn't require.
+ * Enterprise, not classic reCAPTCHA v3 (ReCaptchaV3Provider): as of this
+ * writing, the App Check console no longer offers classic reCAPTCHA as a
+ * registration option for new apps at all (not just deprecated — genuinely
+ * unavailable to configure). The client-side API is otherwise identical
+ * (same invisible-badge model, same constructor shape); Enterprise
+ * additionally needs a billing-enabled Google Cloud project with the
+ * reCAPTCHA Enterprise API (`recaptchaenterprise.googleapis.com`) enabled —
+ * if that API is off, verification fails for every request even with a
+ * correctly registered site key, which the App Check console's request
+ * metrics surface as 100% "invalid requests" with no more specific error
+ * client-side.
  *
  * Safe to call with no site key configured (dev, or before the console
  * setup is done): initializeAppCheck then just never succeeds in minting
