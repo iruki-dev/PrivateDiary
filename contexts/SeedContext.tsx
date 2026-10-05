@@ -316,7 +316,12 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       wipePrivateKeys();
       // A staged seed is the same plaintext secret held for a /settings
       // flow in progress; locking must not leave it sitting in memory.
-      clearStagedSeed();
+      // The one exception is leaving the Android app: a person saving new
+      // backup codes copies one into a password manager and comes back to
+      // finish, and that must not throw the codes on screen away. The
+      // staged seed still dies with its own flow (cancel, confirm, leaving
+      // the page) and with any idle or manual lock.
+      if (reason !== "background") clearStagedSeed();
       setStatus((prev) => (prev === "unlocked" ? "locked" : prev));
       setLockReason(reason);
     },

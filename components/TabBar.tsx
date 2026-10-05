@@ -4,6 +4,8 @@ import { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { APP_LINKS, useHasAccount } from "@/components/NavBar";
+import { useNative } from "@/contexts/NativeContext";
+import { IS_ANDROID_APP } from "@/lib/platform";
 
 function PenIcon() {
   return (
@@ -55,7 +57,11 @@ function keyboardOpenSnapshot(): boolean {
 export function TabBar() {
   const hasAccount = useHasAccount();
   const pathname = usePathname();
-  const keyboardOpen = useSyncExternalStore(subscribeViewport, keyboardOpenSnapshot, () => false);
+  const viewportKeyboardOpen = useSyncExternalStore(subscribeViewport, keyboardOpenSnapshot, () => false);
+  // The Android app shrinks the whole page to sit above the keyboard, so
+  // the viewport comparison above never fires there; the app says so instead.
+  const { keyboardOpen: appKeyboardOpen } = useNative();
+  const keyboardOpen = IS_ANDROID_APP ? appKeyboardOpen : viewportKeyboardOpen;
   if (!hasAccount) return null;
 
   return (

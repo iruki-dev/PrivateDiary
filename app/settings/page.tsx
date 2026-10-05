@@ -18,6 +18,8 @@ import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
 import { AccountGroup } from "@/components/settings/AccountGroup";
+import { DeviceUnlockRow } from "@/components/settings/DeviceUnlockRow";
+import { IS_ANDROID_APP } from "@/lib/platform";
 import {
   MoreLink,
   SettingsGroup,
@@ -144,6 +146,7 @@ export default function SettingsPage() {
         >
           <div className="space-y-8">
             <SettingsGroup id="security" title="일기 보호">
+              {IS_ANDROID_APP && <DeviceUnlockRow shamirK={shamirConfig?.k ?? null} />}
               <ShamirRow
                 config={shamirConfig}
                 stageSeedFromPassphrase={stageSeedFromPassphrase}
@@ -274,7 +277,11 @@ function AutoLockRow() {
     <SettingsRow
       label="자동 잠금"
       htmlFor="auto-lock-minutes"
-      description="사용하지 않으면 지난 일기를 다시 잠급니다."
+      description={
+        IS_ANDROID_APP
+          ? "사용하지 않으면 지난 일기를 다시 잠급니다. 앱을 벗어나면 시간과 상관없이 바로 잠깁니다."
+          : "사용하지 않으면 지난 일기를 다시 잠급니다."
+      }
       control={
         <select
           id="auto-lock-minutes"

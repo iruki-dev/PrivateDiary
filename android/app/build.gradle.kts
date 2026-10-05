@@ -95,6 +95,9 @@ android {
     }
 
     lint {
+        // Newer AndroidX releases need compileSdk 37 (and a newer Android
+        // Gradle Plugin); these are the newest that build against API 36.
+        disable += setOf("GradleDependency", "NewerVersionAvailable")
         abortOnError = true
         checkReleaseBuilds = true
         warningsAsErrors = false
@@ -141,5 +144,5 @@ dependencies {
 
     testImplementation("junit:junit:4.13.2")
     // org.json is part of Android itself, but not of the JVM unit-test classpath.
-    testImplementation("org.json:json:20250517")
+    testImplementation("org.json:json:20260814")
 }

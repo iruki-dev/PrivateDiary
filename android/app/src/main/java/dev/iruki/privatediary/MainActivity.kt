@@ -312,6 +312,8 @@ class MainActivity : FragmentActivity() {
         )
     }
 
+    // onRenderProcessGone IS implemented below; lint doesn't see it on an inner class.
+    @SuppressLint("MissingOnRenderProcessGone")
     private inner class AppWebViewClient : WebViewClient() {
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url

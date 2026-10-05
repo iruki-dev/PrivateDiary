@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { buildExportFile, type ExportFormat, type ExportableEntry } from "@/lib/entries/export";
+import { saveTextFile } from "@/lib/saveFile";
 
 /**
  * "Download my diary", available once the session is unlocked.
@@ -28,20 +29,11 @@ export function ExportEntriesCard({
 }) {
   const [error, setError] = useState<string | null>(null);
 
-  function download(format: ExportFormat) {
+  async function download(format: ExportFormat) {
     setError(null);
     try {
       const file = buildExportFile(entries, format);
-      const blob = new Blob([file.content], { type: file.mimeType });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = file.filename;
-      anchor.click();
-      // Revoking immediately can cancel the download in some browsers, so
-      // this waits a turn — the object URL is scoped to this document and
-      // goes away with the tab regardless.
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
+      await saveTextFile(file.filename, file.mimeType, file.content);
     } catch (err) {
       console.error("export failed", err);
       setError("내보내기에 실패했습니다. 다시 시도해주세요.");
@@ -64,7 +56,7 @@ export function ExportEntriesCard({
       <div className="flex flex-wrap gap-2">
         <button
           type="button"
-          onClick={() => download("markdown")}
+          onClick={() => void download("markdown")}
           disabled={disabled}
           className="btn-secondary btn-sm"
         >
@@ -72,7 +64,7 @@ export function ExportEntriesCard({
         </button>
         <button
           type="button"
-          onClick={() => download("json")}
+          onClick={() => void download("json")}
           disabled={disabled}
           className="btn-secondary btn-sm"
         >

@@ -216,3 +216,22 @@ body {
     @apply sr-only;
   }
 }
+
+/*
+ * Android app (data-platform="android" on <html>, set at build time).
+ * What makes the bundled pages behave like an app rather than a web page
+ * inside one: no grey flash on tap, no text-selection handles or link
+ * previews when a button or tab is long-pressed (text you wrote stays
+ * selectable), and no overscroll bounce revealing nothing behind the page.
+ */
+html[data-platform="android"] {
+  -webkit-tap-highlight-color: transparent;
+}
+html[data-platform="android"] body {
+  overscroll-behavior-y: none;
+}
+html[data-platform="android"] :is(button, a, nav, header, label, [role="switch"], [role="radio"]) {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}

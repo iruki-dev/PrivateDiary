@@ -84,6 +84,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     <html
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-platform={IS_ANDROID_APP ? "android" : undefined}
     >
       <body
         className="flex min-h-full flex-col"

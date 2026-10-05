@@ -12,6 +12,7 @@ import { usePreferences } from "@/contexts/PreferencesContext";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts";
 import { TodayLabel } from "@/components/TodayLabel";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
+import { haptic } from "@/lib/native/app";
 
 const timeFormatter = new Intl.DateTimeFormat("ko-KR", { timeStyle: "short" });
 const draftFormatter = new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" });
@@ -150,9 +151,11 @@ export default function WritePage() {
       clearDraft(user.uid);
       setRestoredDraftAt(null);
       setSavedAt(new Date());
+      haptic("confirm");
       textareaRef.current?.focus();
     } catch (err) {
       console.error("writeEntry failed", err);
+      haptic("reject");
       setError("저장하지 못했습니다. 다시 시도해주세요.");
     } finally {
       setSubmitting(false);

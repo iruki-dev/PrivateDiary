@@ -1,6 +1,7 @@
 package dev.iruki.privatediary
 
-import android.net.Uri
+import android.annotation.SuppressLint
+import androidx.core.net.toUri
 import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
@@ -24,6 +25,10 @@ import org.json.JSONObject
  * strings, loads URLs it is handed (except a user-tapped https/mailto link
  * opened outside the app), or touches files the page names.
  */
+// Every WebView feature used here is checked before this class exists:
+// MainActivity refuses to start without WEB_MESSAGE_LISTENER, and binary
+// frames are only posted when `binarySupported` (WEB_MESSAGE_ARRAY_BUFFER).
+@SuppressLint("RequiresFeature")
 class NativeBridge(
     private val activity: MainActivity,
     private val webView: WebView,
@@ -52,7 +57,7 @@ class NativeBridge(
     override fun onPostMessage(
         view: WebView,
         message: WebMessageCompat,
-        sourceOrigin: Uri,
+        sourceOrigin: android.net.Uri,
         isMainFrame: Boolean,
         replyProxy: JavaScriptReplyProxy,
     ) {
@@ -176,7 +181,7 @@ class NativeBridge(
                 ok(id)
             }
             "external.open" -> {
-                activity.openExternal(Uri.parse(params.optString("url", "")))
+                activity.openExternal(params.optString("url", "").toUri())
                 ok(id)
             }
             else -> fail(id, "unknown-method")
@@ -214,7 +219,7 @@ class NativeBridge(
 
 /** File names for "모든 일기 내보내기" (unit-tested in FileNamesTest). */
 object FileNames {
-    val ALLOWED_MIME_TYPES = setOf("text/markdown", "application/json")
+    val ALLOWED_MIME_TYPES = setOf("text/markdown", "application/json", "text/plain")
 
     fun sanitize(name: String): String? {
         val cleaned = name.replace(Regex("[\\\\/:*?\"<>|\\u0000-\\u001f]"), "_").trim().trimStart('.')

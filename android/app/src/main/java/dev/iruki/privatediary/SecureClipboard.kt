@@ -4,6 +4,7 @@ import android.content.ClipData
 import android.content.ClipDescription
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.os.PersistableBundle
@@ -32,7 +33,14 @@ class SecureClipboard(context: Context) {
         val label = "PrivateDiary ${UUID.randomUUID()}"
         val clip = ClipData.newPlainText(label, text)
         clip.description.extras = PersistableBundle().apply {
-            putBoolean(ClipDescription.EXTRA_IS_SENSITIVE, true)
+            // The same key as a string before Android 13, where several
+            // keyboards and OEM clipboards already honour it.
+            val key = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                ClipDescription.EXTRA_IS_SENSITIVE
+            } else {
+                "android.content.extra.IS_SENSITIVE"
+            }
+            putBoolean(key, true)
         }
         clipboard.setPrimaryClip(clip)
         pendingLabel = label

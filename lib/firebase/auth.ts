@@ -6,12 +6,15 @@ import {
   reauthenticateWithCredential,
   reauthenticateWithPopup,
   sendPasswordResetEmail,
+  signInWithCredential,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
   type User,
 } from "firebase/auth";
 import { auth } from "./config";
+import { isNativeApp } from "@/lib/native/bridge";
+import { googleIdToken } from "@/lib/native/app";
 
 /**
  * Firebase Authentication only (ARCHITECTURE.md §2: "계정 로그인(신원 확인)만
@@ -36,7 +39,16 @@ export async function signInWithEmail(email: string, password: string): Promise<
   return credential.user;
 }
 
+/**
+ * Web: Google's popup. Android app: Google refuses its sign-in page inside
+ * a WebView, so the app gets a Google ID token from Android's Credential
+ * Manager and only that token is exchanged with Firebase here.
+ */
 export async function signInWithGoogle(): Promise<User> {
+  if (isNativeApp()) {
+    const credential = await signInWithCredential(auth, GoogleAuthProvider.credential(await googleIdToken()));
+    return credential.user;
+  }
   const credential = await signInWithPopup(auth, new GoogleAuthProvider());
   return credential.user;
 }
@@ -74,6 +86,10 @@ export async function reauthenticateWithPassword(user: User, password: string): 
 
 /** Same as reauthenticateWithPassword, for a Google-signed-in user (re-runs the Google popup). */
 export async function reauthenticateWithGoogle(user: User): Promise<void> {
+  if (isNativeApp()) {
+    await reauthenticateWithCredential(user, GoogleAuthProvider.credential(await googleIdToken()));
+    return;
+  }
   await reauthenticateWithPopup(user, new GoogleAuthProvider());
 }
 

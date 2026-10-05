@@ -4,6 +4,7 @@ import { SignedInRedirect } from "@/components/SignedInRedirect";
 import { SiteFooter } from "@/components/SiteFooter";
 import { VisitorComposer } from "@/components/VisitorComposer";
 import { SITE } from "@/lib/site";
+import { IS_ANDROID_APP } from "@/lib/platform";
 
 export const metadata: Metadata = {
   title: { absolute: `${SITE.name} — ${SITE.tagline}` },
@@ -37,7 +38,9 @@ export default function FrontPage() {
           <VisitorComposer />
         </div>
       </main>
-      <SiteFooter />
+      {/* The app is not a website: help, privacy and terms are a tap away
+          under 도움말 at the top, and on the sign-up screen. */}
+      {!IS_ANDROID_APP && <SiteFooter />}
     </>
   );
 }

@@ -58,6 +58,49 @@ jobs:
 
       - run: pnpm exec tsc --noEmit
 
+  android:
+    name: Android app (web bundle, unit tests, lint, release build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # The committed gradle-wrapper.jar is executable code; make sure it is
+      # an official Gradle release before running it.
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: pnpm install --frozen-lockfile
+
+      # Static export + per-page CSP pinning. Fails if any page would need
+      # a weaker CSP (scripts/android-csp.mjs).
+      - name: Build web bundle
+        run: pnpm build:android-web
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.example.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-placeholder.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "0"
+          NEXT_PUBLIC_FIREBASE_APP_ID: "1:0:web:0"
+
+      # Every dependency is checked against gradle/verification-metadata.xml.
+      # The runner image ships the Android SDK; AGP fetches any missing
+      # platform/build-tools itself.
+      - name: Test, lint and build
+        working-directory: android
+        run: ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+
   rules:
     name: Firestore security rules
     runs-on: ubuntu-latest
