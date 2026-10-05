@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "re
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { LoadingState } from "@/components/LoadingState";
 import { TodayLabel } from "@/components/TodayLabel";
 
 /**
@@ -14,6 +16,7 @@ import { TodayLabel } from "@/components/TodayLabel";
  */
 export function VisitorComposer() {
   const router = useRouter();
+  const { status: authStatus } = useAuth();
   const { setPendingEntry } = usePendingEntry();
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -42,6 +45,12 @@ export function VisitorComposer() {
     if (!text.trim()) return;
     setPendingEntry(text);
     router.push("/signup");
+  }
+
+  // A signed-in visitor is on their way to /write (SignedInRedirect); don't
+  // hand them an editor whose 저장 would send them through signup.
+  if (authStatus === "signed-in") {
+    return <LoadingState label="오늘의 일기로 이동 중..." />;
   }
 
   return (
