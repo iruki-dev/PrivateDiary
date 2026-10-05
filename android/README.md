@@ -82,6 +82,74 @@ v2/v3 signatures only; v1 (JAR) signing is off.
 - Dependencies are AndroidX and Google Identity only; no analytics, ads,
   crash reporting or third-party SDKs.
 
+## 테스트 배포 (Firebase App Distribution)
+
+Play 스토어에 올리기 전까지 테스터 빌드는 Firebase App Distribution으로 배포합니다. GitHub의
+**Actions → Android tester build → Run workflow** 한 번으로 빌드부터 테스트, 서명, 업로드까지
+처리됩니다(`.github/workflows/android-distribute.yml`). 테스터는 Firebase App Tester 앱이나 초대
+메일로 설치하고 업데이트를 받습니다.
+
+### 버전 관리
+
+| | 어디서 정하나 | 규칙 |
+|---|---|---|
+| 버전 이름 (`1.0.0`) | `android/version.properties` | 사람이 올립니다. 테스터에게 보일 의미 있는 변화가 쌓였을 때 MINOR/PATCH를 올리고, Play 출시 직전에 확정합니다. |
+| 빌드 번호 (`42`) | 배포 워크플로가 자동으로 | 실행할 때마다 1씩 커집니다(`ANDROID_VERSION_CODE_BASE` + 실행 번호). 줄어드는 일이 없어 테스터 휴대폰은 항상 위에 덮어 설치됩니다. Play에 올릴 때도 같은 번호 체계를 그대로 이어 씁니다. |
+| 커밋 | 빌드 시 자동 | 앱에 함께 기록됩니다. |
+
+테스터의 앱에서 **설정 → 계정 → 앱 버전**에 `1.0.0 (42) · abc1234`처럼 표시됩니다. 문제를 알려 줄 때
+이 줄을 같이 보내 달라고 안내하면 정확히 어떤 코드인지 알 수 있습니다. 같은 내용이 App Distribution의
+릴리스 노트 첫 줄과 워크플로 실행 요약에도 남습니다.
+
+로컬 빌드는 빌드 번호가 1이고 디버그 빌드는 패키지 이름도 다르므로(`.debug`), 테스터 빌드와 섞이지
+않습니다.
+
+### 처음 한 번 설정
+
+1. **Firebase에 Android 앱 등록**: Firebase 콘솔 → 프로젝트 설정 → 앱 추가 → Android, 패키지 이름
+   `dev.iruki.privatediary`. `google-services.json`은 받지 않아도 됩니다(앱은 Firebase Android SDK를
+   쓰지 않습니다). 표시되는 **앱 ID**(`1:…:android:…`)를 적어 둡니다.
+2. **테스터 그룹**: App Distribution → 테스터 및 그룹 → 그룹을 만들고 별칭을 `testers`로 둡니다(다른
+   이름이면 실행할 때 입력합니다).
+3. **업로드 키 만들기** (평생 쓰는 키이므로 신중히):
+   ```sh
+   keytool -genkeypair -keystore privatediary-upload.jks -alias upload \
+     -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=PrivateDiary"
+   base64 -w0 privatediary-upload.jks   # → ANDROID_KEYSTORE_BASE64
+   ```
+   키 파일과 비밀번호는 비밀번호 관리자와 오프라인 백업에 보관합니다. 잃어버리면 같은 앱으로
+   업데이트를 낼 수 없습니다(Play 출시 후에는 Play App Signing 덕분에 업로드 키를 재설정할 수 있습니다).
+4. **업로드용 서비스 계정**: Google Cloud 콘솔(같은 프로젝트) → IAM 및 관리자 → 서비스 계정 → 만들기,
+   역할은 **Firebase App Distribution Admin** 하나만 줍니다. 키(JSON)를 만들어 내용 전체를
+   `FIREBASE_APP_DISTRIBUTION_CREDENTIALS`에 넣고, 내려받은 파일은 지웁니다.
+5. **GitHub 환경**: 저장소 Settings → Environments → `app-distribution` 만들기.
+   - *Required reviewers*에 본인(또는 다른 사람)을 넣으면, 승인 없이는 테스터에게 아무것도 나가지 않습니다.
+   - *Deployment branches*를 `main`으로 제한하는 것을 권장합니다.
+   - Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`(`upload`),
+     `ANDROID_KEY_PASSWORD`, `FIREBASE_APP_DISTRIBUTION_CREDENTIALS`
+   - Variables: `FIREBASE_ANDROID_APP_ID`, 웹과 같은 `NEXT_PUBLIC_FIREBASE_*` 여섯 개,
+     `NEXT_PUBLIC_SITE_URL`·`NEXT_PUBLIC_OPERATOR_NAME`·`NEXT_PUBLIC_CONTACT_EMAIL`,
+     `GOOGLE_WEB_CLIENT_ID`(Google 로그인을 쓸 때), `ANDROID_VERSION_CODE_BASE`(선택, 기본 0)
+6. **첫 실행 후**: 워크플로의 *Verify signature and version* 단계 로그에 찍힌 인증서 SHA-1·SHA-256을
+   Firebase의 Android 앱 설정 → 디지털 지문 추가에 등록합니다. Google 로그인에 필요합니다.
+
+### 배포하기
+
+Actions → **Android tester build** → Run workflow → 브랜치(보통 `main`), 테스터 그룹, 릴리스 노트(비우면
+최근 커밋 제목) → 승인 → 몇 분 뒤 테스터에게 알림이 갑니다.
+
+### Play 스토어로 넘어갈 때
+
+- Play App Signing을 쓰면 Play에서 받은 앱은 Google의 앱 서명 키로 서명됩니다. App Distribution으로 설치한
+  앱(업로드 키 서명)과 서명이 달라 **그 위로 업데이트되지 않습니다.** 테스터는 앱을 지우고 Play에서 다시
+  설치해야 합니다. 일기는 서버에 있으므로 다시 로그인하면 그대로 보이고, 생체 인증으로 열기만 다시 켜면
+  됩니다.
+- Play Console의 앱 서명 키 SHA-1·SHA-256도 Firebase에 등록합니다(Google 로그인).
+- 빌드 번호는 이어서 올라가므로 따로 맞출 필요가 없습니다.
+
+App Distribution SDK(앱 안의 "새 버전" 알림)는 넣지 않았습니다. 앱이 통신하는 곳이 늘고 SDK가 하나 더
+들어오는 데 비해, 같은 알림을 App Tester 앱이 이미 줍니다.
+
 ## Security model
 
 Threats are what a phone adds on top of the website's threat model (the

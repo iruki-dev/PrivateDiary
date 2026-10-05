@@ -292,6 +292,8 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
   접근성 악용 차단, 백업·기기 이동 제외, 네트워크 허용 목록.
 
 빌드·서명·Firebase 설정과 위협별 보호 장치 표는 [android/README.md](android/README.md)에 있습니다.
+Play 출시 전 테스터 빌드는 Actions의 **Android tester build** 워크플로로 Firebase App Distribution에
+배포하며, 버전 규칙과 처음 한 번 설정도 같은 문서의 "테스트 배포"에 있습니다.
 사용자용 설명은 `/docs/android`입니다.
 
 ## 항목 길이 패딩 (보안 패치)

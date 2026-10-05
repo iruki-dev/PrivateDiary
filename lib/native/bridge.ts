@@ -187,7 +187,12 @@ export function onNativeEvent(name: string, listener: (data: Record<string, unkn
 }
 
 export interface NativeHello {
+  /** versionName (android/version.properties). */
   version: string;
+  /** Build number; every tester build gets a higher one. */
+  versionCode: number;
+  /** Short commit hash the build came from. */
+  commit: string;
   capabilities: { binary: boolean; googleSignIn: boolean };
   /** Soft warnings about the phone (android/.../DeviceSignals.kt). */
   signals: string[];

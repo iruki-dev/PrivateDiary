@@ -1,0 +1,174 @@
+# Tester builds of the Android app → Firebase App Distribution.
+#
+# Run it from the Actions tab ("Run workflow"), on the branch to ship
+# (normally main). Each run:
+#   1. builds the web bundle with the production Firebase config,
+#   2. runs the Android unit tests and lint,
+#   3. builds a release APK with the next build number and signs it,
+#   4. uploads it to App Distribution for the chosen tester groups.
+#
+# One-time setup (android/README.md → "테스트 배포"):
+#   Environment "app-distribution" (Settings → Environments), holding:
+#     secrets  ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASSWORD,
+#              ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD,
+#              FIREBASE_APP_DISTRIBUTION_CREDENTIALS (service-account JSON)
+#     vars     FIREBASE_ANDROID_APP_ID, NEXT_PUBLIC_FIREBASE_* (the same six
+#              as the website), GOOGLE_WEB_CLIENT_ID (optional),
+#              ANDROID_VERSION_CODE_BASE (optional, default 0)
+#   Requiring a reviewer on that environment means nothing ships to
+#   testers without a second person's approval.
+name: Android tester build
+
+on:
+  workflow_dispatch:
+    inputs:
+      groups:
+        description: "Tester groups (App Distribution group aliases, comma-separated)"
+        required: true
+        default: testers
+      release_notes:
+        description: "Release notes for testers (empty: the last commits' subjects)"
+        required: false
+        default: ""
+
+# One upload at a time, so build numbers reach testers in order.
+concurrency:
+  group: android-distribute
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  distribute:
+    name: Build, sign and distribute
+    runs-on: ubuntu-latest
+    environment: app-distribution
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 30
+
+      - uses: gradle/actions/wrapper-validation@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Check configuration
+        env:
+          APP_ID: ${{ vars.FIREBASE_ANDROID_APP_ID }}
+          API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+          HAS_CREDENTIALS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_CREDENTIALS != '' }}
+        run: |
+          missing=""
+          [ -n "$APP_ID" ] || missing="$missing FIREBASE_ANDROID_APP_ID"
+          [ -n "$API_KEY" ] || missing="$missing NEXT_PUBLIC_FIREBASE_API_KEY"
+          [ "$HAS_KEYSTORE" = "true" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
+          [ "$HAS_CREDENTIALS" = "true" ] || missing="$missing FIREBASE_APP_DISTRIBUTION_CREDENTIALS"
+          if [ -n "$missing" ]; then
+            echo "::error::Not set in the app-distribution environment:$missing (android/README.md → 테스트 배포)"
+            exit 1
+          fi
+
+      # Strictly increasing per run, so every tester build can install over
+      # the previous one. ANDROID_VERSION_CODE_BASE lets the numbering carry
+      # on above anything already uploaded (e.g. if this workflow is renamed
+      # and its run counter restarts).
+      - name: Assign build number
+        env:
+          BASE: ${{ vars.ANDROID_VERSION_CODE_BASE || '0' }}
+        run: |
+          code=$((BASE + GITHUB_RUN_NUMBER))
+          name=$(sed -n 's/^versionName=//p' android/version.properties)
+          echo "ANDROID_VERSION_CODE=$code" >> "$GITHUB_ENV"
+          echo "APP_VERSION_NAME=$name" >> "$GITHUB_ENV"
+          echo "### PrivateDiary $name ($code) · ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build web bundle
+        run: pnpm build:android-web
+        env:
+          NEXT_PUBLIC_FIREBASE_API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ${{ vars.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN }}
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_PROJECT_ID }}
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ${{ vars.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET }}
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID }}
+          NEXT_PUBLIC_FIREBASE_APP_ID: ${{ vars.NEXT_PUBLIC_FIREBASE_APP_ID }}
+          NEXT_PUBLIC_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
+          NEXT_PUBLIC_OPERATOR_NAME: ${{ vars.NEXT_PUBLIC_OPERATOR_NAME }}
+          NEXT_PUBLIC_CONTACT_EMAIL: ${{ vars.NEXT_PUBLIC_CONTACT_EMAIL }}
+
+      # The keystore only ever exists in the runner's temp directory, and is
+      # deleted at the end of the job whatever happens.
+      - name: Restore signing key
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Test, lint and build signed APK
+        working-directory: android
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+        run: ./gradlew --no-daemon testReleaseUnitTest lintRelease assembleRelease
+
+      # Fails the run if the APK isn't validly signed, and prints the
+      # certificate digests — the SHA-1/SHA-256 to register in Firebase for
+      # Google sign-in.
+      - name: Verify signature and version
+        run: |
+          apk=android/app/build/outputs/apk/release/app-release.apk
+          tools="$ANDROID_HOME/build-tools/$(ls "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$tools/apksigner" verify --min-sdk-version 30 --print-certs "$apk" | grep -E "certificate (SHA-1|SHA-256) digest"
+          "$tools/aapt2" dump badging "$apk" | head -1
+          "$tools/aapt2" dump badging "$apk" | grep -q "versionCode='$ANDROID_VERSION_CODE'"
+          echo "APK_PATH=$apk" >> "$GITHUB_ENV"
+
+      - name: Release notes
+        env:
+          NOTES: ${{ inputs.release_notes }}
+        run: |
+          {
+            echo "$APP_VERSION_NAME ($ANDROID_VERSION_CODE) · ${GITHUB_SHA::7}"
+            echo
+            if [ -n "$NOTES" ]; then
+              printf '%s\n' "$NOTES"
+            else
+              git log -10 --no-merges --pretty='- %s'
+            fi
+          } > "$RUNNER_TEMP/release-notes.txt"
+          cat "$RUNNER_TEMP/release-notes.txt"
+
+      - name: Upload to Firebase App Distribution
+        env:
+          CREDENTIALS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_CREDENTIALS }}
+          APP_ID: ${{ vars.FIREBASE_ANDROID_APP_ID }}
+          GROUPS: ${{ inputs.groups }}
+        run: |
+          umask 077
+          printf '%s' "$CREDENTIALS" > "$RUNNER_TEMP/credentials.json"
+          GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/credentials.json" \
+            pnpm exec firebase appdistribution:distribute "$APK_PATH" \
+              --app "$APP_ID" \
+              --groups "$GROUPS" \
+              --release-notes-file "$RUNNER_TEMP/release-notes.txt"
+
+      - name: Remove signing key and credentials
+        if: always()
+        run: rm -f "$RUNNER_TEMP/release.jks" "$RUNNER_TEMP/credentials.json"

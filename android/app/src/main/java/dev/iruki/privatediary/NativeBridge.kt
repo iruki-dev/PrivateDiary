@@ -190,6 +190,8 @@ class NativeBridge(
 
     private fun hello(): JSONObject = JSONObject()
         .put("version", BuildConfig.VERSION_NAME)
+        .put("versionCode", BuildConfig.VERSION_CODE)
+        .put("commit", BuildConfig.BUILD_COMMIT)
         .put(
             "capabilities",
             JSONObject()

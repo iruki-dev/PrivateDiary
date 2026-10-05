@@ -1,3 +1,4 @@
+import java.util.Properties
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -16,6 +17,31 @@ val webAssetsDir = layout.buildDirectory.dir("generated/webAssets")
 /** Optional build inputs, read from the environment so nothing secret lives in the repo. */
 fun env(name: String): String? = providers.environmentVariable(name).orNull?.takeIf { it.isNotBlank() }
 
+/**
+ * Versioning (android/README.md → "버전 관리"):
+ *  - versionName: android/version.properties, bumped by hand.
+ *  - versionCode: ANDROID_VERSION_CODE, set by the distribution workflow to
+ *    a number that only ever goes up. Local builds default to 1 — they're
+ *    for this machine, never for testers.
+ *  - BUILD_COMMIT: the commit a build came from, shown in the app so a
+ *    tester's report points at exact code.
+ */
+val versionProps = Properties().apply {
+    rootProject.file("version.properties").inputStream().use { load(it) }
+}
+val appVersionName: String = versionProps.getProperty("versionName")
+    ?.takeIf { Regex("""\d+\.\d+\.\d+""").matches(it) }
+    ?: error("android/version.properties: versionName must look like 1.2.3")
+val appVersionCode: Int = env("ANDROID_VERSION_CODE")?.let {
+    it.toIntOrNull()?.takeIf { code -> code in 1..2_100_000_000 }
+        ?: error("ANDROID_VERSION_CODE must be a positive integer, got '$it'")
+} ?: 1
+val buildCommit: String = env("GITHUB_SHA")?.take(7)
+    ?: providers.exec {
+        commandLine("git", "rev-parse", "--short=7", "HEAD")
+        isIgnoreExitValue = true
+    }.standardOutput.asText.get().trim().ifEmpty { "local" }
+
 android {
     namespace = "dev.iruki.privatediary"
     compileSdk = 36
@@ -27,8 +53,9 @@ android {
         // so none of the protections below has a weaker fallback path.
         minSdk = 30
         targetSdk = 36
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = appVersionCode
+        versionName = appVersionName
+        buildConfigField("String", "BUILD_COMMIT", "\"$buildCommit\"")
 
         // The OAuth "Web client" ID of the Firebase project (Firebase console →
         // Authentication → Sign-in method → Google → Web SDK configuration).
