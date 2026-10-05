@@ -40,10 +40,10 @@ import { assertNativeIntegrity, EnvironmentTamperedError } from "@/lib/security/
 
 const CHUNK_SIZE = 6;
 
-export const DECRYPT_ERROR_MESSAGE = "복호화 실패 — 암호문이 변조되었을 수 있습니다.";
-export const CORRUPT_PAYLOAD_ERROR_MESSAGE = "손상된 항목 — 저장된 데이터를 읽을 수 없습니다.";
+export const DECRYPT_ERROR_MESSAGE = "이 일기를 열 수 없습니다. 저장된 내용이 손상되었거나 변조되었을 수 있습니다.";
+export const CORRUPT_PAYLOAD_ERROR_MESSAGE = "이 일기는 저장된 데이터가 손상되어 읽을 수 없습니다.";
 export const ENVIRONMENT_TAMPERED_ERROR_MESSAGE =
-  "브라우저 환경이 변조된 것으로 감지되어 복호화를 중단했습니다.";
+  "브라우저 환경이 변조된 것으로 감지되어 일기를 열지 않았습니다.";
 
 export interface DecryptionProgress {
   plaintexts: Record<string, string>;

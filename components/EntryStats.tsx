@@ -14,8 +14,8 @@ import type { EntryDateStats } from "@/lib/entries/calendar";
  */
 export function EntryStats({ stats }: { stats: EntryDateStats }) {
   const rows: { label: string; value: string }[] = [
-    { label: "전체", value: `${stats.total.toLocaleString("ko-KR")}개` },
-    { label: "이번 달", value: `${stats.thisMonth.toLocaleString("ko-KR")}개` },
+    { label: "전체", value: `${stats.total.toLocaleString("ko-KR")}편` },
+    { label: "이번 달", value: `${stats.thisMonth.toLocaleString("ko-KR")}편` },
     { label: "기록한 날", value: `${stats.daysWritten.toLocaleString("ko-KR")}일` },
     {
       label: "연속 기록",

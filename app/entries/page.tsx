@@ -156,10 +156,10 @@ export default function EntriesPage() {
     } catch (err) {
       setUnlockError(
         err instanceof WrongPassphraseError
-          ? "암호가 올바르지 않습니다."
+          ? "일기 암호가 올바르지 않습니다."
           : err instanceof InvalidShamirSharesError
-            ? "백업 코드가 올바른 시드로 복원되지 않습니다."
-            : "잠금 해제에 실패했습니다."
+            ? "백업 코드가 올바르지 않습니다. 코드를 다시 확인해주세요."
+            : "일기를 열지 못했습니다. 다시 시도해주세요."
       );
     } finally {
       setUnlocking(false);
@@ -224,7 +224,7 @@ export default function EntriesPage() {
 
   const emptyState = (
     <div className="card space-y-3 text-center">
-      <p className="muted">아직 작성한 일기가 없습니다.</p>
+      <p className="muted">아직 쓴 일기가 없습니다.</p>
       <Link href="/write" className="btn-primary">
         첫 일기 쓰기
       </Link>
@@ -253,7 +253,7 @@ export default function EntriesPage() {
             given, which reads like a bug. */}
         {seedStatus === "locked" && lockReason === "idle" && (
           <p role="status" className="muted text-xs">
-            일정 시간 사용하지 않아 자동으로 잠갔습니다. 설정에서 시간을 바꿀 수 있습니다.
+            한동안 사용하지 않아 자동으로 잠겼습니다.
           </p>
         )}
 
@@ -301,7 +301,7 @@ export default function EntriesPage() {
                   </p>
                 )}
                 <button type="submit" disabled={unlocking} className="btn-primary w-full">
-                  {unlocking ? "확인 중..." : "잠금 해제"}
+                  {unlocking ? "여는 중..." : "잠금 해제"}
                 </button>
                 {modeSwitcherLinks}
               </form>
@@ -335,9 +335,7 @@ export default function EntriesPage() {
               <form onSubmit={handleUnlock} className="space-y-3 card">
                 {unlockMode === "passphrase" ? (
                   <>
-                    <p className="muted">
-                      총 {metadata.length}개의 일기가 있습니다. 내용을 보려면 암호를 입력하세요.
-                    </p>
+                    <p className="muted">일기 {metadata.length}편이 잠겨 있습니다.</p>
                     <PasswordField
                       label="일기 암호"
                       autoFocus
@@ -360,7 +358,7 @@ export default function EntriesPage() {
                   </p>
                 )}
                 <button type="submit" disabled={unlocking} className="btn-primary w-full">
-                  {unlocking ? "확인 중..." : "잠금 해제"}
+                  {unlocking ? "여는 중..." : "잠금 해제"}
                 </button>
                 {modeSwitcherLinks}
               </form>
