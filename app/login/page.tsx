@@ -2,10 +2,11 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { signInWithEmail, signInWithGoogle } from "@/lib/firebase/auth";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { safeNextPath } from "@/lib/navigation";
 
 function friendlyAuthError(err: unknown): string {
   const code = err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "";
@@ -22,6 +23,8 @@ function friendlyAuthError(err: unknown): string {
 export default function LoginPage() {
   const { status } = useAuth();
   const router = useRouter();
+  // Where the visitor was headed before useAccountGate sent them here.
+  const next = safeNextPath(useSearchParams().get("next"));
   usePageTitle("로그인");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -30,9 +33,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (status === "signed-in") {
-      router.replace("/");
+      router.replace(next);
     }
-  }, [status, router]);
+  }, [status, router, next]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -40,7 +43,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await signInWithEmail(email, password);
-      router.replace("/");
+      router.replace(next);
     } catch (err) {
       setError(friendlyAuthError(err));
     } finally {
@@ -53,7 +56,7 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       await signInWithGoogle();
-      router.replace("/");
+      router.replace(next);
     } catch (err) {
       console.error("signInWithGoogle failed", err);
       setError("Google 로그인에 실패했습니다. 다시 시도해주세요.");

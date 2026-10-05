@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useAccountGate } from "@/hooks/useAccountGate";
 import { usePreferences } from "@/contexts/PreferencesContext";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts";
 
@@ -38,10 +38,10 @@ function EyeIcon({ className }: { className?: string }) {
  * architecture's "쓰기는 시드/개인키 없이 가능" requirement.
  */
 export default function WritePage() {
-  const { user, status: authStatus } = useAuth();
-  const { status: seedStatus, publicKeys } = useSeed();
-  const router = useRouter();
+  const { user } = useAuth();
+  const { publicKeys } = useSeed();
   usePageTitle("오늘의 일기");
+  const ready = useAccountGate();
 
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -68,12 +68,6 @@ export default function WritePage() {
   // that puts plaintext on disk.
   const [restoredDraftAt, setRestoredDraftAt] = useState<Date | null>(null);
   const draftLoadAttemptedRef = useRef(false);
-
-  useEffect(() => {
-    if (authStatus === "signed-in" && seedStatus === "not-issued") {
-      router.replace("/signup");
-    }
-  }, [authStatus, seedStatus, router]);
 
   // Restore a draft left behind by a crash or a closed tab. Runs once per
   // mount: after this, `text` is whatever the user is currently typing, and
@@ -157,7 +151,7 @@ export default function WritePage() {
     }
   }
 
-  if (authStatus !== "signed-in" || !publicKeys || preferencesLoading) {
+  if (!ready || !publicKeys || preferencesLoading) {
     // Also waits on preferencesLoading — rendering before the account's
     // privateWritingMode preference has loaded would default to "off" and
     // briefly show the textarea unblurred, defeating the point of the

@@ -2,7 +2,6 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
@@ -10,6 +9,7 @@ import { OtpGate } from "@/components/OtpGate";
 import { EntryBrowser } from "@/components/EntryBrowser";
 import { LoadingScreen, LoadingState } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useAccountGate } from "@/hooks/useAccountGate";
 import {
   listEntries,
   type EntrySequenceIntegrity,
@@ -56,7 +56,7 @@ type UnlockMode = "passphrase" | "shamir";
  * OTP-blocking-and-not-yet-bypassed state, nothing has been fetched yet.
  */
 export default function EntriesPage() {
-  const { user, status: authStatus } = useAuth();
+  const { user } = useAuth();
   const {
     status: seedStatus,
     privateKeys,
@@ -67,8 +67,8 @@ export default function EntriesPage() {
     decryptionMethods,
   } = useSeed();
   const { loading: otpLoading, otpEnabled, otpVerified, verifyViaShamirBypass } = useOtp();
-  const router = useRouter();
   usePageTitle("지난 일기");
+  const ready = useAccountGate();
   const canReadEntries = !otpLoading && (!otpEnabled || otpVerified);
   const otpBlocking = !otpLoading && otpEnabled && !otpVerified;
 
@@ -91,12 +91,6 @@ export default function EntriesPage() {
   // failure would ever get a chance to show through it. This is shown
   // instead, in the "unlocked but still can't read" branch further down.
   const [otpBypassError, setOtpBypassError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (authStatus === "signed-in" && seedStatus === "not-issued") {
-      router.replace("/signup");
-    }
-  }, [authStatus, seedStatus, router]);
 
   useEffect(() => {
     // firestore.rules denies `entries` reads until OTP (if enabled on this
@@ -171,7 +165,7 @@ export default function EntriesPage() {
     }
   }
 
-  if (authStatus !== "signed-in") {
+  if (!ready) {
     return <LoadingScreen />;
   }
 

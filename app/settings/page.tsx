@@ -15,6 +15,7 @@ import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useAccountGate } from "@/hooks/useAccountGate";
 import { AUTO_LOCK_CHOICES, DAILY_ENTRY_LIMIT_CHOICES } from "@/lib/preferences";
 import { clearAllDrafts } from "@/lib/drafts";
 import {
@@ -38,9 +39,7 @@ import {
 } from "@/lib/crypto";
 
 export default function SettingsPage() {
-  const { status: authStatus } = useAuth();
   const {
-    status: seedStatus,
     changePassphrase,
     resetPassphraseWithShamirShares,
     decryptionMethods,
@@ -51,16 +50,10 @@ export default function SettingsPage() {
     confirmPendingShamir,
     disableShamir,
   } = useSeed();
-  const router = useRouter();
   usePageTitle("설정");
+  const ready = useAccountGate();
 
-  useEffect(() => {
-    if (authStatus === "signed-in" && seedStatus === "not-issued") {
-      router.replace("/signup");
-    }
-  }, [authStatus, seedStatus, router]);
-
-  if (authStatus !== "signed-in" || seedStatus === "unknown" || seedStatus === "not-issued") {
+  if (!ready) {
     return <LoadingScreen />;
   }
 

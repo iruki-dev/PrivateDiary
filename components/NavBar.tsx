@@ -49,7 +49,7 @@ export function NavBar() {
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200 bg-background/90 backdrop-blur dark:border-zinc-800">
       <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="link shrink-0 text-base font-semibold no-underline">
+        <Link href={signedIn ? "/home" : "/"} className="link shrink-0 text-base font-semibold no-underline">
           PrivateDiary
         </Link>
 

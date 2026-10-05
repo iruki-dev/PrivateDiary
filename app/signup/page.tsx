@@ -11,6 +11,7 @@ import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
 
 /**
  * Phase 4 onboarding (ARCHITECTURE.md §3.1 step 1-5): generate the master
@@ -52,7 +53,7 @@ export default function SignupPage() {
 
   useEffect(() => {
     if (seedStatus === "locked" || seedStatus === "unlocked") {
-      router.replace("/");
+      router.replace(DEFAULT_SIGNED_IN_PATH);
     }
   }, [seedStatus, router]);
 
@@ -115,7 +116,7 @@ export default function SignupPage() {
 
       await createUserKeyRecord(user.uid, publicKeys, wrapped);
       await refresh();
-      router.replace("/");
+      router.replace(DEFAULT_SIGNED_IN_PATH);
       // Deliberately NOT clearing passphrase/passphraseConfirm here: refresh()
       // just flipped seedStatus to "locked", which re-renders this form
       // (still mounted — router.replace()'s navigation hasn't committed yet)
