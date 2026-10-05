@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Firestore / Firebase Auth / Cloud Functions over HTTPS. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Opening the diary with a fingerprint or face (BiometricVault.kt). -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" />
+    <!-- Hides other apps' floating windows while the diary is on screen
+         (MainActivity: Window.setHideOverlayWindows) — overlays are how
+         tapjacking and on-screen phishing work. -->
+    <uses-permission android:name="android.permission.HIDE_OVERLAY_WINDOWS" />
+
+    <!-- Nothing below is needed; removed in case a library merges it in. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+    <uses-permission android:name="com.google.android.gms.permission.AD_ID" tools:node="remove" />
+
+    <!--
+      allowBackup / fullBackupContent: no Google Drive or adb backup of app data.
+      dataExtractionRules: Android 12+ also copies app data during
+        phone-to-phone transfer even with backups off; the rules exclude
+        every domain from that too. The diary lives in Firestore (encrypted);
+        a new phone signs in again, and the fingerprint key never leaves the
+        phone it was made on.
+      hasFragileUserData=false: uninstalling never offers to keep the data.
+    -->
+    <application
+        android:allowBackup="false"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:hasFragileUserData="false"
+        android:enableOnBackInvokedCallback="true"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:usesCleartextTraffic="false"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.PrivateDiary.Starting"
+        tools:targetApi="36">
+
+        <!--
+          taskAffinity="": the activity can't be pulled into another app's
+            task (StrandHogg-style task hijacking, OWASP MASTG-TEST-0029).
+          configChanges: rotating the phone or resizing the window must not
+            recreate the activity — that would reload the page and throw
+            away a half-written entry that was never put on disk.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:taskAffinity=""
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|density|fontScale|layoutDirection|locale"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

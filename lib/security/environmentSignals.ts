@@ -9,7 +9,13 @@
  * through contexts/SecurityContext.tsx as dismissible warnings instead.
  */
 
-export type EnvironmentWarningKind = "insecure-context" | "automation" | "devtools-open";
+export type EnvironmentWarningKind =
+  | "insecure-context"
+  | "automation"
+  | "devtools-open"
+  | "device-no-screen-lock"
+  | "device-rooted"
+  | "device-usb-debugging";
 
 export interface EnvironmentWarning {
   kind: EnvironmentWarningKind;
@@ -104,4 +110,33 @@ export function devtoolsWarning(): EnvironmentWarning {
     message:
       "개발자 도구가 열려 있는 것으로 보입니다. 이 상태에서는 화면에 표시되거나 메모리에 있는 암호/일기 내용이 그대로 보일 수 있습니다. 화면 공유 중이거나 자리를 비울 예정이라면 먼저 잠금 해제를 종료하세요.",
   };
+}
+
+/**
+ * Android app only: soft warnings about the phone itself, reported by the
+ * app (android/.../DeviceSignals.kt). Warned about, never blocked on —
+ * each has an ordinary explanation (a developer's own phone has USB
+ * debugging on), and root detection is easy to evade for anyone actually
+ * attacking, so it's for informing the owner, not a defence.
+ */
+const DEVICE_WARNINGS: Record<string, EnvironmentWarning> = {
+  "no-screen-lock": {
+    kind: "device-no-screen-lock",
+    message:
+      "이 휴대폰에 화면 잠금이 없습니다. 휴대폰을 집어 든 누구나 이 앱을 열 수 있고, 생체 인증으로 일기 열기도 쓸 수 없습니다. 휴대폰 설정에서 화면 잠금을 켜주세요.",
+  },
+  rooted: {
+    kind: "device-rooted",
+    message:
+      "이 휴대폰은 루팅된 것으로 보입니다. 루팅된 휴대폰에서는 다른 앱이 이 앱의 화면과 메모리를 들여다볼 수 있어, 앱의 보호 장치가 제대로 동작하지 않을 수 있습니다.",
+  },
+  "usb-debugging": {
+    kind: "device-usb-debugging",
+    message:
+      "USB 디버깅이 켜져 있습니다. 컴퓨터에 연결하면 이 휴대폰을 조작할 수 있는 상태입니다. 개발 중이 아니라면 개발자 옵션에서 꺼주세요.",
+  },
+};
+
+export function deviceWarnings(signals: readonly string[]): EnvironmentWarning[] {
+  return signals.flatMap((signal) => (DEVICE_WARNINGS[signal] ? [DEVICE_WARNINGS[signal]] : []));
 }

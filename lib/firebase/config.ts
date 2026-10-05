@@ -1,7 +1,8 @@
 import { getApp, getApps, initializeApp, type FirebaseApp } from "firebase/app";
-import { getAuth, type Auth } from "firebase/auth";
+import { getAuth, indexedDBLocalPersistence, initializeAuth, type Auth } from "firebase/auth";
 import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
 import { getFunctions, type Functions } from "firebase/functions";
+import { IS_ANDROID_APP } from "@/lib/platform";
 
 /**
  * These NEXT_PUBLIC_* values are not secrets — Firebase's client config is
@@ -46,7 +47,22 @@ export const firebaseApp: FirebaseApp = getApps().length
   ? getApp()
   : initializeApp(firebaseConfig);
 
-export const auth: Auth = getAuth(firebaseApp);
+/**
+ * The Android app signs in to Google natively (lib/native/google.ts) and
+ * never opens Firebase's popup/redirect flow, so it initialises Auth
+ * WITHOUT the popup/redirect resolver: nothing in the app can then load
+ * Firebase's hidden auth iframe at all (its CSP has frame-src 'none').
+ * The session persists in the app's own sandboxed IndexedDB.
+ */
+export const auth: Auth = IS_ANDROID_APP
+  ? (() => {
+      try {
+        return initializeAuth(firebaseApp, { persistence: indexedDBLocalPersistence });
+      } catch {
+        return getAuth(firebaseApp);
+      }
+    })()
+  : getAuth(firebaseApp);
 
 /**
  * `experimentalAutoDetectLongPolling` (Firestore Web SDK): probes once

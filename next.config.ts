@@ -15,15 +15,29 @@ const securityHeaders = [
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
 ];
 
-const nextConfig: NextConfig = {
-  async headers() {
-    return [
-      {
-        source: "/:path*",
-        headers: securityHeaders,
+/**
+ * `BUILD_TARGET=android` (scripts/build-android-web.mjs) builds the same app
+ * as plain static files for the Android app to bundle inside its APK
+ * (android/README.md). Response headers and proxy.ts don't exist there —
+ * the app's own WebView serves those files and sets the equivalent
+ * headers itself (android/.../AppAssetServer.kt).
+ */
+const isAndroid = process.env.BUILD_TARGET === "android";
+
+const nextConfig: NextConfig = isAndroid
+  ? {
+      output: "export",
+      images: { unoptimized: true },
+    }
+  : {
+      async headers() {
+        return [
+          {
+            source: "/:path*",
+            headers: securityHeaders,
+          },
+        ];
       },
-    ];
-  },
-};
+    };
 
 export default nextConfig;

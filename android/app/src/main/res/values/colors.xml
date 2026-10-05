@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Same as the page background and text colours in app/globals.css. -->
+    <color name="background">#FFFFFF</color>
+    <color name="foreground">#171717</color>
+    <color name="splash_icon_plate">#18181B</color>
+    <color name="icon_plate">#18181B</color>
+    <color name="icon_mark">#FAFAFA</color>
+</resources>

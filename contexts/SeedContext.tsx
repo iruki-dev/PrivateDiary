@@ -19,6 +19,12 @@ import {
   updateWrappedSeed,
 } from "@/lib/firebase/users";
 import { assertNativeIntegrity } from "@/lib/security/nativeIntegrity";
+import { isNativeApp, onNativeEvent } from "@/lib/native/bridge";
+import {
+  enrollDeviceUnlock as enrollDeviceUnlockNative,
+  forgetDeviceUnlock,
+  unwrapSeedWithDevice,
+} from "@/lib/native/app";
 import {
   combineSeedShamir,
   deriveHybridKeyPair,
@@ -100,7 +106,7 @@ import {
 export type SeedStatus = "unknown" | "not-issued" | "locked" | "unlocked";
 
 /** Why the session stopped being unlocked, so the UI can say so. */
-export type LockReason = "manual" | "idle";
+export type LockReason = "manual" | "idle" | "background";
 
 interface PendingShamir {
   shares: Uint8Array[];
@@ -153,6 +159,19 @@ interface SeedContextValue {
   confirmPendingShamir: () => Promise<void>;
   /** Disables Shamir. Requires a staged seed (via either co-equal credential). */
   disableShamir: () => Promise<void>;
+
+  /**
+   * Android app only: unlocks with the seed the app keeps wrapped by a
+   * biometric-bound hardware key (android/.../BiometricVault.kt). Throws
+   * NativeError ("cancelled", "use-passphrase", "invalidated", …).
+   */
+  unlockWithDevice: () => Promise<void>;
+  /**
+   * Android app only: wraps the STAGED seed (stageSeedFromPassphrase /
+   * stageSeedFromShamirShares first) for biometric unlock on this phone,
+   * then discards the staged copy whatever happens.
+   */
+  enrollDeviceUnlock: () => Promise<void>;
 }
 
 const SeedContext = createContext<SeedContextValue | undefined>(undefined);
@@ -231,6 +250,9 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void refresh();
     } else if (authStatus === "signed-out") {
+      // Signed out, nothing of the account stays usable on this phone —
+      // including the biometric-wrapped seed (Android app).
+      if (isNativeApp()) void forgetDeviceUnlock().catch(() => {});
       wipePrivateKeys();
       clearStagedSeed();
       // Signing out must not leave the previous account's half-written
@@ -397,6 +419,45 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     setDecryptionMethods({ shamir: null });
   }, [user, clearStagedSeed]);
 
+  const unlockWithDevice = useCallback(async () => {
+    assertNativeIntegrity();
+    if (!user) throw new Error("Not signed in");
+    const seed = await unwrapSeedWithDevice(user.uid);
+    try {
+      deriveAndUnlock(seed);
+    } finally {
+      wipeBytes(seed);
+    }
+  }, [user, deriveAndUnlock]);
+
+  const enrollDeviceUnlock = useCallback(async () => {
+    assertNativeIntegrity();
+    if (!user || !stagedSeedRef.current) {
+      throw new Error("No staged seed to enroll");
+    }
+    try {
+      await enrollDeviceUnlockNative(user.uid, stagedSeedRef.current);
+    } finally {
+      clearStagedSeed();
+    }
+  }, [user, clearStagedSeed]);
+
+  /**
+   * Android app: leaving the app locks the diary at once — home button,
+   * switching apps, the screen turning off. The app tells the page
+   * (MainActivity.onStop); "foreground" after time away is the backstop
+   * in case the page was too busy to act on "background" before Android
+   * suspended it. The app's own system sheets (biometric prompt, "save
+   * as") don't count as leaving.
+   */
+  useEffect(() => {
+    if (status !== "unlocked" || !isNativeApp()) return;
+    return onNativeEvent("lifecycle", (data) => {
+      const away = data.state === "background" || (typeof data.awayMs === "number" && data.awayMs > 0);
+      if (away) lock("background");
+    });
+  }, [status, lock]);
+
   /**
    * Auto-lock on inactivity. Before this, an unlocked session held the
    * derived private keys in memory until the tab was closed — so a diary
@@ -479,6 +540,8 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         prepareShamir,
         confirmPendingShamir,
         disableShamir,
+        unlockWithDevice,
+        enrollDeviceUnlock,
       }}
     >
       {children}
