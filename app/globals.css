@@ -76,6 +76,17 @@ body {
   .field-code {
     @apply text-center font-mono text-lg tracking-widest;
   }
+  /* The diary writing surface (/write): reading-size type at every width
+   * (the plain .field drops to 14px on wide screens) and a looser line
+   * height for Korean prose. Height grows with the text in JS; this is the
+   * floor while it's empty. */
+  .field-editor {
+    @apply block min-h-[45vh] w-full resize-none overflow-hidden rounded border border-zinc-300 bg-transparent
+      px-4 py-3.5 text-base leading-8 text-foreground transition-colors placeholder:text-zinc-400
+      dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500
+      focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/30
+      dark:focus:border-zinc-400 dark:focus:ring-zinc-400/30;
+  }
 
   .btn,
   .btn-primary,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
@@ -16,6 +16,15 @@ export function VisitorComposer() {
   const router = useRouter();
   const { setPendingEntry } = usePendingEntry();
   const [text, setText] = useState("");
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Grows with the text, same as /write.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
 
   // Same guard as /write: don't lose a half-written entry to a stray
   // refresh or tab close.
@@ -43,11 +52,12 @@ export function VisitorComposer() {
         </label>
         <textarea
           id="visitor-entry"
+          ref={textareaRef}
           value={text}
           onChange={(e) => setText(e.target.value)}
-          rows={10}
+          rows={8}
           placeholder="오늘 하루는 어땠나요?"
-          className="field min-h-48 resize-y"
+          className="field-editor"
         />
         <p className="faint text-right text-xs" aria-live="polite">
           {text.length.toLocaleString("ko-KR")}자

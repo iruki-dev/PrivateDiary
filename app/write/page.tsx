@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
@@ -11,6 +12,9 @@ import { usePreferences } from "@/contexts/PreferencesContext";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts";
 import { TodayLabel } from "@/components/TodayLabel";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
+
+const timeFormatter = new Intl.DateTimeFormat("ko-KR", { timeStyle: "short" });
+const draftFormatter = new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" });
 
 /** Minimal outline eye glyph — no icon library in this codebase, and this is the only icon needed. */
 function EyeIcon({ className }: { className?: string }) {
@@ -40,14 +44,15 @@ function EyeIcon({ className }: { className?: string }) {
  */
 export default function WritePage() {
   const { user } = useAuth();
-  const { publicKeys } = useSeed();
+  const { publicKeys, decryptionMethods } = useSeed();
   usePageTitle("오늘의 일기");
   const ready = useAccountGate();
 
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  // Time of the last successful save, shown as "오전 11:22에 저장했습니다".
+  const [savedAt, setSavedAt] = useState<Date | null>(null);
   // One-shot message from signup ("첫 일기가 저장되었습니다"), shown once.
   const { notice, setNotice, hasPendingEntry, takePendingEntry } = usePendingEntry();
   const [initialNotice] = useState(notice);
@@ -123,11 +128,20 @@ export default function WritePage() {
     return () => window.removeEventListener("beforeunload", handleBeforeUnload);
   }, [text]);
 
+  // Grow with the text instead of scrolling inside a fixed box: a diary
+  // page should read like a page. CSS min-height keeps it tall when empty.
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [text]);
+
   async function submit() {
     if (!user || !publicKeys || !text.trim()) return;
     setSubmitting(true);
     setError(null);
-    setSuccess(false);
+    setSavedAt(null);
     try {
       await writeEntry(user.uid, publicKeys, text);
       setText("");
@@ -135,7 +149,7 @@ export default function WritePage() {
       // device has no reason to outlive that by even a moment.
       clearDraft(user.uid);
       setRestoredDraftAt(null);
-      setSuccess(true);
+      setSavedAt(new Date());
       textareaRef.current?.focus();
     } catch (err) {
       console.error("writeEntry failed", err);
@@ -176,33 +190,64 @@ export default function WritePage() {
     return <LoadingScreen />;
   }
 
+  const missingBackupCodes = decryptionMethods !== null && !decryptionMethods.shamir;
+  const status = error
+    ? null
+    : savedAt
+      ? `${timeFormatter.format(savedAt)}에 저장했습니다.`
+      : initialNotice;
+
   return (
-    <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
-      <form onSubmit={handleSubmit} className="w-full max-w-xl space-y-4">
-        <div className="flex items-center justify-between gap-3">
+    <main className="flex flex-1 flex-col items-center px-4 pb-10 sm:px-6 sm:pb-16">
+      <form onSubmit={handleSubmit} className="w-full max-w-xl">
+        {/* Stays in view however long the entry grows, so 저장 is always one tap away. */}
+        <div className="sticky top-14 z-30 -mx-4 flex items-center justify-between gap-3 bg-background/95 px-4 pb-3 pt-6 backdrop-blur sm:-mx-6 sm:px-6 sm:pt-10">
           <h1 className="text-xl font-semibold">
             <TodayLabel />
           </h1>
-        </div>
-        {restoredDraftAt && (
-          <div
-            role="status"
-            className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
-          >
-            <p className="muted text-xs">
-              저장하지 않고 닫은 글을 이 기기에서 불러왔습니다 (
-              {new Intl.DateTimeFormat("ko-KR", {
-                dateStyle: "short",
-                timeStyle: "short",
-              }).format(restoredDraftAt)}
-              ).
-            </p>
-            <button type="button" onClick={discardDraft} className="text-xs link">
-              버리기
+          <div className="flex items-center gap-3">
+            {text.length > 0 && (
+              <span className="faint text-xs tabular-nums">{text.length.toLocaleString("ko-KR")}자</span>
+            )}
+            <button
+              type="submit"
+              disabled={submitting || !text.trim()}
+              className="btn-primary min-h-10 px-5"
+              title="⌘/Ctrl + Enter"
+            >
+              {submitting ? "저장 중..." : "저장"}
             </button>
           </div>
-        )}
-        <div className="space-y-1">
+        </div>
+
+        <div className="space-y-3">
+          {error && (
+            <p role="alert" className="error-text">
+              {error}
+            </p>
+          )}
+          {status && (
+            <p role="status" className="muted flex flex-wrap items-center gap-x-2">
+              <span>{status}</span>
+              <Link href="/entries" className="link">
+                지난 일기에서 보기
+              </Link>
+            </p>
+          )}
+          {restoredDraftAt && (
+            <div
+              role="status"
+              className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
+            >
+              <p className="muted text-xs">
+                저장하지 않은 글을 불러왔습니다 ({draftFormatter.format(restoredDraftAt)})
+              </p>
+              <button type="button" onClick={discardDraft} className="btn-secondary btn-sm">
+                버리기
+              </button>
+            </div>
+          )}
+
           <div className="relative">
             <textarea
               ref={textareaRef}
@@ -211,12 +256,10 @@ export default function WritePage() {
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
-              rows={12}
+              rows={8}
               placeholder="오늘 하루는 어땠나요?"
               aria-label="오늘의 일기 내용"
-              className={`field min-h-48 resize-y transition-[filter] duration-300 ${
-                obscured ? "blur-[4px]" : ""
-              }`}
+              className={`field-editor transition-[filter] duration-300 ${obscured ? "blur-[4px]" : ""}`}
               style={obscured ? { caretColor: "transparent" } : undefined}
             />
             {privateMode && peekAllowed && (
@@ -237,36 +280,21 @@ export default function WritePage() {
                 onKeyUp={(e) => {
                   if (e.key === " " || e.key === "Enter") setRevealing(false);
                 }}
-                className="absolute right-2 top-2 rounded p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
+                className="absolute right-2 top-2 rounded p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
               >
                 <EyeIcon className="h-4 w-4" />
               </button>
             )}
           </div>
-          <p className="faint text-right text-xs" aria-live="polite">
-            {text.length.toLocaleString("ko-KR")}자
-          </p>
-        </div>
-        {error && (
-          <p role="alert" className="error-text">
-            {error}
-          </p>
-        )}
-        {initialNotice && !success && (
-          <p role="status" className="success-text">
-            {initialNotice}
-          </p>
-        )}
-        {success && (
-          <p role="status" className="success-text">
-            저장되었습니다.
-          </p>
-        )}
-        <div className="flex items-center gap-3">
-          <button type="submit" disabled={submitting || !text.trim()} className="btn-primary">
-            {submitting ? "저장 중..." : "저장"}
-          </button>
-          <span className="faint hidden text-xs sm:inline">⌘/Ctrl + Enter로도 저장할 수 있습니다</span>
+
+          {missingBackupCodes && (
+            <p className="faint pt-2 text-xs leading-relaxed">
+              백업 코드가 없습니다. 일기 암호를 잊으면 일기를 열 수 없습니다.{" "}
+              <Link href="/settings#security" className="link font-medium text-foreground">
+                백업 코드 만들기
+              </Link>
+            </p>
+          )}
         </div>
       </form>
     </main>
