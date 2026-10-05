@@ -19,6 +19,7 @@ export function SecretReveal({
   confirmLabel = "저장했습니다",
   acknowledgeText = "안전한 곳에 보관했습니다. 이 화면은 다시 표시되지 않는다는 것을 이해했습니다.",
   confirming = false,
+  headingLevel = 1,
 }: {
   title: string;
   description: string;
@@ -28,7 +29,10 @@ export function SecretReveal({
   acknowledgeText?: string;
   /** True while onConfirm's action is in flight — disables the button to prevent double-submits. */
   confirming?: boolean;
+  /** 1 when this is the page itself (signup); 3 when it opens inside a /settings row. */
+  headingLevel?: 1 | 3;
 }) {
+  const Heading = headingLevel === 1 ? "h1" : "h3";
   const [acknowledged, setAcknowledged] = useState(false);
 
   useEffect(() => {
@@ -42,7 +46,7 @@ export function SecretReveal({
   return (
     <div className="w-full max-w-lg space-y-6">
       <div>
-        <h1 className="text-xl font-semibold">{title}</h1>
+        <Heading className={headingLevel === 1 ? "text-xl font-semibold" : "text-base font-semibold"}>{title}</Heading>
         <p className="mt-2 muted">{description}</p>
       </div>
 

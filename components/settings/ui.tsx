@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { Children, type ReactNode } from "react";
 
 /**
  * Building blocks for /settings: titled groups of rows, each row a label,
@@ -48,6 +48,10 @@ export function SettingsRow({
   htmlFor?: string;
 }) {
   const LabelTag = htmlFor ? "label" : "p";
+  // Rows pass their conditional panels as `{phase === "x" && <Panel/>}`;
+  // when none applies those are all `false`, which must not leave an empty
+  // spaced wrapper behind.
+  const hasPanel = Children.toArray(children).length > 0;
   return (
     <div className="px-4 py-3.5">
       <div className="flex items-center justify-between gap-4">
@@ -62,7 +66,7 @@ export function SettingsRow({
         </div>
         {control && <div className="shrink-0">{control}</div>}
       </div>
-      {children && <div className="mt-4">{children}</div>}
+      {hasPanel && <div className="mt-4">{children}</div>}
     </div>
   );
 }

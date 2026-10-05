@@ -23,7 +23,7 @@ export default function OtpPage() {
 
       <h2 id="enable">켜기</h2>
       <ol>
-        <li>설정의 <strong>OTP 인증</strong>에서 OTP 활성화를 누릅니다.</li>
+        <li>설정의 <strong>OTP 인증</strong>에서 켜기를 누릅니다.</li>
         <li>일기 암호를 입력해 본인임을 확인합니다. 로그인한 지 오래되었다면 다시 로그인을 요청합니다.</li>
         <li>Google Authenticator 같은 인증 앱으로 QR 코드를 스캔합니다.</li>
         <li>앱에 표시된 코드를 입력하면 켜집니다.</li>
