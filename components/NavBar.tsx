@@ -1,163 +1,95 @@
 "use client";
 
-import { useState } from "react";
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
-import { signOut } from "@/lib/firebase/auth";
 
-const LINKS = [
+/** The three places a signed-in person moves between every day. */
+export const APP_LINKS = [
   { href: "/write", label: "쓰기" },
   { href: "/entries", label: "지난 일기" },
   { href: "/settings", label: "설정" },
-  { href: "/docs", label: "도움말" },
-];
+] as const;
 
-/** /docs is a section, so any page under it marks that link current. */
 function isCurrent(pathname: string, href: string): boolean {
-  return href === "/docs" ? pathname === "/docs" || pathname.startsWith("/docs/") : pathname === href;
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** True once there's a finished account — the app chrome only makes sense then. */
+export function useHasAccount(): boolean {
+  const { status: authStatus } = useAuth();
+  const { status: seedStatus } = useSeed();
+  return authStatus === "signed-in" && seedStatus !== "not-issued" && seedStatus !== "unknown";
 }
 
 /**
- * The one piece of persistent chrome in the app — every route below this
- * was previously an island reachable only by typing a URL or by whatever
- * one or two Links that specific page happened to include (e.g. /write
- * only linked to /entries, /settings linked nowhere). This is the fix,
- * responsive: an inline row of links on wider screens, collapsing into a
- * disclosure menu on narrow ones so it never wraps into a cramped second
- * line of Korean text on a phone.
+ * Top bar. Signed in: the wordmark plus, on wide screens, the three app
+ * destinations (phones get components/TabBar.tsx instead — a daily-use app
+ * shouldn't hide its only three places behind a menu button). Signed out:
+ * the help docs and login.
+ *
+ * Sign-out and help deliberately aren't here for signed-in users: they're
+ * occasional, and sign-out one tap away from "설정" in a row of identical
+ * links is easy to hit by accident. Both live in /settings' 계정 group.
  */
 export function NavBar() {
-  const { user, status: authStatus } = useAuth();
-  const { status: seedStatus } = useSeed();
+  const { status: authStatus } = useAuth();
+  const hasAccount = useHasAccount();
   const pathname = usePathname();
-  const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // Close the mobile menu automatically whenever the route changes — adjusted
-  // during render (React's recommended "reset state when a prop changes"
-  // pattern) rather than in an effect, which would cause an extra render.
-  const [menuTrackedPathname, setMenuTrackedPathname] = useState(pathname);
-  if (pathname !== menuTrackedPathname) {
-    setMenuTrackedPathname(pathname);
-    setMenuOpen(false);
-  }
-
-  const signedIn = authStatus === "signed-in" && seedStatus !== "not-issued";
-
-  async function handleSignOut() {
-    setMenuOpen(false);
-    await signOut();
-    router.replace("/login");
-  }
 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200 bg-background/90 backdrop-blur dark:border-zinc-800">
       <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
-        <Link href="/" className="link shrink-0 text-base font-semibold no-underline">
+        <Link
+          href="/"
+          className="shrink-0 rounded-sm text-base font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50"
+        >
           PrivateDiary
         </Link>
 
-        {signedIn && (
-          <>
-            {/* Desktop / wide-screen nav */}
-            <nav className="hidden items-center gap-6 sm:flex" aria-label="주 메뉴">
-              {LINKS.map(({ href, label }) => (
+        {hasAccount && (
+          <nav className="hidden items-center gap-1 sm:flex" aria-label="주 메뉴">
+            {APP_LINKS.map(({ href, label }) => {
+              const current = isCurrent(pathname, href);
+              return (
                 <Link
                   key={href}
                   href={href}
-                  aria-current={isCurrent(pathname, href) ? "page" : undefined}
-                  className={
-                    isCurrent(pathname, href)
-                      ? "link text-sm font-medium"
-                      : "link text-sm text-zinc-600 dark:text-zinc-400"
-                  }
+                  aria-current={current ? "page" : undefined}
+                  className={`rounded px-3 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 ${
+                    current
+                      ? "bg-zinc-100 font-medium text-foreground dark:bg-zinc-900"
+                      : "text-zinc-600 hover:text-foreground dark:text-zinc-400"
+                  }`}
                 >
                   {label}
                 </Link>
-              ))}
-              <button type="button" onClick={() => void handleSignOut()} className="link text-sm text-zinc-600 dark:text-zinc-400">
-                로그아웃
-              </button>
-            </nav>
-
-            {/* Mobile menu toggle */}
-            <button
-              type="button"
-              onClick={() => setMenuOpen((open) => !open)}
-              aria-expanded={menuOpen}
-              aria-controls="mobile-nav-menu"
-              aria-label={menuOpen ? "메뉴 닫기" : "메뉴 열기"}
-              className="flex h-11 w-11 items-center justify-center rounded focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 sm:hidden"
-            >
-              <span className="relative block h-4 w-5" aria-hidden="true">
-                <span
-                  className={`absolute left-0 top-0 h-0.5 w-5 bg-foreground transition-transform ${menuOpen ? "translate-y-[7px] rotate-45" : ""}`}
-                />
-                <span
-                  className={`absolute left-0 top-[7px] h-0.5 w-5 bg-foreground transition-opacity ${menuOpen ? "opacity-0" : ""}`}
-                />
-                <span
-                  className={`absolute left-0 top-[14px] h-0.5 w-5 bg-foreground transition-transform ${menuOpen ? "-translate-y-[7px] -rotate-45" : ""}`}
-                />
-              </span>
-            </button>
-          </>
+              );
+            })}
+          </nav>
         )}
 
-        {!signedIn && authStatus !== "signed-in" && (
-          <nav className="flex items-center gap-5" aria-label="주 메뉴">
+        {!hasAccount && authStatus !== "signed-in" && (
+          <nav className="flex items-center gap-1" aria-label="주 메뉴">
             <Link
               href="/docs"
               aria-current={isCurrent(pathname, "/docs") ? "page" : undefined}
-              className="link text-sm text-zinc-600 no-underline hover:underline dark:text-zinc-400"
+              className="rounded px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400"
             >
               도움말
             </Link>
             {pathname !== "/login" && (
-              <Link href="/login" className="link text-sm">
+              <Link
+                href="/login"
+                className="rounded px-3 py-1.5 text-sm font-medium transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-900"
+              >
                 로그인
               </Link>
             )}
           </nav>
         )}
       </div>
-
-      {signedIn && menuOpen && (
-        <nav
-          id="mobile-nav-menu"
-          aria-label="주 메뉴 (모바일)"
-          className="border-t border-zinc-200 px-4 pb-3 sm:hidden dark:border-zinc-800"
-        >
-          <ul className="flex flex-col divide-y divide-zinc-200 dark:divide-zinc-800">
-            {LINKS.map(({ href, label }) => (
-              <li key={href}>
-                <Link
-                  href={href}
-                  aria-current={isCurrent(pathname, href) ? "page" : undefined}
-                  className={
-                    isCurrent(pathname, href)
-                      ? "flex min-h-12 items-center text-sm font-medium"
-                      : "flex min-h-12 items-center text-sm text-zinc-600 dark:text-zinc-400"
-                  }
-                >
-                  {label}
-                </Link>
-              </li>
-            ))}
-            <li>
-              <button
-                type="button"
-                onClick={() => void handleSignOut()}
-                className="flex min-h-12 w-full items-center text-left text-sm text-zinc-600 dark:text-zinc-400"
-              >
-                로그아웃{user?.email ? ` (${user.email})` : ""}
-              </button>
-            </li>
-          </ul>
-        </nav>
-      )}
     </header>
   );
 }

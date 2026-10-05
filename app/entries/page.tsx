@@ -236,16 +236,15 @@ export default function EntriesPage() {
       <div className={`w-full space-y-6 ${browsing ? "max-w-xl lg:max-w-5xl" : "max-w-xl"}`}>
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">지난 일기</h1>
-          <div className="flex items-center gap-3">
-            {seedStatus === "unlocked" && (
-              <button type="button" onClick={() => lock("manual")} className="text-sm link">
-                잠그기
-              </button>
-            )}
-            <Link href="/write" className="text-sm link">
-              오늘의 일기 쓰기
-            </Link>
-          </div>
+          {seedStatus === "unlocked" && (
+            <button type="button" onClick={() => lock("manual")} className="btn-secondary btn-sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
+                <rect x="5" y="11" width="14" height="9" rx="2" />
+                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+              </svg>
+              잠그기
+            </button>
+          )}
         </div>
 
         {/* Explains a session that locked itself out from under the reader

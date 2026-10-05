@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
-import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { writeEntry } from "@/lib/firebase/entries";
@@ -184,9 +183,6 @@ export default function WritePage() {
           <h1 className="text-xl font-semibold">
             <TodayLabel />
           </h1>
-          <Link href="/entries" className="text-sm link">
-            지난 일기 보기
-          </Link>
         </div>
         {restoredDraftAt && (
           <div

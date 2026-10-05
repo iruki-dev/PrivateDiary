@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/contexts/Providers";
 import { NavBar } from "@/components/NavBar";
+import { TabBar } from "@/components/TabBar";
 import { SecurityWarningBanner } from "@/components/SecurityWarningBanner";
 import { SITE } from "@/lib/site";
 import "./globals.css";
@@ -93,6 +94,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <div id="main-content" tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
             {children}
           </div>
+          <TabBar />
         </Providers>
       </body>
     </html>

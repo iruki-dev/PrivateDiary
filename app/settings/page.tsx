@@ -16,6 +16,7 @@ import { OtpQrCard } from "@/components/OtpQrCard";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
+import { AccountGroup } from "@/components/settings/AccountGroup";
 import { AUTO_LOCK_CHOICES, DAILY_ENTRY_LIMIT_CHOICES } from "@/lib/preferences";
 import { clearAllDrafts } from "@/lib/drafts";
 import {
@@ -141,6 +142,9 @@ export default function SettingsPage() {
           />
         </div>
       </OtpGate>
+      <div className="w-full max-w-sm">
+        <AccountGroup />
+      </div>
     </main>
   );
 }
