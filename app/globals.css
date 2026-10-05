@@ -1,65 +1,21 @@
 @import "tailwindcss";
 
-/* Design tokens.
- *
- * Warm paper and ink rather than the starter template's neutral zinc: this
- * is a diary, and the cold grey read as a developer tool. Every component in
- * app/ and components/ is written against Tailwind's `zinc-*` scale, so the
- * scale itself is remapped here to warm "paper" greys — one place restyles
- * the whole app consistently instead of touching every call site.
- *
- * Contrast (WCAG 2.1) checked against --background: zinc-500 text 5.0:1 on
- * light, zinc-400 text 6.8:1 on dark, --accent 6.0:1 / 9.5:1. zinc-400 on
- * light (2.6:1) is only for placeholders and decoration — readable small
- * text uses the `.faint` class instead.
- */
 :root {
-  --background: #fbfaf6;
-  --foreground: #22201c;
-  --surface: #ffffff;
-  --accent: #2f6b4f;
-  --accent-foreground: #ffffff;
+  --background: #ffffff;
+  --foreground: #171717;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --color-surface: var(--surface);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  /* Korean-first system stack. Apple SD Gothic Neo (iOS/macOS), Noto Sans
-   * CJK (Android, ships as the system font) and Malgun Gothic (Windows)
-   * cover Hangul natively with no webfont download; Pretendard is used when
-   * the visitor already has it installed. The Geist webfont this replaces
-   * was loaded with the latin subset only, so every Hangul glyph fell back
-   * to the OS font anyway — mixed lines ("Google로 계속하기") rendered in two
-   * mismatched typefaces. */
-  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
-    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, "Segoe UI", Roboto,
-    sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
-    monospace;
-
-  --color-zinc-50: #faf8f4;
-  --color-zinc-100: #f2efe8;
-  --color-zinc-200: #e6e1d7;
-  --color-zinc-300: #d5cec1;
-  --color-zinc-400: #a39b8d;
-  --color-zinc-500: #736b5e;
-  --color-zinc-600: #5c554a;
-  --color-zinc-700: #423c34;
-  --color-zinc-800: #2b2722;
-  --color-zinc-900: #1d1a17;
-  --color-zinc-950: #141210;
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #141210;
-    --foreground: #ece7dd;
-    --surface: #1d1a17;
-    --accent: #8cc5a5;
-    --accent-foreground: #141210;
+    --background: #0a0a0a;
+    --foreground: #ededed;
   }
 }
 
@@ -72,11 +28,18 @@ html {
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: var(--font-sans);
-  /* Korean line breaking: break between words (어절), not inside them —
-   * the browser default splits "일기." into "일" / "기." at a line end.
-   * overflow-wrap keeps a single unbreakable run (an email, a backup code)
-   * from overflowing on narrow phones instead. */
+  /* next/font loads and self-hosts Geist in app/layout.tsx, which exposes
+     it as --font-geist-sans on <html>. The Next.js starter template's
+     `font-family: Arial, Helvetica, sans-serif` here silently overrode it,
+     so the app downloaded both Geist weights on every load and then
+     rendered every character in Arial. The explicit fallbacks cover the
+     window before the webfont resolves. */
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  /* Korean line breaking: wrap between words (어절), never inside one —
+     the browser default splits "일기." into "일" / "기." at a line end.
+     overflow-wrap still lets a single unbreakable run (an email address, a
+     backup code) wrap instead of overflowing a phone-width screen. */
   word-break: keep-all;
   overflow-wrap: anywhere;
   /* Prevents an accidental horizontal scrollbar on mobile if any child
@@ -100,10 +63,11 @@ body {
   .field,
   .field-mono,
   .field-code {
-    @apply w-full rounded-lg border border-zinc-300 bg-surface px-3.5 py-3 text-base
+    @apply w-full rounded border border-zinc-300 bg-transparent px-3 py-2.5 text-base
       text-foreground transition-colors placeholder:text-zinc-400
-      dark:border-zinc-700 dark:placeholder:text-zinc-500
-      focus:border-accent focus:outline-none focus:ring-2 focus:ring-accent/25
+      dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500
+      focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/30
+      dark:focus:border-zinc-400 dark:focus:ring-zinc-400/30
       sm:text-sm;
   }
   .field-mono {
@@ -118,17 +82,17 @@ body {
   .btn-secondary,
   .btn-danger,
   .btn-danger-outline {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-lg px-4 py-2.5
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded px-4 py-2.5
       text-sm font-medium transition-colors
       focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-      focus-visible:ring-accent/60 focus-visible:ring-offset-background
+      focus-visible:ring-zinc-500/50 dark:focus-visible:ring-offset-zinc-950
       disabled:pointer-events-none disabled:opacity-50;
   }
   .btn-primary {
     @apply bg-foreground text-background hover:opacity-90;
   }
   .btn-secondary {
-    @apply border border-zinc-300 bg-surface hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800;
+    @apply border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900;
   }
   .btn-danger {
     @apply bg-red-700 text-white hover:bg-red-800;
@@ -137,32 +101,20 @@ body {
     @apply border border-red-600 text-red-700 hover:bg-red-50
       dark:text-red-500 dark:hover:bg-red-950/30;
   }
-  .btn-accent {
-    @apply bg-accent text-accent-foreground hover:opacity-90;
-  }
-  .btn-lg {
-    @apply min-h-12 px-6 text-base;
-  }
   .btn-sm {
     @apply min-h-9 px-3 py-1.5 text-xs;
   }
 
   .link {
     @apply rounded-sm underline underline-offset-2 transition-opacity hover:opacity-70
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60;
+      focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50;
   }
 
   .card {
-    @apply rounded-xl border border-zinc-200 bg-surface p-4 dark:border-zinc-800 sm:p-5;
+    @apply rounded border border-zinc-300 p-4 dark:border-zinc-700;
   }
   .card-danger {
-    @apply rounded-xl border border-red-300 bg-surface p-4 dark:border-red-900 sm:p-5;
-  }
-
-  /* A visible label above a .field — placeholder-only fields lose their
-   * name the moment someone starts typing. */
-  .field-label {
-    @apply mb-1.5 block text-sm font-medium;
+    @apply rounded border border-red-300 p-4 dark:border-red-900;
   }
 
   .muted {
@@ -171,13 +123,18 @@ body {
   .error-text {
     @apply text-sm text-red-600 dark:text-red-400;
   }
-  .success-text {
-    @apply text-sm text-accent;
-  }
-  /* Secondary small text (timestamps, counters, hints) that still has to be
-   * readable — see the contrast note on :root. */
+  /* Secondary small text (timestamps, counters, hints). text-zinc-400 on
+   * white is 2.6:1 — below WCAG AA — so readable small text uses this. */
   .faint {
     @apply text-zinc-500 dark:text-zinc-400;
+  }
+  /* Visible label above a .field: a placeholder-only field loses its name
+   * as soon as someone starts typing. */
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium;
+  }
+  .success-text {
+    @apply text-sm text-green-600 dark:text-green-500;
   }
 
   /* Shared shell for every full-page loading/gate state. */

@@ -11,7 +11,7 @@ import {
   passwordResetErrorMessage,
   signInErrorMessage,
 } from "@/lib/firebase/authErrors";
-import { AuthShell, GoogleMark, OrDivider } from "@/components/AuthShell";
+import { AuthShell, OrDivider } from "@/components/AuthShell";
 import { PasswordField, TextField } from "@/components/PasswordField";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { safeNextPath } from "@/lib/navigation";
@@ -24,7 +24,7 @@ export default function LoginPage() {
   // Where the visitor was headed before useAccountGate sent them here.
   const next = safeNextPath(useSearchParams().get("next"));
   const [mode, setMode] = useState<Mode>("sign-in");
-  usePageTitle(mode === "reset" ? "로그인 비밀번호 재설정" : "로그인");
+  usePageTitle(mode === "reset" ? "비밀번호 재설정" : "로그인");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -96,25 +96,14 @@ export default function LoginPage() {
 
   if (mode === "reset") {
     return (
-      <AuthShell
-        title="로그인 비밀번호 재설정"
-        lead="가입한 이메일로 재설정 링크를 보내드려요."
-        footer={
-          <button type="button" onClick={() => switchMode("sign-in")} className="link">
-            로그인으로 돌아가기
-          </button>
-        }
-      >
-        <div className="rounded-lg bg-zinc-100 p-3.5 text-sm leading-relaxed dark:bg-zinc-800">
-          <p className="font-medium">일기 암호는 바뀌지 않아요</p>
-          <p className="muted mt-1">
-            로그인 비밀번호만 재설정됩니다. 일기 암호는 저희 서버에도 없어서 재설정해 드릴 수
-            없어요. 일기 암호를 잊으셨다면, 로그인한 뒤 복구 코드로 새 암호를 정할 수 있습니다.
-          </p>
-        </div>
+      <AuthShell title="비밀번호 재설정" lead="가입한 이메일로 로그인 비밀번호 재설정 링크를 보내드립니다.">
+        <p className="muted card">
+          로그인 비밀번호만 재설정됩니다. 일기 암호는 서버에 저장되지 않으므로 재설정할 수
+          없습니다. 일기 암호를 잊었다면 로그인한 뒤 백업 코드로 새 암호를 설정할 수 있습니다.
+        </p>
         {resetSent ? (
-          <p role="status" className="success-text leading-relaxed">
-            가입된 이메일이라면 재설정 링크를 보냈어요. 메일함(스팸함 포함)을 확인해주세요.
+          <p role="status" className="success-text">
+            가입된 이메일이라면 재설정 링크가 발송되었습니다. 메일함을 확인해주세요.
           </p>
         ) : (
           <form onSubmit={handleReset} className="space-y-4">
@@ -133,27 +122,19 @@ export default function LoginPage() {
               </p>
             )}
             <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {submitting ? "보내는 중..." : "재설정 메일 받기"}
+              {submitting ? "발송 중..." : "재설정 링크 받기"}
             </button>
           </form>
         )}
+        <button type="button" onClick={() => switchMode("sign-in")} className="block w-full text-center text-sm link">
+          로그인으로 돌아가기
+        </button>
       </AuthShell>
     );
   }
 
   return (
-    <AuthShell
-      title="다시 만나서 반가워요"
-      lead="로그인한 뒤, 일기는 일기 암호로 한 번 더 열어요."
-      footer={
-        <>
-          처음이신가요?{" "}
-          <Link href="/signup" className="link font-medium">
-            무료로 시작하기
-          </Link>
-        </>
-      }
-    >
+    <AuthShell title="로그인">
       <form onSubmit={handleSubmit} className="space-y-4">
         <TextField
           label="이메일"
@@ -163,21 +144,12 @@ export default function LoginPage() {
           onChange={setEmail}
           placeholder="you@example.com"
         />
-        <div>
-          <PasswordField
-            label="로그인 비밀번호"
-            autoComplete="current-password"
-            value={password}
-            onChange={setPassword}
-          />
-          <button
-            type="button"
-            onClick={() => switchMode("reset")}
-            className="link faint mt-2 text-xs"
-          >
-            로그인 비밀번호를 잊으셨나요?
-          </button>
-        </div>
+        <PasswordField
+          label="로그인 비밀번호"
+          autoComplete="current-password"
+          value={password}
+          onChange={setPassword}
+        />
         {error && (
           <p role="alert" className="error-text">
             {error}
@@ -188,6 +160,15 @@ export default function LoginPage() {
         </button>
       </form>
 
+      <div className="flex flex-col items-center gap-2 text-sm">
+        <Link href="/signup" className="link">
+          계정이 없으신가요? 회원가입
+        </Link>
+        <button type="button" onClick={() => switchMode("reset")} className="faint link text-xs">
+          로그인 비밀번호를 잊으셨나요?
+        </button>
+      </div>
+
       <OrDivider />
 
       <button
@@ -196,7 +177,6 @@ export default function LoginPage() {
         disabled={submitting}
         className="btn-secondary w-full"
       >
-        <GoogleMark />
         Google로 계속하기
       </button>
     </AuthShell>

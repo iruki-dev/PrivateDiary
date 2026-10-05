@@ -64,7 +64,7 @@ export function PasswordField({
           aria-pressed={visible}
           aria-controls={id}
           aria-label={visible ? `${label} 숨기기` : `${label} 보기`}
-          className="absolute inset-y-0 right-0 flex min-w-14 items-center justify-center rounded-r-lg px-3 text-xs font-medium text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-accent/60 dark:text-zinc-400"
+          className="absolute inset-y-0 right-0 flex min-w-14 items-center justify-center rounded-r px-3 text-xs font-medium text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400"
         >
           {visible ? "숨기기" : "보기"}
         </button>

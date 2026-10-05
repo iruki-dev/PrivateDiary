@@ -31,8 +31,8 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#fbfaf6",
-    theme_color: "#fbfaf6",
+    background_color: "#ffffff",
+    theme_color: "#ffffff",
     icons: [
       // Served from public/ rather than the app/icon convention: those get
       // a build-hashed URL that can't be referenced from here by a stable

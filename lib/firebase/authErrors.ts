@@ -18,11 +18,11 @@ export function isUserCancelledPopup(err: unknown): boolean {
 }
 
 const SHARED: Record<string, string> = {
-  "auth/network-request-failed": "인터넷 연결을 확인한 뒤 다시 시도해주세요.",
-  "auth/too-many-requests": "시도가 너무 많았어요. 잠시 후 다시 시도해주세요.",
-  "auth/invalid-email": "이메일 주소 형식이 올바르지 않아요.",
-  "auth/user-disabled": "사용이 중지된 계정이에요. 문의처로 연락해주세요.",
-  "auth/popup-blocked": "브라우저가 Google 로그인 창을 막았어요. 팝업을 허용한 뒤 다시 시도해주세요.",
+  "auth/network-request-failed": "네트워크에 연결할 수 없습니다. 연결을 확인한 뒤 다시 시도해주세요.",
+  "auth/too-many-requests": "시도 횟수가 너무 많습니다. 잠시 후 다시 시도해주세요.",
+  "auth/invalid-email": "이메일 주소 형식이 올바르지 않습니다.",
+  "auth/user-disabled": "사용이 중지된 계정입니다.",
+  "auth/popup-blocked": "브라우저가 Google 로그인 창을 차단했습니다. 팝업을 허용한 뒤 다시 시도해주세요.",
 };
 
 export function signInErrorMessage(err: unknown): string {
@@ -31,9 +31,9 @@ export function signInErrorMessage(err: unknown): string {
     case "auth/invalid-credential":
     case "auth/wrong-password":
     case "auth/user-not-found":
-      return "이메일 또는 로그인 비밀번호가 맞지 않아요.";
+      return "이메일 또는 비밀번호가 올바르지 않습니다.";
     default:
-      return SHARED[code] ?? "로그인하지 못했어요. 잠시 후 다시 시도해주세요.";
+      return SHARED[code] ?? "로그인에 실패했습니다. 다시 시도해주세요.";
   }
 }
 
@@ -41,16 +41,16 @@ export function signUpErrorMessage(err: unknown): string {
   const code = authErrorCode(err);
   switch (code) {
     case "auth/email-already-in-use":
-      return "이미 가입된 이메일이에요. 로그인하거나 다른 이메일을 사용해주세요.";
+      return "이미 가입된 이메일입니다. 로그인하거나 다른 이메일을 사용해주세요.";
     case "auth/weak-password":
-      return "로그인 비밀번호는 6자 이상이어야 해요.";
+      return "로그인 비밀번호는 6자 이상이어야 합니다.";
     case "auth/account-exists-with-different-credential":
-      return "같은 이메일로 다른 방식(이메일 또는 Google)으로 가입된 계정이 있어요.";
+      return "같은 이메일로 다른 방식(이메일 또는 Google)으로 가입된 계정이 있습니다.";
     default:
-      return SHARED[code] ?? "계정을 만들지 못했어요. 잠시 후 다시 시도해주세요.";
+      return SHARED[code] ?? "계정을 만들지 못했습니다. 다시 시도해주세요.";
   }
 }
 
 export function passwordResetErrorMessage(err: unknown): string {
-  return SHARED[authErrorCode(err)] ?? "메일을 보내지 못했어요. 잠시 후 다시 시도해주세요.";
+  return SHARED[authErrorCode(err)] ?? "메일을 보내지 못했습니다. 다시 시도해주세요.";
 }
