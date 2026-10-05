@@ -34,7 +34,14 @@ body {
      so the app downloaded both Geist weights on every load and then
      rendered every character in Arial. The explicit fallbacks cover the
      window before the webfont resolves. */
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  /* Korean line breaking: wrap between words (어절), never inside one —
+     the browser default splits "일기." into "일" / "기." at a line end.
+     overflow-wrap still lets a single unbreakable run (an email address, a
+     backup code) wrap instead of overflowing a phone-width screen. */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   /* Prevents an accidental horizontal scrollbar on mobile if any child
      briefly overflows (e.g. during a layout shift on load). */
   overflow-x: hidden;
@@ -68,6 +75,17 @@ body {
   }
   .field-code {
     @apply text-center font-mono text-lg tracking-widest;
+  }
+  /* The diary writing surface (/write): reading-size type at every width
+   * (the plain .field drops to 14px on wide screens) and a looser line
+   * height for Korean prose. Height grows with the text in JS; this is the
+   * floor while it's empty. */
+  .field-editor {
+    @apply block min-h-[45vh] w-full resize-none overflow-hidden rounded border border-zinc-300 bg-transparent
+      px-4 py-3.5 text-base leading-8 text-foreground transition-colors placeholder:text-zinc-400
+      dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500
+      focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/30
+      dark:focus:border-zinc-400 dark:focus:ring-zinc-400/30;
   }
 
   .btn,
@@ -116,6 +134,16 @@ body {
   .error-text {
     @apply text-sm text-red-600 dark:text-red-400;
   }
+  /* Secondary small text (timestamps, counters, hints). text-zinc-400 on
+   * white is 2.6:1 — below WCAG AA — so readable small text uses this. */
+  .faint {
+    @apply text-zinc-500 dark:text-zinc-400;
+  }
+  /* Visible label above a .field: a placeholder-only field loses its name
+   * as soon as someone starts typing. */
+  .field-label {
+    @apply mb-1.5 block text-sm font-medium;
+  }
   .success-text {
     @apply text-sm text-green-600 dark:text-green-500;
   }
@@ -123,6 +151,63 @@ body {
   /* Shared shell for every full-page loading/gate state. */
   .page-center {
     @apply flex flex-1 items-center justify-center px-4 py-16 sm:px-6 sm:py-24;
+  }
+}
+
+/* Help-doc typography (app/(docs)). Written out rather than pulled in from
+ * a typography plugin: it is one small block, and Korean body text wants a
+ * looser line height (1.8) than Latin-tuned defaults. */
+@layer components {
+  .doc {
+    @apply text-[0.9375rem] leading-[1.8];
+  }
+  .doc h1 {
+    @apply mb-3 text-2xl font-semibold leading-snug tracking-tight;
+  }
+  .doc .doc-lead {
+    @apply mb-10 text-base text-zinc-600 dark:text-zinc-400;
+  }
+  .doc h2 {
+    @apply mb-3 mt-12 scroll-mt-20 text-lg font-semibold leading-snug;
+  }
+  .doc h3 {
+    @apply mb-2 mt-8 scroll-mt-20 font-semibold;
+  }
+  .doc p {
+    @apply my-3;
+  }
+  .doc ul {
+    @apply my-3 list-disc space-y-1.5 pl-5;
+  }
+  .doc ol {
+    @apply my-3 list-decimal space-y-1.5 pl-5;
+  }
+  .doc li::marker {
+    @apply text-zinc-400 dark:text-zinc-600;
+  }
+  .doc a {
+    @apply underline underline-offset-2 hover:opacity-70;
+  }
+  .doc strong {
+    @apply font-semibold;
+  }
+  .doc code {
+    @apply rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] dark:bg-zinc-900;
+  }
+  .doc table {
+    @apply my-4 w-full border-collapse text-sm;
+  }
+  .doc th {
+    @apply border-b border-zinc-300 py-2 pr-4 text-left font-medium dark:border-zinc-700;
+  }
+  .doc td {
+    @apply border-b border-zinc-200 py-2 pr-4 align-top dark:border-zinc-800;
+  }
+  .doc .doc-note {
+    @apply my-5 rounded border border-zinc-300 px-4 py-3 dark:border-zinc-700;
+  }
+  .doc .doc-meta {
+    @apply mt-12 text-xs text-zinc-500 dark:text-zinc-400;
   }
 }
 

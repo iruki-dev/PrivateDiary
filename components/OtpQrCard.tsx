@@ -35,7 +35,7 @@ export function OtpQrCard({ uri, secret }: { uri: string; secret: string }) {
         // eslint-disable-next-line @next/next/no-img-element -- generated data: URL, not a static/remote asset next/image can optimize
         <img src={qrDataUrl} alt="OTP 설정 QR 코드" className="mx-auto h-44 w-44" />
       )}
-      <p className="text-xs text-zinc-500">QR을 스캔할 수 없다면 아래 코드를 수동으로 입력하세요.</p>
+      <p className="faint text-xs">QR을 스캔할 수 없다면 아래 코드를 수동으로 입력하세요.</p>
       <p className="break-all rounded bg-zinc-100 p-2 font-mono text-xs dark:bg-zinc-800">{secret}</p>
     </div>
   );

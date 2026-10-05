@@ -50,14 +50,10 @@ export function ExportEntriesCard({
 
   return (
     <div className="card space-y-3">
-      <h2 className="text-sm font-semibold">일기 내보내기</h2>
-      <p className="muted text-xs">
-        일기 {entries.length}개를 파일로 내려받습니다. 암호를 잊고 백업 코드까지 잃어버리면 일기는
-        영구히 복구할 수 없으므로, 별도의 사본을 직접 보관해두는 것을 권장합니다.
-      </p>
-      <p className="error-text text-xs">
-        내려받는 파일은 <strong>암호화되어 있지 않습니다.</strong> 파일을 열 수 있는 사람은 누구나
-        내용을 그대로 읽을 수 있으니, 암호화된 저장소나 오프라인 매체에 보관하세요.
+      <h2 className="text-sm font-semibold">일기 {entries.length}편 내보내기</h2>
+      <p className="muted text-xs leading-relaxed">
+        받은 파일은 <strong className="text-foreground">암호화되지 않은 일반 텍스트</strong>입니다. 파일을
+        가진 사람은 누구나 읽을 수 있으니 안전한 곳에 보관하세요.
       </p>
       {disabled && disabledReason && <p className="muted text-xs">{disabledReason}</p>}
       {error && (

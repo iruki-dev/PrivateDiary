@@ -117,9 +117,17 @@ components/
   EntryCard.tsx                         # 일기 한 건 — 긴 글은 접고, 검색 중에는 일치 지점 주변만 보여준다
   HighlightedText.tsx                    # 검색어 일치 구간을 <mark>로 표시
   ExportEntriesCard.tsx                   # 복호화된 일기를 파일로 내려받기 (평문 경고 포함)
+  NavBar.tsx, TabBar.tsx                    # 상단 바 / 휴대폰 하단 탭 바(쓰기·지난 일기·설정)
+  settings/                                 # /settings의 그룹·행·스위치(ui.tsx), 본인 확인·재로그인 공용 폼(forms.tsx)
+  docs/                                     # 도움말 목차·이전/다음
 
 app/                  # Next.js App Router 페이지
+  page.tsx             # 첫 화면 = 방문자용 오늘의 일기(서버 렌더링). 저장하면 가입으로 이어지고,
+                       # 쓴 글은 메모리에만 들고 있다가 가입 직후 첫 일기로 저장(contexts/PendingEntryContext.tsx)
   login/, signup/, settings/, write/, entries/
+                       # signup: 계정 → 일기 암호 → 백업 코드(3개 중 2개) 3단계
+  (docs)/              # 서비스와 분리된 도움말·정책 영역: /docs/*, /privacy, /terms.
+                       # 서비스 화면은 라벨과 한 줄 설명만 두고 "자세히"로 여기에 연결한다
   manifest.ts          # 웹 앱 매니페스트 (홈 화면 설치 — "설치형 앱(PWA)" 참조)
   icon.svg, apple-icon.png, favicon.ico   # 앱 아이콘
 
@@ -319,7 +327,7 @@ pnpm exec firebase deploy --only firestore:rules,firestore:indexes,functions --p
 ## Vercel 배포
 
 1. GitHub 저장소를 Vercel 프로젝트에 연결 (vercel.com에서 "Import Project").
-2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두). 이 6개가 전부이고, 그 외에 설정할 환경변수는 없다.
+2. Vercel 프로젝트 설정 > Environment Variables에 `.env.example`의 6개 `NEXT_PUBLIC_FIREBASE_*` 값을 등록 (Production/Preview/Development 모두). 그 외에 공개 정보용 `NEXT_PUBLIC_SITE_URL`, `NEXT_PUBLIC_OPERATOR_NAME`, `NEXT_PUBLIC_CONTACT_EMAIL`(개인정보처리방침·이용약관·OG/sitemap에 쓰임)을 출시 전에 채운다 — 비워 두면 문의처가 GitHub 이슈로 표시된다. 시크릿은 하나도 없다.
 3. **Firebase 콘솔 > Authentication > Settings > Authorized domains에 Vercel 배포 도메인을 추가해야 로그인이 동작한다** (`*.vercel.app` 프리뷰 도메인 포함, 커스텀 도메인 사용 시 그것도 추가).
 4. Next.js 앱(Vercel에 배포되는 쪽) 자체는 여전히 전부 클라이언트 사이드 Firebase SDK 호출만 하므로 Vercel 쪽에는 시크릿 환경변수가 전혀 없다. 서버 로직(OTP 검증)은 Vercel이 아니라 Firebase Cloud Functions에서 별도로 돌아간다 — 위 "Firestore 규칙 / Cloud Functions 배포" 참조.
 

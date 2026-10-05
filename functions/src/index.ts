@@ -304,7 +304,16 @@ export const startOtpSetup = onCall({ invoker: "public" }, async (request) => {
   return { secret, uri };
 });
 
-/** Step 2 of setup: proves the user actually scanned the QR by requiring one valid code. */
+/**
+ * Step 2 of setup: proves the user actually scanned the QR by requiring one
+ * valid code.
+ *
+ * That code is exactly the proof verifyOtp below accepts, so this session
+ * is stamped as verified too. Without that, the person who had just typed
+ * a valid code was immediately gated behind the OTP prompt again — and
+ * replay protection (verifyStoredOtp) meant the code on their screen was
+ * already spent, so they had to wait up to 30s for the next one.
+ */
 export const confirmOtpSetup = onCall({ invoker: "public" }, async (request) => {
   requireAuth(request.auth?.uid);
   const uid = request.auth.uid;
@@ -312,7 +321,7 @@ export const confirmOtpSetup = onCall({ invoker: "public" }, async (request) => 
 
   const { doc } = await verifyStoredOtp(uid, code);
   await doc.update({ confirmed: true });
-  await mergeClaims(uid, { otpEnabled: true });
+  await mergeClaims(uid, { otpEnabled: true, otpVerified: true, otpVerifiedAt: Date.now() });
   return { success: true };
 });
 

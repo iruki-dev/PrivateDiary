@@ -2,14 +2,15 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { OtpGate } from "@/components/OtpGate";
+import { PasswordField } from "@/components/PasswordField";
 import { EntryBrowser } from "@/components/EntryBrowser";
 import { LoadingScreen, LoadingState } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useAccountGate } from "@/hooks/useAccountGate";
 import {
   listEntries,
   type EntrySequenceIntegrity,
@@ -56,7 +57,7 @@ type UnlockMode = "passphrase" | "shamir";
  * OTP-blocking-and-not-yet-bypassed state, nothing has been fetched yet.
  */
 export default function EntriesPage() {
-  const { user, status: authStatus } = useAuth();
+  const { user } = useAuth();
   const {
     status: seedStatus,
     privateKeys,
@@ -67,8 +68,8 @@ export default function EntriesPage() {
     decryptionMethods,
   } = useSeed();
   const { loading: otpLoading, otpEnabled, otpVerified, verifyViaShamirBypass } = useOtp();
-  const router = useRouter();
   usePageTitle("지난 일기");
+  const ready = useAccountGate();
   const canReadEntries = !otpLoading && (!otpEnabled || otpVerified);
   const otpBlocking = !otpLoading && otpEnabled && !otpVerified;
 
@@ -91,12 +92,6 @@ export default function EntriesPage() {
   // failure would ever get a chance to show through it. This is shown
   // instead, in the "unlocked but still can't read" branch further down.
   const [otpBypassError, setOtpBypassError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (authStatus === "signed-in" && seedStatus === "not-issued") {
-      router.replace("/signup");
-    }
-  }, [authStatus, seedStatus, router]);
 
   useEffect(() => {
     // firestore.rules denies `entries` reads until OTP (if enabled on this
@@ -161,17 +156,17 @@ export default function EntriesPage() {
     } catch (err) {
       setUnlockError(
         err instanceof WrongPassphraseError
-          ? "암호가 올바르지 않습니다."
+          ? "일기 암호가 올바르지 않습니다."
           : err instanceof InvalidShamirSharesError
-            ? "백업 코드가 올바른 시드로 복원되지 않습니다."
-            : "잠금 해제에 실패했습니다."
+            ? "백업 코드가 올바르지 않습니다. 코드를 다시 확인해주세요."
+            : "일기를 열지 못했습니다. 다시 시도해주세요."
       );
     } finally {
       setUnlocking(false);
     }
   }
 
-  if (authStatus !== "signed-in") {
+  if (!ready) {
     return <LoadingScreen />;
   }
 
@@ -229,7 +224,7 @@ export default function EntriesPage() {
 
   const emptyState = (
     <div className="card space-y-3 text-center">
-      <p className="muted">아직 작성한 일기가 없습니다.</p>
+      <p className="muted">아직 쓴 일기가 없습니다.</p>
       <Link href="/write" className="btn-primary">
         첫 일기 쓰기
       </Link>
@@ -241,16 +236,15 @@ export default function EntriesPage() {
       <div className={`w-full space-y-6 ${browsing ? "max-w-xl lg:max-w-5xl" : "max-w-xl"}`}>
         <div className="flex items-center justify-between gap-3">
           <h1 className="text-xl font-semibold">지난 일기</h1>
-          <div className="flex items-center gap-3">
-            {seedStatus === "unlocked" && (
-              <button type="button" onClick={() => lock("manual")} className="text-sm link">
-                잠그기
-              </button>
-            )}
-            <Link href="/write" className="text-sm link">
-              오늘의 일기 쓰기
-            </Link>
-          </div>
+          {seedStatus === "unlocked" && (
+            <button type="button" onClick={() => lock("manual")} className="btn-secondary btn-sm">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
+                <rect x="5" y="11" width="14" height="9" rx="2" />
+                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+              </svg>
+              잠그기
+            </button>
+          )}
         </div>
 
         {/* Explains a session that locked itself out from under the reader
@@ -259,7 +253,7 @@ export default function EntriesPage() {
             given, which reads like a bug. */}
         {seedStatus === "locked" && lockReason === "idle" && (
           <p role="status" className="muted text-xs">
-            일정 시간 사용하지 않아 자동으로 잠갔습니다. 설정에서 시간을 바꿀 수 있습니다.
+            한동안 사용하지 않아 자동으로 잠겼습니다.
           </p>
         )}
 
@@ -307,7 +301,7 @@ export default function EntriesPage() {
                   </p>
                 )}
                 <button type="submit" disabled={unlocking} className="btn-primary w-full">
-                  {unlocking ? "확인 중..." : "잠금 해제"}
+                  {unlocking ? "여는 중..." : "잠금 해제"}
                 </button>
                 {modeSwitcherLinks}
               </form>
@@ -341,19 +335,13 @@ export default function EntriesPage() {
               <form onSubmit={handleUnlock} className="space-y-3 card">
                 {unlockMode === "passphrase" ? (
                   <>
-                    <p className="muted">
-                      총 {metadata.length}개의 일기가 있습니다. 내용을 보려면 암호를 입력하세요.
-                    </p>
-                    <input
-                      type="password"
-                      required
+                    <p className="muted">일기 {metadata.length}편이 잠겨 있습니다.</p>
+                    <PasswordField
+                      label="일기 암호"
                       autoFocus
                       autoComplete="current-password"
-                      aria-label="암호"
                       value={passphrase}
-                      onChange={(e) => setPassphrase(e.target.value)}
-                      placeholder="암호"
-                      className="field"
+                      onChange={setPassphrase}
                     />
                   </>
                 ) : (
@@ -370,7 +358,7 @@ export default function EntriesPage() {
                   </p>
                 )}
                 <button type="submit" disabled={unlocking} className="btn-primary w-full">
-                  {unlocking ? "확인 중..." : "잠금 해제"}
+                  {unlocking ? "여는 중..." : "잠금 해제"}
                 </button>
                 {modeSwitcherLinks}
               </form>

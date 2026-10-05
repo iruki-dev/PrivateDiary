@@ -108,6 +108,7 @@ afterAll(async () => {
   await Promise.all([
     auth.deleteUser("replay-test-user").catch(() => undefined),
     auth.deleteUser("lockout-test-user").catch(() => undefined),
+    auth.deleteUser("confirm-setup-user").catch(() => undefined),
   ]);
 });
 
@@ -167,4 +168,20 @@ describe("security-patch-v2 / M4: atomic brute-force lockout", () => {
     // Reaching the threshold above must have tripped the lockout.
     expect(stored.data()?.lockedUntil).not.toBeNull();
   }, 20_000);
+});
+
+describe("confirmOtpSetup", () => {
+  it("leaves the enabling session verified, not immediately gated again", async () => {
+    const uid = "confirm-setup-user";
+    const idToken = await signInAndGetIdToken(uid);
+    await seedOtpSecret(uid, TEST_SECRET, { confirmed: false });
+
+    const response = await callFunction("confirmOtpSetup", idToken, { code: await generate({ secret: TEST_SECRET }) });
+    expect(response.status).toBe(200);
+
+    const claims = (await auth.getUser(uid)).customClaims ?? {};
+    expect(claims.otpEnabled).toBe(true);
+    expect(claims.otpVerified).toBe(true);
+    expect(typeof claims.otpVerifiedAt).toBe("number");
+  });
 });

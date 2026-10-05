@@ -2,7 +2,9 @@ import type { Metadata, Viewport } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/contexts/Providers";
 import { NavBar } from "@/components/NavBar";
+import { TabBar } from "@/components/TabBar";
 import { SecurityWarningBanner } from "@/components/SecurityWarningBanner";
+import { SITE } from "@/lib/site";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -16,15 +18,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "PrivateDiary",
-  description: "누구도 아닌 나만 읽을 수 있는, 제로 지식 암호화 일기.",
-  applicationName: "PrivateDiary",
+  metadataBase: new URL(SITE.url),
+  title: { default: SITE.name, template: `%s · ${SITE.name}` },
+  description: SITE.description,
+  applicationName: SITE.name,
   // A diary is a daily-use app people keep on a phone home screen; this is
   // what makes the installed shortcut open standalone instead of in a tab.
-  appleWebApp: { capable: true, title: "PrivateDiary", statusBarStyle: "black-translucent" },
-  // Nothing here should ever appear in a search result — the app is an
-  // account-gated personal vault, not a public page.
-  robots: { index: false, follow: false },
+  appleWebApp: { capable: true, title: SITE.name, statusBarStyle: "black-translucent" },
+  openGraph: {
+    type: "website",
+    locale: "ko_KR",
+    siteName: SITE.name,
+    title: SITE.name,
+    description: SITE.description,
+  },
+  // Only the public pages (landing, security, legal) are indexable. Every
+  // account page opts back out in its own segment layout (app/write,
+  // entries, settings) — those are a personal vault, never a search
+  // result. app/robots.ts says the same to crawlers.
+  robots: { index: true, follow: true },
 };
 
 export const viewport: Viewport = {
@@ -82,6 +94,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <div id="main-content" tabIndex={-1} className="flex flex-1 flex-col focus:outline-none">
             {children}
           </div>
+          <TabBar />
         </Providers>
       </body>
     </html>

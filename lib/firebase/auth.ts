@@ -5,6 +5,7 @@ import {
   onAuthStateChanged,
   reauthenticateWithCredential,
   reauthenticateWithPopup,
+  sendPasswordResetEmail,
   signInWithEmailAndPassword,
   signInWithPopup,
   signOut as firebaseSignOut,
@@ -38,6 +39,17 @@ export async function signInWithEmail(email: string, password: string): Promise<
 export async function signInWithGoogle(): Promise<User> {
   const credential = await signInWithPopup(auth, new GoogleAuthProvider());
   return credential.user;
+}
+
+/**
+ * Resets the LOGIN password only. The diary passphrase is a different
+ * secret that never reaches Firebase (rule 5), so nothing here can reset
+ * it — the UI that calls this must say so. Resolves the same way whether
+ * or not the address has an account (Firebase's email enumeration
+ * protection), so the caller can't and shouldn't tell the two apart.
+ */
+export async function sendLoginPasswordReset(email: string): Promise<void> {
+  await sendPasswordResetEmail(auth, email);
 }
 
 export function subscribeToAuthState(callback: (user: User | null) => void): () => void {

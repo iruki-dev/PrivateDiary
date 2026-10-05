@@ -18,15 +18,11 @@ import { buildSnippet, type MatchRange } from "@/lib/entries/search";
 /** Roughly the point past which a card stops being scannable in a list. */
 const CLAMP_THRESHOLD = 400;
 
-function formatTimestamp(date: Date | null): string {
-  if (!date) return "저장 중...";
-  return new Intl.DateTimeFormat("ko-KR", {
-    month: "long",
-    day: "numeric",
-    weekday: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
+const timeFormatter = new Intl.DateTimeFormat("ko-KR", { hour: "numeric", minute: "2-digit" });
+
+/** Time of day only — the day itself is the group heading above (EntryBrowser). */
+function formatTime(date: Date | null): string {
+  return date ? timeFormatter.format(date) : "저장 중...";
 }
 
 export interface EntryCardProps {
@@ -52,28 +48,16 @@ export function EntryCard({ createdAt, text, error, ranges, searching }: EntryCa
   const canExpand = !expanded && (clamped || snippet?.truncatedStart || snippet?.truncatedEnd);
 
   return (
-    <li className="card">
-      <div className="flex items-baseline justify-between gap-3">
-        <p className="text-xs text-zinc-400">{formatTimestamp(createdAt)}</p>
-        {/* Computed from plaintext already in memory, and only once
-            decrypted. It discloses nothing further: AES-GCM does not pad,
-            so the stored ciphertext length already tells anyone with
-            database access roughly how long each entry is (ARCHITECTURE.md
-            §9). */}
-        {text !== null && !error && (
-          <p className="shrink-0 text-xs text-zinc-400 tabular-nums">
-            {text.length.toLocaleString("ko-KR")}자
-          </p>
-        )}
-      </div>
+    <li className="px-4 py-4 sm:px-5">
+      <p className="faint text-xs tabular-nums">{formatTime(createdAt)}</p>
 
       {error ? (
-        <p className="mt-2 error-text">{error}</p>
+        <p className="mt-1.5 error-text">{error}</p>
       ) : text === null ? (
-        <p className="mt-2 muted italic">복호화하는 중...</p>
+        <p className="mt-1.5 muted">여는 중...</p>
       ) : (
         <>
-          <p className={`mt-2 whitespace-pre-wrap text-sm ${clamped ? "line-clamp-6" : ""}`}>
+          <p className={`mt-1.5 whitespace-pre-wrap text-[0.9375rem] leading-7 ${clamped ? "line-clamp-6" : ""}`}>
             {snippet?.truncatedStart && !expanded ? "… " : ""}
             <HighlightedText text={body ?? ""} ranges={bodyRanges} />
             {snippet?.truncatedEnd && !expanded ? " …" : ""}

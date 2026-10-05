@@ -122,7 +122,7 @@ export function EntryCalendar({
               key={cell.key}
               type="button"
               aria-pressed={selected}
-              aria-label={`${cell.date.getFullYear()}년 ${cell.date.getMonth() + 1}월 ${cell.day}일, 일기 ${cell.count}개${cell.isToday ? " (오늘)" : ""}`}
+              aria-label={`${cell.date.getFullYear()}년 ${cell.date.getMonth() + 1}월 ${cell.day}일, 일기 ${cell.count}편${cell.isToday ? " (오늘)" : ""}`}
               // Clicking the selected day again clears the filter — the
               // same affordance as the chip above the list, so there is no
               // state you can get into without an obvious way back out.
@@ -148,16 +148,16 @@ export function EntryCalendar({
       </div>
 
       <div className="flex items-center justify-between gap-2 pt-1">
-        <button type="button" onClick={goToToday} className="text-xs link">
+        <button type="button" onClick={goToToday} className="rounded px-1 py-0.5 text-xs text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400">
           오늘
         </button>
         {selectedDay && (
-          <button type="button" onClick={() => onSelectDay(null)} className="text-xs link">
+          <button type="button" onClick={() => onSelectDay(null)} className="rounded px-1 py-0.5 text-xs text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400">
             날짜 선택 해제
           </button>
         )}
         {!selectedDay && counts.has(todayKey) && (
-          <button type="button" onClick={() => onSelectDay(todayKey)} className="text-xs link">
+          <button type="button" onClick={() => onSelectDay(todayKey)} className="rounded px-1 py-0.5 text-xs text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400">
             오늘 쓴 일기 보기
           </button>
         )}

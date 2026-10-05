@@ -41,8 +41,8 @@ export function OtpGate({ children, footer }: { children: ReactNode; footer?: Re
         err instanceof IncorrectOtpCodeError
           ? "코드가 올바르지 않습니다."
           : err instanceof OtpLockedOutError
-            ? "시도 횟수를 초과했습니다. 잠시 후 다시 시도하세요."
-            : "인증에 실패했습니다."
+            ? "시도 횟수를 초과했습니다. 1분 뒤 다시 시도해주세요."
+            : "확인하지 못했습니다. 다시 시도해주세요."
       );
     } finally {
       setVerifying(false);
@@ -51,29 +51,36 @@ export function OtpGate({ children, footer }: { children: ReactNode; footer?: Re
 
   return (
     <div className="w-full max-w-sm space-y-3">
-      <form onSubmit={handleSubmit} className="space-y-3 card">
-        <p className="muted">
-          이 계정은 OTP 인증이 활성화되어 있습니다. 인증 앱의 코드를 입력하세요.
-        </p>
-        <input
-          type="text"
-          required
-          autoFocus
-          inputMode="numeric"
-          pattern="[0-9]{6,8}"
-          aria-label="OTP 코드"
-          value={code}
-          onChange={(e) => setCode(e.target.value)}
-          placeholder="123456"
-          className="field-code"
-        />
+      <form onSubmit={handleSubmit} className="card space-y-4">
+        <div className="space-y-1">
+          <h2 className="font-semibold">OTP 인증</h2>
+          <p className="muted">계속하려면 인증 앱에 표시된 코드를 입력하세요.</p>
+        </div>
+        <div>
+          <label htmlFor="otp-gate-code" className="field-label">
+            6자리 코드
+          </label>
+          <input
+            id="otp-gate-code"
+            type="text"
+            required
+            autoFocus
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            pattern="[0-9]{6,8}"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+            placeholder="123456"
+            className="field-code"
+          />
+        </div>
         {error && (
           <p role="alert" className="error-text">
             {error}
           </p>
         )}
         <button type="submit" disabled={verifying} className="btn-primary w-full">
-          {verifying ? "확인 중..." : "인증"}
+          {verifying ? "확인 중..." : "확인"}
         </button>
       </form>
       {footer}

@@ -190,3 +190,40 @@ export function groupByMonth<T extends { createdAt: Date | null }>(
   }
   return groups;
 }
+
+const WEEKDAYS = ["일요일", "월요일", "화요일", "수요일", "목요일", "금요일", "토요일"];
+
+/**
+ * Groups entries by calendar day, in arrival order — a diary's natural
+ * unit is the day, so the list reads as dated pages rather than a log of
+ * timestamped rows. The year is left out of the label for the current
+ * year ("10월 5일 월요일") and kept for earlier ones ("2025년 10월 5일
+ * 일요일").
+ *
+ * Same "pending" bucket as groupByMonth for entries whose server timestamp
+ * hasn't resolved yet.
+ */
+export function groupByDay<T extends { createdAt: Date | null }>(
+  entries: readonly T[],
+  currentYear: number
+): MonthGroup<T>[] {
+  const groups: MonthGroup<T>[] = [];
+  const byKey = new Map<string, MonthGroup<T>>();
+  for (const entry of entries) {
+    const date = entry.createdAt;
+    const { key, label } = date
+      ? {
+          key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`,
+          label: `${date.getFullYear() === currentYear ? "" : `${date.getFullYear()}년 `}${date.getMonth() + 1}월 ${date.getDate()}일 ${WEEKDAYS[date.getDay()]}`,
+        }
+      : { key: "pending", label: "저장 중" };
+    let group = byKey.get(key);
+    if (!group) {
+      group = { key, label, entries: [] };
+      byKey.set(key, group);
+      groups.push(group);
+    }
+    group.entries.push(entry);
+  }
+  return groups;
+}

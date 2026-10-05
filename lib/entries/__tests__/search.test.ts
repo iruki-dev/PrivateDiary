@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSnippet,
+  groupByDay,
   groupByMonth,
   matchEntry,
   mergeRanges,
@@ -121,5 +122,32 @@ describe("groupByMonth", () => {
     const groups = groupByMonth([{ createdAt: null }, { createdAt: new Date(2026, 8, 14) }]);
 
     expect(groups.map((g) => g.key)).toEqual(["pending", "2026-09"]);
+  });
+});
+
+describe("groupByDay", () => {
+  it("buckets by calendar day in arrival order, with a Korean weekday label", () => {
+    const groups = groupByDay(
+      [
+        { createdAt: new Date(2026, 9, 5, 21, 0) },
+        { createdAt: new Date(2026, 9, 5, 8, 30) },
+        { createdAt: new Date(2026, 9, 4, 23, 59) },
+      ],
+      2026
+    );
+
+    expect(groups.map((g) => g.label)).toEqual(["10월 5일 월요일", "10월 4일 일요일"]);
+    expect(groups[0].entries).toHaveLength(2);
+    expect(groups.map((g) => g.key)).toEqual(["2026-10-05", "2026-10-04"]);
+  });
+
+  it("keeps the year only for earlier years", () => {
+    const groups = groupByDay([{ createdAt: new Date(2025, 9, 5) }], 2026);
+    expect(groups[0].label).toBe("2025년 10월 5일 일요일");
+  });
+
+  it("puts entries with an unresolved server timestamp in their own bucket", () => {
+    const groups = groupByDay([{ createdAt: null }, { createdAt: new Date(2026, 9, 5) }], 2026);
+    expect(groups.map((g) => g.key)).toEqual(["pending", "2026-10-05"]);
   });
 });

@@ -27,7 +27,10 @@ export default function manifest(): MetadataRoute.Manifest {
     short_name: "PrivateDiary",
     description: "누구도 아닌 나만 읽을 수 있는, 제로 지식 암호화 일기.",
     lang: "ko",
-    start_url: "/",
+    // Straight to today's page. "/" would show a signed-in person the
+    // visitor version of it for a moment before redirecting; signed-out
+    // launches get sent to /login from here anyway (hooks/useAccountGate).
+    start_url: "/write",
     scope: "/",
     display: "standalone",
     orientation: "portrait",

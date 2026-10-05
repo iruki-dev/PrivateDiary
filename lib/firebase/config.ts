@@ -18,6 +18,30 @@ const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
+/**
+ * NEXT_PUBLIC_* values are inlined at BUILD time, so a deployment built
+ * without them (e.g. a Vercel environment whose variables are scoped to
+ * Production only, then used for a Preview) still builds "Ready" and then
+ * fails on every request — as an opaque 500 on the server and Firebase's
+ * terse `auth/invalid-api-key` in the browser. Name the missing variables
+ * instead, so the runtime log says exactly what to set.
+ */
+const missingConfig = Object.entries({
+  NEXT_PUBLIC_FIREBASE_API_KEY: firebaseConfig.apiKey,
+  NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: firebaseConfig.authDomain,
+  NEXT_PUBLIC_FIREBASE_PROJECT_ID: firebaseConfig.projectId,
+  NEXT_PUBLIC_FIREBASE_APP_ID: firebaseConfig.appId,
+})
+  .filter(([, value]) => !value)
+  .map(([name]) => name);
+if (missingConfig.length > 0) {
+  throw new Error(
+    `Firebase configuration missing at build time: ${missingConfig.join(", ")}. ` +
+      "Set them for this deployment's environment (on Vercel: Settings → Environment Variables, " +
+      "including Preview) and redeploy — they are inlined during the build."
+  );
+}
+
 export const firebaseApp: FirebaseApp = getApps().length
   ? getApp()
   : initializeApp(firebaseConfig);
