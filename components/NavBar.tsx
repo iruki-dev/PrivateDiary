@@ -11,7 +11,13 @@ const LINKS = [
   { href: "/write", label: "쓰기" },
   { href: "/entries", label: "지난 일기" },
   { href: "/settings", label: "설정" },
+  { href: "/docs", label: "도움말" },
 ];
+
+/** /docs is a section, so any page under it marks that link current. */
+function isCurrent(pathname: string, href: string): boolean {
+  return href === "/docs" ? pathname === "/docs" || pathname.startsWith("/docs/") : pathname === href;
+}
 
 /**
  * The one piece of persistent chrome in the app — every route below this
@@ -48,8 +54,8 @@ export function NavBar() {
 
   return (
     <header className="sticky top-0 z-40 border-b border-zinc-200 bg-background/90 backdrop-blur dark:border-zinc-800">
-      <div className="mx-auto flex h-14 max-w-3xl items-center justify-between px-4 sm:px-6">
-        <Link href={signedIn ? "/home" : "/"} className="link shrink-0 text-base font-semibold no-underline">
+      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
+        <Link href="/" className="link shrink-0 text-base font-semibold no-underline">
           PrivateDiary
         </Link>
 
@@ -61,9 +67,9 @@ export function NavBar() {
                 <Link
                   key={href}
                   href={href}
-                  aria-current={pathname === href ? "page" : undefined}
+                  aria-current={isCurrent(pathname, href) ? "page" : undefined}
                   className={
-                    pathname === href
+                    isCurrent(pathname, href)
                       ? "link text-sm font-medium"
                       : "link text-sm text-zinc-600 dark:text-zinc-400"
                   }
@@ -100,10 +106,21 @@ export function NavBar() {
           </>
         )}
 
-        {!signedIn && authStatus === "signed-out" && (
-          <Link href="/login" className="link text-sm">
-            로그인
-          </Link>
+        {!signedIn && authStatus !== "signed-in" && (
+          <nav className="flex items-center gap-5" aria-label="주 메뉴">
+            <Link
+              href="/docs"
+              aria-current={isCurrent(pathname, "/docs") ? "page" : undefined}
+              className="link text-sm text-zinc-600 no-underline hover:underline dark:text-zinc-400"
+            >
+              도움말
+            </Link>
+            {pathname !== "/login" && (
+              <Link href="/login" className="link text-sm">
+                로그인
+              </Link>
+            )}
+          </nav>
         )}
       </div>
 
@@ -118,9 +135,9 @@ export function NavBar() {
               <li key={href}>
                 <Link
                   href={href}
-                  aria-current={pathname === href ? "page" : undefined}
+                  aria-current={isCurrent(pathname, href) ? "page" : undefined}
                   className={
-                    pathname === href
+                    isCurrent(pathname, href)
                       ? "flex min-h-12 items-center text-sm font-medium"
                       : "flex min-h-12 items-center text-sm text-zinc-600 dark:text-zinc-400"
                   }
