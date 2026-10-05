@@ -87,7 +87,7 @@ export function SecretCard({
         </button>
       </div>
       {copied && (
-        <p className="text-xs text-zinc-400">
+        <p className="faint text-xs">
           복사한 내용은 30초 후 클립보드에서 자동으로 지워집니다.
         </p>
       )}

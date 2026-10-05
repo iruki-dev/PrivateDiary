@@ -54,14 +54,14 @@ export function EntryCard({ createdAt, text, error, ranges, searching }: EntryCa
   return (
     <li className="card">
       <div className="flex items-baseline justify-between gap-3">
-        <p className="text-xs text-zinc-400">{formatTimestamp(createdAt)}</p>
+        <p className="faint text-xs">{formatTimestamp(createdAt)}</p>
         {/* Computed from plaintext already in memory, and only once
             decrypted. It discloses nothing further: AES-GCM does not pad,
             so the stored ciphertext length already tells anyone with
             database access roughly how long each entry is (ARCHITECTURE.md
             §9). */}
         {text !== null && !error && (
-          <p className="shrink-0 text-xs text-zinc-400 tabular-nums">
+          <p className="faint shrink-0 text-xs tabular-nums">
             {text.length.toLocaleString("ko-KR")}자
           </p>
         )}
@@ -70,10 +70,10 @@ export function EntryCard({ createdAt, text, error, ranges, searching }: EntryCa
       {error ? (
         <p className="mt-2 error-text">{error}</p>
       ) : text === null ? (
-        <p className="mt-2 muted italic">복호화하는 중...</p>
+        <p className="mt-2 muted italic">여는 중...</p>
       ) : (
         <>
-          <p className={`mt-2 whitespace-pre-wrap text-sm ${clamped ? "line-clamp-6" : ""}`}>
+          <p className={`mt-2 whitespace-pre-wrap text-[0.9375rem] leading-7 ${clamped ? "line-clamp-6" : ""}`}>
             {snippet?.truncatedStart && !expanded ? "… " : ""}
             <HighlightedText text={body ?? ""} ranges={bodyRanges} />
             {snippet?.truncatedEnd && !expanded ? " …" : ""}

@@ -1,19 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
 import { Providers } from "@/contexts/Providers";
 import { NavBar } from "@/components/NavBar";
 import { SecurityWarningBanner } from "@/components/SecurityWarningBanner";
 import "./globals.css";
-
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
 
 export const metadata: Metadata = {
   title: "PrivateDiary",
@@ -32,8 +21,8 @@ export const viewport: Viewport = {
   // mobile browser chrome (status bar / address bar) never mismatches the
   // page itself when switching themes.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#fbfaf6" },
+    { media: "(prefers-color-scheme: dark)", color: "#141210" },
   ],
   // Next.js sets width=device-width/initial-scale=1 by default; this only
   // adds viewport-fit=cover so safe-area-inset-* below actually has
@@ -57,10 +46,7 @@ export const dynamic = "force-dynamic";
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="ko"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
+    <html lang="ko" className="h-full antialiased">
       <body
         className="flex min-h-full flex-col"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}

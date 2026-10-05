@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { OtpGate } from "@/components/OtpGate";
+import { PasswordField } from "@/components/PasswordField";
 import { EntryBrowser } from "@/components/EntryBrowser";
 import { LoadingScreen, LoadingState } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
@@ -338,16 +339,12 @@ export default function EntriesPage() {
                     <p className="muted">
                       총 {metadata.length}개의 일기가 있습니다. 내용을 보려면 암호를 입력하세요.
                     </p>
-                    <input
-                      type="password"
-                      required
+                    <PasswordField
+                      label="일기 암호"
                       autoFocus
                       autoComplete="current-password"
-                      aria-label="암호"
                       value={passphrase}
-                      onChange={(e) => setPassphrase(e.target.value)}
-                      placeholder="암호"
-                      className="field"
+                      onChange={setPassphrase}
                     />
                   </>
                 ) : (

@@ -227,7 +227,7 @@ export default function WritePage() {
               </button>
             )}
           </div>
-          <p className="text-right text-xs text-zinc-400" aria-live="polite">
+          <p className="faint text-right text-xs" aria-live="polite">
             {text.length.toLocaleString("ko-KR")}자
           </p>
         </div>
@@ -245,7 +245,7 @@ export default function WritePage() {
           <button type="submit" disabled={submitting || !text.trim()} className="btn-primary">
             {submitting ? "저장 중..." : "저장"}
           </button>
-          <span className="hidden text-xs text-zinc-400 sm:inline">⌘/Ctrl + Enter로도 저장할 수 있습니다</span>
+          <span className="faint hidden text-xs sm:inline">⌘/Ctrl + Enter로도 저장할 수 있습니다</span>
         </div>
       </form>
     </main>
