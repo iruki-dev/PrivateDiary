@@ -1,8 +1,8 @@
 /**
- * Where a signed-in user lands when nothing more specific was asked for —
- * the daily dashboard, not the public landing page at "/".
+ * Where a signed-in user lands when nothing more specific was asked for:
+ * today's page. A diary's home is the page you write on.
  */
-export const DEFAULT_SIGNED_IN_PATH = "/home";
+export const DEFAULT_SIGNED_IN_PATH = "/write";
 
 /**
  * Validates the `?next=` value /login carries back to the page a signed-out

@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import { AuthProvider } from "./AuthContext";
 import { OtpProvider } from "./OtpContext";
+import { PendingEntryProvider } from "./PendingEntryContext";
 import { PreferencesProvider } from "./PreferencesContext";
 import { SecurityProvider } from "./SecurityContext";
 import { SeedProvider } from "./SeedContext";
@@ -22,7 +23,9 @@ export function Providers({ children }: { children: ReactNode }) {
       <AuthProvider>
         <PreferencesProvider>
           <OtpProvider>
-            <SeedProvider>{children}</SeedProvider>
+            <SeedProvider>
+              <PendingEntryProvider>{children}</PendingEntryProvider>
+            </SeedProvider>
           </OtpProvider>
         </PreferencesProvider>
       </AuthProvider>

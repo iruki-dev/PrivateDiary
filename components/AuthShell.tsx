@@ -15,7 +15,10 @@ export function AuthShell({
   children: ReactNode;
 }) {
   return (
-    <main className="page-center">
+    // Top-aligned rather than .page-center: the signup steps swap content
+    // of different heights, and a vertically centred form jumps to a new
+    // position on every step on a phone.
+    <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-2">
           <h1 className="text-xl font-semibold">{title}</h1>

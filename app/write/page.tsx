@@ -10,6 +10,8 @@ import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
 import { usePreferences } from "@/contexts/PreferencesContext";
 import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts";
+import { TodayLabel } from "@/components/TodayLabel";
+import { usePendingEntry } from "@/contexts/PendingEntryContext";
 
 /** Minimal outline eye glyph — no icon library in this codebase, and this is the only icon needed. */
 function EyeIcon({ className }: { className?: string }) {
@@ -47,6 +49,12 @@ export default function WritePage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+  // One-shot message from signup ("첫 일기가 저장되었습니다"), shown once.
+  const { notice, setNotice, hasPendingEntry, takePendingEntry } = usePendingEntry();
+  const [initialNotice] = useState(notice);
+  useEffect(() => {
+    if (notice) setNotice(null);
+  }, [notice, setNotice]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const {
     loading: preferencesLoading,
@@ -83,6 +91,16 @@ export default function WritePage() {
     setText(draft.text);
     setRestoredDraftAt(draft.savedAt);
   }, [user, draftAutosave]);
+
+  // An entry written on "/" before signing up that signup couldn't save
+  // (see app/signup/page.tsx) — put it back in the editor, not lost.
+  useEffect(() => {
+    if (!hasPendingEntry) return;
+    const pending = takePendingEntry();
+    // Taking it out of the in-memory hand-off is a one-time side effect.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (pending) setText(pending);
+  }, [hasPendingEntry, takePendingEntry]);
 
   // Debounced so a fast typist isn't writing to localStorage on every
   // keystroke. The cleanup cancels the pending write, which also means the
@@ -163,7 +181,9 @@ export default function WritePage() {
     <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
       <form onSubmit={handleSubmit} className="w-full max-w-xl space-y-4">
         <div className="flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold">오늘의 일기</h1>
+          <h1 className="text-xl font-semibold">
+            <TodayLabel />
+          </h1>
           <Link href="/entries" className="text-sm link">
             지난 일기 보기
           </Link>
@@ -234,6 +254,11 @@ export default function WritePage() {
         {error && (
           <p role="alert" className="error-text">
             {error}
+          </p>
+        )}
+        {initialNotice && !success && (
+          <p role="status" className="success-text">
+            {initialNotice}
           </p>
         )}
         {success && (
