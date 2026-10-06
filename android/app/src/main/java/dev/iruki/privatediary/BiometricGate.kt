@@ -21,11 +21,13 @@ import java.security.Signature
 import java.security.spec.ECGenParameterSpec
 
 /**
- * Biometric check as an ADDITIONAL factor, on the same footing as OTP:
- * when it's on, opening the diary (or any settings step that needs the
- * diary passphrase) takes the passphrase AND a fingerprint or face. It
- * never stands in for the passphrase, and nothing that can open the diary
- * is kept on the phone — no passphrase, no seed, no key derived from them.
+ * Biometric check handled exactly like OTP: a gate IN FRONT OF the diary
+ * passphrase (components/BiometricGate.tsx, contexts/BiometricGateContext).
+ * When it's on, the passphrase can't be entered — or tried — until a
+ * fingerprint or face has passed; the backup codes are the one way around
+ * it, as they are for OTP. It never stands in for the passphrase, and
+ * nothing that can open the diary is kept on the phone — no passphrase, no
+ * seed, no key derived from them.
  *
  * What the check is: an ECDSA P-256 signing key generated in Android
  * Keystore (StrongBox if present, else the TEE), usable only right after a
@@ -128,8 +130,8 @@ class BiometricGate(private val context: Context) {
 
     /**
      * After the biometric key was invalidated: the page calls this only once
-     * the person has re-proven the login (Firebase reauthentication), then
-     * offers to set the check up again.
+     * the person has re-proven the login (Firebase reauthentication); the
+     * check is then off until they set it up again.
      */
     fun reset(uid: String) {
         if (GateAccount.isValidUid(uid)) clear(GateAccount.tag(uid))

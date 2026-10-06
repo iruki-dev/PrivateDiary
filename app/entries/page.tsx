@@ -18,6 +18,7 @@ import {
 } from "@/lib/firebase/entries";
 import { ShamirNotConfiguredError } from "@/lib/firebase/otp";
 import { BiometricGateError, haptic } from "@/lib/native/app";
+import { BiometricGate } from "@/components/BiometricGate";
 import {
   bytesToBase64,
   computeShamirOtpBypassProof,
@@ -29,18 +30,16 @@ import {
 type UnlockMode = "passphrase" | "shamir";
 
 /**
- * The biometric check (Android app, when turned on) runs after the
- * passphrase or backup codes were accepted. Null: the person dismissed the
- * prompt themselves — nothing to say.
+ * The biometric check (Android app) is a gate in front of the passphrase
+ * (components/BiometricGate), so the passphrase paths only see it if
+ * something rendered the form without that gate — SeedContext refuses.
  */
 function biometricGateMessage(code: string): string | null {
   switch (code) {
     case "cancelled":
       return null;
-    case "lockout":
-      return "생체 인증 시도가 너무 많았습니다. 잠시 뒤에 다시 시도해주세요.";
-    case "invalidated":
-      return "휴대폰에 새 지문이나 얼굴이 등록되어 생체 인증을 통과할 수 없습니다. 설정 → 생체 인증에서 로그인 비밀번호로 확인한 뒤 다시 설정해주세요.";
+    case "required":
+      return "생체 인증을 먼저 통과해야 합니다.";
     default:
       return "생체 인증을 확인하지 못했습니다. 다시 시도해주세요.";
   }
@@ -255,6 +254,39 @@ export default function EntriesPage() {
     </div>
   );
 
+  const unlockForm = (
+    <form onSubmit={handleUnlock} className="space-y-3 card">
+      {unlockMode === "passphrase" ? (
+        <>
+          <p className="muted">일기 {metadata.length}편이 잠겨 있습니다.</p>
+          <PasswordField
+            label="일기 암호"
+            autoFocus
+            autoComplete="passphrase"
+            value={passphrase}
+            onChange={setPassphrase}
+          />
+        </>
+      ) : (
+        decryptionMethods?.shamir && (
+          <>
+            <p className="muted">백업 코드 {decryptionMethods.shamir.k}개를 입력하세요.</p>
+            {shamirFields}
+          </>
+        )
+      )}
+      {unlockError && (
+        <p role="alert" className="error-text">
+          {unlockError}
+        </p>
+      )}
+      <button type="submit" disabled={unlocking} className="btn-primary w-full">
+        {unlocking ? "여는 중..." : "잠금 해제"}
+      </button>
+      {modeSwitcherLinks}
+    </form>
+  );
+
   return (
     <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
       <div className={`w-full space-y-6 ${browsing ? "max-w-xl lg:max-w-5xl" : "max-w-xl"}`}>
@@ -355,38 +387,24 @@ export default function EntriesPage() {
 
             {metadataLoaded && metadata.length === 0 && emptyState}
 
-            {metadataLoaded && metadata.length > 0 && (
-              <form onSubmit={handleUnlock} className="space-y-3 card">
-                {unlockMode === "passphrase" ? (
-                  <>
-                    <p className="muted">일기 {metadata.length}편이 잠겨 있습니다.</p>
-                    <PasswordField
-                      label="일기 암호"
-                      autoFocus
-                      autoComplete="passphrase"
-                      value={passphrase}
-                      onChange={setPassphrase}
-                    />
-                  </>
-                ) : (
-                  decryptionMethods?.shamir && (
-                    <>
-                      <p className="muted">백업 코드 {decryptionMethods.shamir.k}개를 입력하세요.</p>
-                      {shamirFields}
-                    </>
-                  )
-                )}
-                {unlockError && (
-                  <p role="alert" className="error-text">
-                    {unlockError}
-                  </p>
-                )}
-                <button type="submit" disabled={unlocking} className="btn-primary w-full">
-                  {unlocking ? "여는 중..." : "잠금 해제"}
-                </button>
-                {modeSwitcherLinks}
-              </form>
-            )}
+            {metadataLoaded && metadata.length > 0 &&
+              (unlockMode === "shamir" ? (
+                unlockForm
+              ) : (
+                // Like OTP: the biometric check comes before the passphrase
+                // can even be tried; the backup codes are the way around it.
+                <BiometricGate
+                  footer={
+                    decryptionMethods?.shamir && (
+                      <button type="button" onClick={() => switchMode("shamir")} className="w-full text-center text-xs link">
+                        백업 코드가 있다면 생체 인증 없이 바로 열기
+                      </button>
+                    )
+                  }
+                >
+                  {unlockForm}
+                </BiometricGate>
+              ))}
           </OtpGate>
         )}
       </div>

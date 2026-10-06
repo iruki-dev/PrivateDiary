@@ -2,7 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useBiometricGate } from "@/hooks/useBiometricGate";
+import { useBiometricGate } from "@/contexts/BiometricGateContext";
 import {
   disableBiometricGate,
   enableBiometricGate,
@@ -21,11 +21,11 @@ function describe(status: BiometricGateStatus): string {
     return "휴대폰에 새 지문이나 얼굴이 등록되어 확인할 수 없습니다. 로그인 비밀번호로 본인을 확인한 뒤 다시 설정하세요.";
   }
   if (status.enabled) {
-    return "일기를 열거나 일기 암호가 필요한 설정을 바꿀 때, 일기 암호에 더해 지문이나 얼굴을 확인합니다. 이 휴대폰에만 적용됩니다.";
+    return "OTP처럼, 일기 암호를 입력하기 전에 지문이나 얼굴을 먼저 확인합니다. 백업 코드로는 바로 열 수 있습니다. 이 휴대폰에만 적용됩니다.";
   }
   switch (status.availability) {
     case "ready":
-      return "일기 암호에 더해 지문이나 얼굴을 한 번 더 확인합니다. 일기 암호를 대신하지는 않습니다.";
+      return "OTP처럼, 일기 암호를 입력하기 전에 지문이나 얼굴을 먼저 확인합니다. 일기 암호를 대신하지는 않습니다.";
     case "no-device-lock":
       return "휴대폰에 화면 잠금을 먼저 설정해야 쓸 수 있습니다.";
     case "none-enrolled":
@@ -45,16 +45,17 @@ function gateErrorMessage(err: unknown): string | null {
 }
 
 /**
- * "생체 인증" (Android app only) — on the same footing as OTP: an extra
- * check on top of the diary passphrase, never a replacement for it. Turning
- * it on needs one passing check; turning it off needs one too. If a new
+ * "생체 인증" (Android app only) — on the same footing as OTP: a check in
+ * front of the diary passphrase, never a replacement for it
+ * (components/BiometricGate). Turning it on needs one passing check;
+ * turning it off needs one too. If a new
  * fingerprint or face invalidates it, the diary stays closed until the
  * person re-proves the login and sets it up again
  * (android/.../BiometricGate.kt).
  */
 export function BiometricGateRow() {
   const { user } = useAuth();
-  const { status, refresh } = useBiometricGate();
+  const { status, refresh, markPassed } = useBiometricGate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -150,7 +151,11 @@ export function BiometricGateRow() {
             disabled={!available || busy}
             onChange={(next) =>
               void (next
-                ? run(() => enableBiometricGate(signedInUser.uid), "켰습니다.")
+                ? run(async () => {
+                    await enableBiometricGate(signedInUser.uid);
+                    // Turning it on passed one check already.
+                    markPassed();
+                  }, "켰습니다.")
                 : run(() => disableBiometricGate(signedInUser.uid), "껐습니다."))
             }
           />

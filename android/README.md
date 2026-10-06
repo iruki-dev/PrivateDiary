@@ -2,7 +2,7 @@
 
 The Android app is the same web app — same accounts, same end-to-end
 encryption, same Firestore data — packaged inside a hardened native shell
-that adds what a browser can't: a hardware-backed biometric check (on top of the passphrase, like OTP), screen
+that adds what a browser can't: a hardware-backed biometric check (a gate in front of the passphrase, like OTP), screen
 protection and an app that only ever runs the code signed into it.
 
 ```
@@ -13,7 +13,7 @@ android/app/src/main/java/dev/iruki/privatediary/
   AppOrigin.kt         the app origin and the network allowlist
   NativeBridge.kt      origin-checked page ↔ app channel (WebMessageListener)
   BridgeProtocol.kt    its wire format (JSON + binary frames for secrets)
-  BiometricGate.kt     biometric check as an extra factor (Keystore signing key, per-use)
+  BiometricGate.kt     biometric check, a gate before the passphrase like OTP (Keystore signing key, per-use)
   GateAccount.kt       per-account key/preference names
   SecureClipboard.kt   sensitive-flagged copy with auto-clear
   GoogleSignIn.kt      Credential Manager → Google ID token → Firebase
@@ -171,8 +171,8 @@ categories in brackets.
 | Page talks to a host it shouldn't | CSP `connect-src` **and** a native allowlist in `shouldInterceptRequest`: only Firestore, Firebase Auth and Cloud Functions hosts; everything else gets 403. Top-level navigation off the app origin is blocked; tapped https/mailto links open outside the app. [NETWORK] |
 | Traffic interception | HTTPS only; user-installed CAs are not trusted (`network_security_config.xml`). No certificate pinning — Google rotates Firebase certificates, and entries are end-to-end encrypted regardless. [NETWORK] |
 | Copying app data off the phone (backup, device transfer, a stolen unlocked phone over USB) | `allowBackup=false`, data-extraction rules exclude every domain from cloud backup **and** device-to-device transfer. Nothing on the phone can open the diary: neither the passphrase nor the seed is ever stored. [STORAGE] |
-| Someone holding the phone reads the diary | Leaving the app locks the diary immediately (keys wiped from memory). Reading always needs the passphrase or backup codes — plus, if turned on, a fresh Class 3 biometric match. [AUTH] |
-| Someone who learned the passphrase opens the diary on the owner's phone | Optional biometric check (`BiometricGate.kt`), an extra factor like OTP and never a replacement for the passphrase. It runs after the passphrase/backup codes reconstruct the seed and before the seed is used (unlock, and every settings step that needs the passphrase); a failed check wipes the seed. It signs a random challenge with an ECDSA P-256 Keystore key (StrongBox if present, else TEE; software-only refused) that is usable only after a per-use `BIOMETRIC_STRONG` match bound via `CryptoObject` — no PIN fallback, unusable while the device is locked — and the signature is verified, so a faked success callback doesn't pass. A new biometric enrollment invalidates the key, which keeps the diary closed (it does not switch the check off) until the login is re-proven and the check set up again; turning it off needs a passing check. Limit: it's enforced by the app on this phone, so clearing app data removes it — together with the Firebase session. [AUTH] |
+| Someone holding the phone reads the diary | Leaving the app locks the diary immediately (keys wiped from memory). Reading always needs the passphrase (behind the biometric check, if turned on) or the backup codes. [AUTH] |
+| Someone who learned the passphrase opens the diary on the owner's phone | Optional biometric check (`BiometricGate.kt`, `components/BiometricGate.tsx`), handled exactly like OTP: a gate IN FRONT OF the passphrase — the passphrase field isn't shown, and `SeedContext` refuses every passphrase path before any crypto, until the check passes, so the passphrase can't even be tried without it. Ways in: check + passphrase, or the backup codes alone (which stand in for it, as for OTP). Never a replacement for the passphrase; nothing that opens the diary is stored. The check signs a random challenge with an ECDSA P-256 Keystore key (StrongBox if present, else TEE; software-only refused) usable only after a per-use `BIOMETRIC_STRONG` match bound via `CryptoObject` — no PIN fallback, unusable while the device is locked — and the signature is verified, so a faked success callback doesn't pass. The pass ends when the diary locks or the app leaves the foreground. A new biometric enrollment invalidates the key; the gate then stays closed until the backup codes are used or the login is re-proven and the check set up again. Turning it off needs a passing check. Limit: enforced by the app on this phone, so clearing app data removes it — together with the Firebase session. [AUTH] |
 | Screenshots, screen recording, recents thumbnail, casting | `FLAG_SECURE`, `setRecentsScreenshotEnabled(false)`. [PLATFORM] |
 | Tapjacking / fake overlays over the passphrase field | `setHideOverlayWindows(true)` (`HIDE_OVERLAY_WINDOWS`), `filterTouchesWhenObscured`. [PLATFORM] |
 | Keyboard learning or syncing diary text and passphrases | `IME_FLAG_NO_PERSONALIZED_LEARNING` on every input connection. [PRIVACY] |
