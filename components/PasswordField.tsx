@@ -1,6 +1,23 @@
 "use client";
 
-import { useId, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { blockAutofill } from "@/lib/native/autofill";
+
+/**
+ * Attributes that tell password managers to leave a field alone. The diary
+ * passphrase is never stored anywhere — including in a password manager —
+ * so its fields must not invite one to save or fill them. There is no
+ * standard opt-out for that, so this is every manager's own: autocomplete
+ * "off", 1Password, LastPass, Bitwarden, Dashlane and Proton Pass.
+ */
+const PASSWORD_MANAGER_OPT_OUT = {
+  autoComplete: "off",
+  "data-1p-ignore": "true",
+  "data-lpignore": "true",
+  "data-bwignore": "true",
+  "data-form-type": "other",
+  "data-protonpass-ignore": "true",
+} as const;
 
 /**
  * A labelled password input with a show/hide toggle.
@@ -13,6 +30,18 @@ import { useId, useState, type ReactNode } from "react";
  *
  * Autocorrect and auto-capitalisation are off: a phone "fixing" one word of
  * a passphrase silently changes the secret.
+ *
+ * `autoComplete="passphrase"` marks the diary passphrase, which must never
+ * be saved anywhere:
+ *  - no password-manager hints (PASSWORD_MANAGER_OPT_OUT above), and in
+ *    the Android app, Android's autofill is switched off while the field
+ *    is on screen (lib/native/autofill.ts);
+ *  - "보기" shows the passphrase to check it, read-only. Typing is always
+ *    into a masked field: phone keyboards don't learn from password
+ *    fields, but they do learn from visible text, and a learned word list
+ *    would be a copy of the passphrase.
+ * The login password ("current-password" / "new-password") is an ordinary
+ * account password, and a password manager is welcome to it.
  */
 export function PasswordField({
   label,
@@ -27,7 +56,7 @@ export function PasswordField({
   label: string;
   value: string;
   onChange: (value: string) => void;
-  autoComplete: "current-password" | "new-password";
+  autoComplete: "current-password" | "new-password" | "passphrase";
   autoFocus?: boolean;
   required?: boolean;
   placeholder?: string;
@@ -36,6 +65,16 @@ export function PasswordField({
   const id = useId();
   const hintId = `${id}-hint`;
   const [visible, setVisible] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const isPassphrase = autoComplete === "passphrase";
+
+  useEffect(() => (isPassphrase ? blockAutofill() : undefined), [isPassphrase]);
+
+  // Revealed passphrases are read-only; touching the field to type again
+  // masks it first, so the keyboard only ever sees a password field.
+  function maskForTyping() {
+    if (isPassphrase && visible) setVisible(false);
+  }
 
   return (
     <div>
@@ -48,7 +87,11 @@ export function PasswordField({
           type={visible ? "text" : "password"}
           required={required}
           autoFocus={autoFocus}
-          autoComplete={autoComplete}
+          ref={inputRef}
+          {...(isPassphrase ? PASSWORD_MANAGER_OPT_OUT : { autoComplete })}
+          readOnly={isPassphrase && visible}
+          onFocus={maskForTyping}
+          onPointerDown={maskForTyping}
           autoCapitalize="none"
           autoCorrect="off"
           spellCheck={false}
@@ -60,7 +103,16 @@ export function PasswordField({
         />
         <button
           type="button"
-          onClick={() => setVisible((v) => !v)}
+          onClick={() => {
+            const next = !visible;
+            setVisible(next);
+            // Checking a passphrase: drop the keyboard, so nothing is typed
+            // while it's visible. Hiding it again: back to typing.
+            if (isPassphrase) {
+              if (next) inputRef.current?.blur();
+              else inputRef.current?.focus();
+            }
+          }}
           aria-pressed={visible}
           aria-controls={id}
           aria-label={visible ? `${label} 숨기기` : `${label} 보기`}

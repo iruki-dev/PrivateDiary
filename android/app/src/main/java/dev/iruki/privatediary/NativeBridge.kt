@@ -100,8 +100,9 @@ class NativeBridge(
                 activity.onPageReady()
                 ok(id)
             }
-            "app.route" -> {
-                activity.onRouteChanged(params.optString("path", "/"))
+            "app.autofill" -> {
+                // Anything but an explicit true keeps autofill off.
+                activity.setAutofillAllowed(params.optBoolean("allowed", false))
                 ok(id)
             }
             "vault.status" -> {

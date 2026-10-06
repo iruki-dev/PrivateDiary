@@ -425,7 +425,7 @@ export default function EntriesPage() {
                     <PasswordField
                       label="일기 암호"
                       autoFocus
-                      autoComplete="current-password"
+                      autoComplete="passphrase"
                       value={passphrase}
                       onChange={setPassphrase}
                     />

@@ -177,7 +177,8 @@ categories in brackets.
 | Tapjacking / fake overlays over the passphrase field | `setHideOverlayWindows(true)` (`HIDE_OVERLAY_WINDOWS`), `filterTouchesWhenObscured`. [PLATFORM] |
 | Keyboard learning or syncing diary text and passphrases | `IME_FLAG_NO_PERSONALIZED_LEARNING` on every input connection. [PRIVACY] |
 | Spyware abusing accessibility services | `ACCESSIBILITY_DATA_SENSITIVE_YES` (Android 14+): only real accessibility tools (e.g. TalkBack) can read the screen. [PRIVACY] |
-| Password managers / autofill services receiving diary text | Autofill is excluded for the whole WebView except on `/login` and `/signup`. [PRIVACY] |
+| The diary passphrase ending up stored by a password manager or keyboard | Passphrase fields carry no password-manager hints (`autocomplete="off"` plus each manager's ignore attribute). Android autofill is off for the whole WebView unless the page allows it, which it does only for the login password and never while a passphrase field is mounted; turning it off cancels any session in progress (`lib/native/autofill.ts`). "보기" is read-only, so a passphrase is only ever typed into a masked field. [STORAGE, PRIVACY] |
+| Password managers / autofill services receiving diary text | Same switch: autofill is off everywhere except the login password. [PRIVACY] |
 | Clipboard leaking backup codes | Copied with `EXTRA_IS_SENSITIVE` (hidden from previews and keyboard clipboard history) and cleared after 30 s if still ours. [STORAGE] |
 | Malicious page or frame calling native code | `WebMessageListener` injected only for the exact app origin; every message re-checked for origin and main frame; a fixed list of methods; secrets travel as zeroable binary frames, never as JSON strings. [PLATFORM] |
 | Task hijacking (StrandHogg) | `taskAffinity=""`, single exported activity. [PLATFORM] |

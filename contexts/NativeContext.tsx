@@ -1,10 +1,11 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "./AuthContext";
 import { isNativeApp, nativeHello, onNativeEvent, type NativeHello } from "@/lib/native/bridge";
-import { reportReady, reportRoute } from "@/lib/native/app";
+import { reportAutofillAllowed, reportReady } from "@/lib/native/app";
+import { autofillAllowed, isAutofillBlocked, subscribeAutofillBlocks } from "@/lib/native/autofill";
 
 /**
  * What the Android app around this page can do, plus the bits of app state
@@ -12,8 +13,9 @@ import { reportReady, reportRoute } from "@/lib/native/app";
  * does anything.
  *
  * Also the page's half of the app's lifecycle handshake: it tells the app
- * when it has rendered (so the splash screen can go) and which route it is
- * on (so the app can allow password managers on the sign-in pages only).
+ * when it has rendered (so the splash screen can go) and when Android's
+ * autofill may serve the page: only for the login password, never while a
+ * diary passphrase field is on screen (lib/native/autofill.ts).
  */
 interface NativeContextValue {
   /** Null until the app answers, and always on the website. */
@@ -45,9 +47,10 @@ export function NativeProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const passphraseOnScreen = useSyncExternalStore(subscribeAutofillBlocks, isAutofillBlocked, () => false);
   useEffect(() => {
-    if (isNativeApp()) reportRoute(pathname);
-  }, [pathname]);
+    if (isNativeApp()) reportAutofillAllowed(autofillAllowed(pathname, passphraseOnScreen));
+  }, [pathname, passphraseOnScreen]);
 
   // Signed-in or not is what decides the first screen; hold the splash
   // until that's known and one frame has been painted.

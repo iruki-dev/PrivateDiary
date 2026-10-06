@@ -550,7 +550,7 @@ function ChangePassphraseRow({
         <form onSubmit={handleSubmit} className="space-y-4">
           <PasswordField
             label="기존 일기 암호"
-            autoComplete="current-password"
+            autoComplete="passphrase"
             autoFocus
             value={oldPassphrase}
             onChange={setOldPassphrase}
@@ -558,7 +558,7 @@ function ChangePassphraseRow({
           <div className="space-y-2">
             <PasswordField
               label="새 일기 암호"
-              autoComplete="new-password"
+              autoComplete="passphrase"
               value={newPassphrase}
               onChange={setNewPassphrase}
             />
@@ -566,7 +566,7 @@ function ChangePassphraseRow({
           </div>
           <PasswordField
             label="새 일기 암호 확인"
-            autoComplete="new-password"
+            autoComplete="passphrase"
             value={confirmPassphrase}
             onChange={setConfirmPassphrase}
           />
@@ -676,7 +676,7 @@ function ResetPassphraseRow({
           <div className="space-y-2">
             <PasswordField
               label="새 일기 암호"
-              autoComplete="new-password"
+              autoComplete="passphrase"
               value={newPassphrase}
               onChange={setNewPassphrase}
             />
@@ -684,7 +684,7 @@ function ResetPassphraseRow({
           </div>
           <PasswordField
             label="새 일기 암호 확인"
-            autoComplete="new-password"
+            autoComplete="passphrase"
             value={confirmPassphrase}
             onChange={setConfirmPassphrase}
           />
@@ -891,7 +891,7 @@ function OtpRow({
         <form onSubmit={handleConfirmPassphrase} className="space-y-4">
           <PasswordField
             label="일기 암호"
-            autoComplete="current-password"
+            autoComplete="passphrase"
             autoFocus
             value={passphrase}
             onChange={setPassphrase}

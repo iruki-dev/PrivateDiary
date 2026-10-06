@@ -399,7 +399,7 @@ export default function SignupPage() {
         <div className="space-y-2">
           <PasswordField
             label="일기 암호"
-            autoComplete="new-password"
+            autoComplete="passphrase"
             value={passphrase}
             onChange={setPassphrase}
             hint="로그인 비밀번호와 다른 값. 서로 관련 없는 단어 여러 개를 이어 쓰면 좋습니다."
@@ -411,7 +411,7 @@ export default function SignupPage() {
         </div>
         <PasswordField
           label="일기 암호 확인"
-          autoComplete="new-password"
+          autoComplete="passphrase"
           value={passphraseConfirm}
           onChange={setPassphraseConfirm}
         />

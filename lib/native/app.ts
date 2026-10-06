@@ -56,8 +56,9 @@ export function haptic(kind: "confirm" | "reject" | "tick"): void {
   void callNative("haptic", { kind }).catch(() => {});
 }
 
-export function reportRoute(path: string): void {
-  void callNative("app.route", { path }).catch(() => {});
+/** Whether Android's autofill may serve the page right now (lib/native/autofill.ts). */
+export function reportAutofillAllowed(allowed: boolean): void {
+  void callNative("app.autofill", { allowed }).catch(() => {});
 }
 
 export function reportReady(): void {
