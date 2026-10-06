@@ -88,10 +88,13 @@ export default function SignupPage() {
   const [nickname, setNicknameInput] = useState("");
   const [recoveryEmail, setRecoveryEmailInput] = useState("");
   const [accountPassword, setAccountPassword] = useState("");
-  // Accounts that came in through Google (or an earlier, unfinished signup)
-  // name themselves before the passphrase step. null: still checking.
-  const [hasNickname, setHasNickname] = useState<boolean | null>(null);
+  // Google accounts name themselves before the passphrase step (an id
+  // account gave its nickname with the id). "unknown": still checking.
+  const [nicknameStep, setNicknameStep] = useState<"unknown" | "ask" | "done">("unknown");
   const [nicknameSaving, setNicknameSaving] = useState(false);
+  // A nickname that couldn't be saved yet. Never holds signup up: it is
+  // tried again once the diary exists, and settings can always set it.
+  const [pendingNickname, setPendingNickname] = useState<string | null>(null);
   // Set when the reset email couldn't be saved during signup; settings can add it later.
   const [recoveryEmailFailed, setRecoveryEmailFailed] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
@@ -124,25 +127,39 @@ export default function SignupPage() {
     }
   }, [alreadyOnboarded, account?.kind, router]);
 
-  // Signed in without keys yet: has this account named itself already?
+  const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
+
+  // Signed in without keys yet. Only a Google account is asked for a
+  // nickname here, and only if it hasn't got one; an id account named
+  // itself on the first form. Whatever happens, this never stops signup.
   useEffect(() => {
-    if (authStatus !== "signed-in" || !user || seedStatus !== "not-issued" || hasNickname !== null || accountSubmitting) {
+    if (authStatus !== "signed-in" || !user || seedStatus !== "not-issued" || nicknameStep !== "unknown" || accountSubmitting) {
+      return;
+    }
+    if (!isGoogleAccount) {
+      // Reading the account's sign-in method is the external state here.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setNicknameStep("done");
       return;
     }
     let cancelled = false;
+    const ask = () => {
+      setNicknameInput((current) => current || normalizeNickname(user.displayName ?? "").slice(0, NICKNAME_MAX_LENGTH));
+      setNicknameStep("ask");
+    };
     getNickname(user.uid)
       .then((existing) => {
         if (cancelled) return;
-        if (!existing) setNicknameInput((current) => current || normalizeNickname(user.displayName ?? "").slice(0, NICKNAME_MAX_LENGTH));
-        setHasNickname(existing !== null);
+        if (existing) setNicknameStep("done");
+        else ask();
       })
       .catch(() => {
-        if (!cancelled) setHasNickname(false);
+        if (!cancelled) ask();
       });
     return () => {
       cancelled = true;
     };
-  }, [authStatus, user, seedStatus, hasNickname, accountSubmitting]);
+  }, [authStatus, user, seedStatus, nicknameStep, accountSubmitting, isGoogleAccount]);
 
   // Leaving this page drops any seed staged for step 3.
   useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
@@ -173,14 +190,15 @@ export default function SignupPage() {
       const created = await signUpWithLoginId(id, accountPassword);
       loginPasswordRef.current = accountPassword;
       setAccountPassword("");
+      // The nickname was given on this form, so there is no nickname step.
+      setNicknameStep("done");
       // The account exists from here on; naming it and the reset email are
       // extras that settings can redo, so a failure here doesn't stop signup.
       try {
         await setNickname(created.uid, name);
-        setHasNickname(true);
       } catch (err) {
         console.error("setNickname failed", err);
-        setHasNickname(false);
+        setPendingNickname(name);
       }
       if (email) {
         try {
@@ -228,12 +246,13 @@ export default function SignupPage() {
     setNicknameSaving(true);
     try {
       await store.setNickname(name);
-      setHasNickname(true);
     } catch (err) {
+      // Not a reason to stop: it is tried again once the diary exists.
       console.error("setNickname failed", err);
-      setAccountError("닉네임을 저장하지 못했어요. 다시 시도해 주세요.");
+      setPendingNickname(name);
     } finally {
       setNicknameSaving(false);
+      setNicknameStep("done");
     }
   }
 
@@ -268,6 +287,14 @@ export default function SignupPage() {
       setOnboarding(true);
       keysCreated = true;
       await store.createKeyRecord(publicKeys, wrapped);
+      if (pendingNickname) {
+        try {
+          await store.setNickname(pendingNickname);
+          setPendingNickname(null);
+        } catch (err) {
+          console.error("setNickname retry failed", err);
+        }
+      }
       loginPasswordRef.current = "";
       await refresh();
 
@@ -423,11 +450,11 @@ export default function SignupPage() {
     );
   }
 
-  if (!onboarding && hasNickname === null) {
+  if (!onboarding && nicknameStep === "unknown") {
     return <LoadingScreen />;
   }
 
-  if (!onboarding && hasNickname === false) {
+  if (!onboarding && nicknameStep === "ask") {
     return (
       <AuthShell title="닉네임을 정해 주세요" step={1} lead="앱에서 부를 이름이에요. 나중에 설정에서 바꿀 수 있어요.">
         <form onSubmit={(event) => void handleSaveNickname(event)} className="space-y-4">
@@ -534,10 +561,17 @@ export default function SignupPage() {
         </>
       }
     >
-      {recoveryEmailFailed && (
+      {(recoveryEmailFailed || pendingNickname) && (
         <p className="note-warn">
           <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
-          <span>재설정용 이메일은 저장하지 못했어요. 가입을 마친 뒤 설정에서 다시 넣어 주세요.</span>
+          <span>
+            {recoveryEmailFailed && pendingNickname
+              ? "닉네임과 재설정용 이메일은 아직 저장하지 못했어요."
+              : pendingNickname
+                ? "닉네임은 아직 저장하지 못했어요."
+                : "재설정용 이메일은 저장하지 못했어요."}{" "}
+            가입은 그대로 이어져요. 가입을 마친 뒤 설정에서 다시 정해 주세요.
+          </span>
         </p>
       )}
       <form onSubmit={handleSetPassphrase} className="space-y-5">
