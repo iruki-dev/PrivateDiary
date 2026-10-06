@@ -29,14 +29,14 @@ export const DOC_GROUPS: DocGroup[] = [
       { href: "/docs/how-it-works", title: "일기가 보호되는 방식", summary: "무엇이 암호화되고 서버는 무엇을 알 수 있는지" },
       { href: "/docs/passphrase", title: "일기 암호와 로그인 비밀번호", summary: "두 비밀의 차이, 바꾸는 법, 잊었을 때" },
       { href: "/docs/backup-codes", title: "백업 코드", summary: "일기 암호를 잊었을 때를 위한 비상 열쇠" },
-      { href: "/docs/otp", title: "OTP 인증", summary: "일기를 열기 전에 인증 앱 코드를 한 번 더 확인" },
+      { href: "/docs/otp", title: "2단계 인증 (OTP)", summary: "일기를 열기 전에 인증 앱 코드를 한 번 더 확인" },
     ],
   },
   {
     title: "사용하기",
     pages: [
-      { href: "/docs/writing", title: "일기 쓰기", summary: "저장, 임시 저장, 프라이빗 작성 모드, 하루 저장 개수" },
-      { href: "/docs/reading", title: "지난 일기", summary: "열기, 자동 잠금, 달력, 검색, 내보내기" },
+      { href: "/docs/writing", title: "일기 쓰기", summary: "저장, 임시 저장, 쓰는 글 가리기, 하루에 쓸 수 있는 일기" },
+      { href: "/docs/reading", title: "일기장", summary: "열기, 자동 잠금, 달력, 검색, 내보내기" },
       { href: "/docs/account", title: "계정 관리", summary: "비밀번호 재설정, 로그아웃, 계정 삭제" },
       { href: "/docs/android", title: "Android 앱", summary: "생체 인증(추가 확인)과 휴대폰에서 일기를 지키는 장치" },
     ],

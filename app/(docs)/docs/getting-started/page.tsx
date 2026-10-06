@@ -44,7 +44,7 @@ export default function GettingStartedPage() {
           없습니다. <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>Enter</kbd>로도 저장됩니다.
         </li>
         <li>
-          <strong>읽기</strong>는 지난 일기 화면에서 일기 암호를 입력해 엽니다. 한동안 사용하지 않으면
+          <strong>읽기</strong>는 일기장 탭에서 일기 암호를 입력해 엽니다. 한동안 사용하지 않으면
           다시 잠깁니다.
         </li>
       </ul>

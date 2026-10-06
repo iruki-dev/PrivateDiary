@@ -58,7 +58,7 @@ export interface UserPreferences {
    * this protection has to apply to everyone by default, since the whole
    * point is bounding what a session-only attacker (who will never
    * voluntarily turn on a limit against themselves) can inject. 0 means no
-   * limit, matching the "사용 안 함" convention autoLockMinutes already uses
+   * limit, matching the "잠그지 않기" (0) convention autoLockMinutes already uses
    * — an explicit choice the account owner has to prove a master
    * credential to make (SECURITY_PREFERENCE_KEYS below).
    */
@@ -112,7 +112,7 @@ export const AUTO_LOCK_CHOICES: { minutes: number; label: string }[] = [
   { minutes: 15, label: "15분" },
   { minutes: 30, label: "30분" },
   { minutes: 60, label: "1시간" },
-  { minutes: 0, label: "사용 안 함" },
+  { minutes: 0, label: "잠그지 않기" },
 ];
 
 export const AUTO_LOCK_MINUTE_VALUES: readonly number[] = AUTO_LOCK_CHOICES.map((c) => c.minutes);

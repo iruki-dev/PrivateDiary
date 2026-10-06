@@ -10,7 +10,7 @@ const err = (code: string) => Object.assign(new Error(code), { code });
 
 describe("auth error messages", () => {
   it("separates the two causes the old signup copy lumped together", () => {
-    expect(signUpErrorMessage(err("auth/email-already-in-use"))).toContain("이미 가입된");
+    expect(signUpErrorMessage(err("auth/email-already-in-use"))).toContain("이미 가입한");
     expect(signUpErrorMessage(err("auth/weak-password"))).toContain("6자");
   });
 
@@ -27,8 +27,8 @@ describe("auth error messages", () => {
   });
 
   it("falls back for unknown errors", () => {
-    expect(signInErrorMessage(new Error("boom"))).toContain("로그인에 실패했습니다");
-    expect(signUpErrorMessage("nope")).toContain("계정을 만들지 못했습니다");
+    expect(signInErrorMessage(new Error("boom"))).toContain("로그인하지 못했어요");
+    expect(signUpErrorMessage("nope")).toContain("계정을 만들지 못했어요");
   });
 
   it("recognises a popup the user closed", () => {
@@ -43,6 +43,6 @@ describe("Android app Google sign-in errors", () => {
   });
 
   it("explains a phone without a Google account", () => {
-    expect(signInErrorMessage({ code: "no-account" })).toContain("Google 계정이 없습니다");
+    expect(signInErrorMessage({ code: "no-account" })).toContain("Google 계정이 없어요");
   });
 });

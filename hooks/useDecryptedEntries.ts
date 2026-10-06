@@ -40,10 +40,10 @@ import { assertNativeIntegrity, EnvironmentTamperedError } from "@/lib/security/
 
 const CHUNK_SIZE = 6;
 
-export const DECRYPT_ERROR_MESSAGE = "이 일기를 열 수 없습니다. 저장된 내용이 손상되었거나 변조되었을 수 있습니다.";
-export const CORRUPT_PAYLOAD_ERROR_MESSAGE = "이 일기는 저장된 데이터가 손상되어 읽을 수 없습니다.";
+export const DECRYPT_ERROR_MESSAGE = "이 일기는 열 수 없어요. 저장된 뒤에 내용이 바뀌었거나 손상됐을 수 있어요.";
+export const CORRUPT_PAYLOAD_ERROR_MESSAGE = "이 일기는 저장된 데이터가 손상돼서 읽을 수 없어요.";
 export const ENVIRONMENT_TAMPERED_ERROR_MESSAGE =
-  "브라우저 환경이 변조된 것으로 감지되어 일기를 열지 않았습니다.";
+  "브라우저의 보안 기능이 바뀐 것 같아서 일기를 열지 않았어요.";
 
 export interface DecryptionProgress {
   plaintexts: Record<string, string>;

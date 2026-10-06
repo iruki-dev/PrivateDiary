@@ -56,7 +56,7 @@ export default function HowItWorksPage() {
           </tr>
           <tr>
             <td>짧은 일기의 길이</td>
-            <td>OTP 인증 사용 여부</td>
+            <td>2단계 인증(OTP) 사용 여부</td>
           </tr>
         </tbody>
       </table>
@@ -77,7 +77,7 @@ export default function HowItWorksPage() {
         <li>
           기기 자체가 악성 프로그램에 감염되었거나, 악성 브라우저 확장 프로그램이 설치되어 있으면 화면에
           보이는 내용과 입력하는 암호를 지킬 수 없습니다. PrivateDiary는 암호화 기능이 변조된 것을
-          감지하면 잠금 해제와 저장을 막지만, 모든 경우를 잡아낼 수는 없습니다.
+          감지하면 일기장 열기와 저장을 막지만, 모든 경우를 잡아낼 수는 없습니다.
         </li>
         <li>잠금이 풀린 화면을 다른 사람이 보는 것은 막을 수 없습니다. 자리를 비울 때는 잠가 주세요.</li>
         <li>

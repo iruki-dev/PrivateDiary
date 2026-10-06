@@ -16,7 +16,7 @@ export default function AndroidPage() {
 
       <h2 id="biometric">생체 인증</h2>
       <p>
-        설정 → 일기 보호에서 <strong>생체 인증</strong>을 켜면 OTP와 같은 방식으로 동작합니다. 일기 암호를 입력하기
+        설정 → 일기장 지키기에서 <strong>생체 인증</strong>을 켜면 OTP와 같은 방식으로 동작합니다. 일기 암호를 입력하기
         <strong>전에</strong> 지문이나 얼굴을 먼저 확인하고, 일기 암호를 대신하지는 않습니다.
       </p>
       <ul>
