@@ -1,41 +1,144 @@
 @import "tailwindcss";
 
+/* Design tokens — "자물쇠 달린 일기장".
+ *
+ * Monochrome on purpose: hierarchy comes from size, weight and elevation,
+ * not hue. Three functional colours only — danger, warn, and the search
+ * highlighter — and each always travels with an icon or words, never alone.
+ *
+ * Elevation is three steps of lightness, not shadows: the page (--bg)
+ * recedes, cards and the writing sheet (--surface) come forward, and
+ * inputs and secondary buttons sit in --fill. Dark mode is not an
+ * inversion: the page is #121212 rather than black (pure black smears
+ * light text and leaves no room to show elevation), and cards get lighter
+ * as they rise.
+ *
+ * Contrast (WCAG 2.2, against --surface): ink 18.9:1 / 15.2:1, ink-2
+ * 8.5:1 / 9.1:1, ink-3 5.1:1 / 5.3:1 (light ink-3 is still 4.6:1 on --bg).
+ * ink-4 is decoration only — placeholders, days without entries — never
+ * text someone needs to read.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  --bg: #f4f4f4;
+  --surface: #ffffff;
+  --fill: #eeeeee;
+  --pill: #e4e4e4;
+  --off: #d6d6d6;
+  --line: #e6e6e6;
+  --ink: #111111;
+  --ink-2: #4d4d4d;
+  --ink-3: #6e6e6e;
+  --ink-4: #a8a8a8;
+  --primary: #111111;
+  --on-primary: #ffffff;
+  --pressed: #333333;
+  --cover: #161616;
+  --on-cover: #f2f2f2;
+  --danger: #c62a1f;
+  --danger-fill: #fdecea;
+  --warn: #9a5b00;
+  --warn-fill: #fff4db;
+  --hl: #ffe58a;
+  --scrim: rgb(0 0 0 / 0.4);
+  --shadow-float: 0 8px 24px rgb(0 0 0 / 0.12), 0 1px 3px rgb(0 0 0 / 0.08);
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* Older names, still used by components written before the tokens. */
+  --background: var(--bg);
+  --foreground: var(--ink);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --bg: #121212;
+    --surface: #1c1c1c;
+    --fill: #262626;
+    --pill: #333333;
+    --off: #3a3a3a;
+    --line: #2e2e2e;
+    --ink: #f2f2f2;
+    --ink-2: #bdbdbd;
+    --ink-3: #8f8f8f;
+    --ink-4: #5e5e5e;
+    --primary: #f2f2f2;
+    --on-primary: #121212;
+    --pressed: #d0d0d0;
+    --cover: #2a2a2a;
+    --on-cover: #f2f2f2;
+    --danger: #ff6b5e;
+    --danger-fill: #3a1512;
+    --warn: #f2b33d;
+    --warn-fill: #33260a;
+    --scrim: rgb(0 0 0 / 0.6);
+    --shadow-float: 0 8px 24px rgb(0 0 0 / 0.5);
   }
+}
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--ink);
+  --color-surface: var(--surface);
+  --color-fill: var(--fill);
+  --color-pill: var(--pill);
+  --color-off: var(--off);
+  --color-line: var(--line);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-ink-4: var(--ink-4);
+  --color-primary: var(--primary);
+  --color-on-primary: var(--on-primary);
+  --color-pressed: var(--pressed);
+  --color-cover: var(--cover);
+  --color-on-cover: var(--on-cover);
+  --color-danger: var(--danger);
+  --color-danger-fill: var(--danger-fill);
+  --color-warn: var(--warn);
+  --color-warn-fill: var(--warn-fill);
+  --color-hl: var(--hl);
+  --color-scrim: var(--scrim);
+  --shadow-float: var(--shadow-float);
+
+  /* Pretendard (app/layout.tsx loads its dynamic subset: only the slices a
+   * page actually uses are downloaded). One family for Hangul and Latin, so
+   * "Google로 계속하기" is set in a single typeface — Geist, the old
+   * webfont, had no Hangul and every Korean glyph fell back to the OS. */
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont,
+    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", system-ui, sans-serif;
+  /* Backup codes and OTP digits only: 0/O and 1/l must look different. */
+  --font-mono: var(--font-plex-mono), ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* Every component was written against Tailwind's zinc scale; pointing that
+ * scale at the token greys keeps call sites that haven't moved to the
+ * semantic names (text-ink-3, bg-fill …) on the same palette. */
+@theme {
+  --color-zinc-50: #fafafa;
+  --color-zinc-100: #f4f4f4;
+  --color-zinc-200: #e6e6e6;
+  --color-zinc-300: #d6d6d6;
+  --color-zinc-400: #a8a8a8;
+  --color-zinc-500: #6e6e6e;
+  --color-zinc-600: #4d4d4d;
+  --color-zinc-700: #3a3a3a;
+  --color-zinc-800: #262626;
+  --color-zinc-900: #1c1c1c;
+  --color-zinc-950: #121212;
 }
 
 html {
   /* Avoids the iOS Safari "rubber-band" flash of the default white canvas
      behind the page during overscroll, especially visible in dark mode. */
-  background: var(--background);
+  background: var(--bg);
+  /* Sticky headers and the tab bar must never cover the focused control
+     (WCAG 2.2 — 2.4.11 Focus Not Obscured). */
+  scroll-padding-top: 4.5rem;
+  scroll-padding-bottom: 6rem;
 }
 
 body {
-  background: var(--background);
-  color: var(--foreground);
-  /* next/font loads and self-hosts Geist in app/layout.tsx, which exposes
-     it as --font-geist-sans on <html>. The Next.js starter template's
-     `font-family: Arial, Helvetica, sans-serif` here silently overrode it,
-     so the app downloaded both Geist weights on every load and then
-     rendered every character in Arial. The explicit fallbacks cover the
-     window before the webfont resolves. */
-  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
-    "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
   /* Korean line breaking: wrap between words (어절), never inside one —
      the browser default splits "일기." into "일" / "기." at a line end.
      overflow-wrap still lets a single unbreakable run (an email address, a
@@ -47,45 +150,60 @@ body {
   overflow-x: hidden;
 }
 
-/* Reusable style primitives (design concept unchanged — these are exactly
- * the utility combinations already used throughout app/, just centralized
- * so every field/button/card looks and behaves consistently, including the
- * mobile/accessibility fixes below that would otherwise need repeating at
- * every call site). */
-@layer components {
-  /* Tailwind v4's @apply only composes real utilities, not other classes
-   * defined here — so instead of "field-mono extends field" via @apply
-   * chaining (which fails to build), each variant restates the shared base
-   * declaration directly. Keep them in sync by hand if the base changes. */
+/* Search matches: a highlighter stroke, the one colour that isn't a
+ * warning. Text on it is always near-black, in both modes. */
+mark {
+  background: var(--hl);
+  color: #111111;
+  border-radius: 3px;
+  padding: 0 1px;
+}
 
-  /* text-base (16px) below `sm` prevents iOS Safari from auto-zooming the
-   * page on focus — a real mobile bug the old flat `text-sm` inputs had. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Reusable style primitives. Tailwind v4's @apply only composes real
+ * utilities, not other classes defined here — so each variant restates the
+ * shared base declaration directly. Keep them in sync by hand. */
+@layer components {
+  /* Large titles, as on iOS (34pt) — one per tab's first screen. */
+  .title-display {
+    @apply text-[2.125rem] leading-[2.75rem] font-extrabold tracking-[-0.03em];
+  }
+  .title-1 {
+    @apply text-[1.75rem] leading-[2.375rem] font-extrabold tracking-[-0.025em];
+  }
+  .title-2 {
+    @apply text-[1.375rem] leading-[1.875rem] font-bold tracking-[-0.02em];
+  }
+
+  /* 17px keeps iOS Safari from zooming the page on focus. Labels sit
+   * outside the field (a placeholder disappears the moment you type). */
   .field,
   .field-mono,
   .field-code {
-    @apply w-full rounded border border-zinc-300 bg-transparent px-3 py-2.5 text-base
-      text-foreground transition-colors placeholder:text-zinc-400
-      dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500
-      focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/30
-      dark:focus:border-zinc-400 dark:focus:ring-zinc-400/30
-      sm:text-sm;
+    @apply block min-h-[3.25rem] w-full rounded-xl border-0 bg-fill px-4 py-3 text-[1.0625rem] text-ink
+      transition-[background-color,box-shadow] duration-200 placeholder:text-ink-4
+      focus:bg-surface focus:outline-none focus:ring-2 focus:ring-ink
+      aria-[invalid=true]:ring-2 aria-[invalid=true]:ring-danger;
   }
   .field-mono {
-    @apply font-mono text-base sm:text-xs;
+    @apply font-mono tracking-[0.04em];
   }
   .field-code {
-    @apply text-center font-mono text-lg tracking-widest;
+    @apply text-center font-mono text-2xl tracking-[0.4em];
   }
-  /* The diary writing surface (/write): reading-size type at every width
-   * (the plain .field drops to 14px on wide screens) and a looser line
-   * height for Korean prose. Height grows with the text in JS; this is the
-   * floor while it's empty. */
+  /* The writing surface (/write): no box, just paper. Height grows with
+   * the text in JS; this is the floor while it's empty. */
   .field-editor {
-    @apply block min-h-[45vh] w-full resize-none overflow-hidden rounded border border-zinc-300 bg-transparent
-      px-4 py-3.5 text-base leading-8 text-foreground transition-colors placeholder:text-zinc-400
-      dark:border-zinc-700 dark:bg-zinc-900 dark:placeholder:text-zinc-500
-      focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500/30
-      dark:focus:border-zinc-400 dark:focus:ring-zinc-400/30;
+    @apply block min-h-[45vh] w-full resize-none overflow-hidden border-0 bg-transparent p-0
+      text-[1.0625rem] leading-7 text-ink placeholder:text-ink-4 focus:outline-none;
   }
 
   .btn,
@@ -93,64 +211,69 @@ body {
   .btn-secondary,
   .btn-danger,
   .btn-danger-outline {
-    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded px-4 py-2.5
-      text-sm font-medium transition-colors
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2
-      focus-visible:ring-zinc-500/50 dark:focus-visible:ring-offset-zinc-950
-      disabled:pointer-events-none disabled:opacity-50;
+    @apply inline-flex min-h-12 select-none items-center justify-center gap-2 rounded-[0.875rem] px-5
+      text-base font-semibold transition-[background-color,transform] duration-150
+      active:scale-[0.98] focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-[3px]
+      focus-visible:outline-ink disabled:pointer-events-none disabled:bg-fill disabled:text-ink-3;
   }
   .btn-primary {
-    @apply bg-foreground text-background hover:opacity-90;
+    @apply bg-primary text-on-primary hover:bg-pressed;
   }
   .btn-secondary {
-    @apply border border-zinc-300 hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-900;
+    @apply bg-fill text-ink hover:bg-pill;
   }
   .btn-danger {
-    @apply bg-red-700 text-white hover:bg-red-800;
+    @apply bg-danger text-white hover:opacity-90;
   }
   .btn-danger-outline {
-    @apply border border-red-600 text-red-700 hover:bg-red-50
-      dark:text-red-500 dark:hover:bg-red-950/30;
+    @apply bg-danger-fill text-danger hover:opacity-90;
   }
+  /* Header actions and chips: a pill, 36px tall with a 44px touch area. */
   .btn-sm {
-    @apply min-h-9 px-3 py-1.5 text-xs;
+    @apply min-h-9 rounded-full px-3.5 text-sm;
+  }
+  .btn-text {
+    @apply inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-2 text-[0.9375rem]
+      font-semibold text-ink-2 transition-colors hover:text-ink focus:outline-none
+      focus-visible:outline-2 focus-visible:outline-ink;
   }
 
   .link {
-    @apply rounded-sm underline underline-offset-2 transition-opacity hover:opacity-70
-      focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50;
+    @apply rounded-sm font-medium underline decoration-1 underline-offset-4 transition-opacity hover:opacity-70
+      focus:outline-none focus-visible:outline-2 focus-visible:outline-ink;
   }
 
+  /* Cards are lighter than the page instead of outlined. */
   .card {
-    @apply rounded border border-zinc-300 p-4 dark:border-zinc-700;
+    @apply rounded-2xl bg-surface p-5;
   }
   .card-danger {
-    @apply rounded border border-red-300 p-4 dark:border-red-900;
+    @apply rounded-2xl bg-danger-fill p-5 text-danger;
+  }
+  .note-warn {
+    @apply flex gap-2.5 rounded-2xl bg-warn-fill px-4 py-3.5 text-sm leading-relaxed text-warn;
   }
 
   .muted {
-    @apply text-sm text-zinc-600 dark:text-zinc-400;
+    @apply text-[0.9375rem] leading-relaxed text-ink-2;
   }
   .error-text {
-    @apply text-sm text-red-600 dark:text-red-400;
+    @apply text-sm text-danger;
   }
-  /* Secondary small text (timestamps, counters, hints). text-zinc-400 on
-   * white is 2.6:1 — below WCAG AA — so readable small text uses this. */
   .faint {
-    @apply text-zinc-500 dark:text-zinc-400;
+    @apply text-ink-3;
   }
-  /* Visible label above a .field: a placeholder-only field loses its name
-   * as soon as someone starts typing. */
   .field-label {
-    @apply mb-1.5 block text-sm font-medium;
+    @apply mb-2 block text-sm font-semibold;
   }
+  /* Success is said with a check and words, not green. */
   .success-text {
-    @apply text-sm text-green-600 dark:text-green-500;
+    @apply text-sm text-ink-2;
   }
 
   /* Shared shell for every full-page loading/gate state. */
   .page-center {
-    @apply flex flex-1 items-center justify-center px-4 py-16 sm:px-6 sm:py-24;
+    @apply flex flex-1 items-center justify-center px-5 py-16 sm:px-6 sm:py-24;
   }
 }
 
@@ -159,16 +282,16 @@ body {
  * looser line height (1.8) than Latin-tuned defaults. */
 @layer components {
   .doc {
-    @apply text-[0.9375rem] leading-[1.8];
+    @apply text-base leading-[1.8];
   }
   .doc h1 {
-    @apply mb-3 text-2xl font-semibold leading-snug tracking-tight;
+    @apply mb-3 text-[1.75rem] leading-snug font-extrabold tracking-[-0.025em];
   }
   .doc .doc-lead {
-    @apply mb-10 text-base text-zinc-600 dark:text-zinc-400;
+    @apply mb-10 text-[1.0625rem] text-ink-2;
   }
   .doc h2 {
-    @apply mb-3 mt-12 scroll-mt-20 text-lg font-semibold leading-snug;
+    @apply mb-3 mt-12 scroll-mt-20 text-xl leading-snug font-bold tracking-[-0.01em];
   }
   .doc h3 {
     @apply mb-2 mt-8 scroll-mt-20 font-semibold;
@@ -183,31 +306,31 @@ body {
     @apply my-3 list-decimal space-y-1.5 pl-5;
   }
   .doc li::marker {
-    @apply text-zinc-400 dark:text-zinc-600;
+    @apply text-ink-4;
   }
   .doc a {
-    @apply underline underline-offset-2 hover:opacity-70;
+    @apply underline underline-offset-4 hover:opacity-70;
   }
   .doc strong {
     @apply font-semibold;
   }
   .doc code {
-    @apply rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.85em] dark:bg-zinc-900;
+    @apply rounded-md bg-fill px-1.5 py-0.5 font-mono text-[0.85em];
   }
   .doc table {
     @apply my-4 w-full border-collapse text-sm;
   }
   .doc th {
-    @apply border-b border-zinc-300 py-2 pr-4 text-left font-medium dark:border-zinc-700;
+    @apply border-b border-ink py-2 pr-4 text-left font-semibold;
   }
   .doc td {
-    @apply border-b border-zinc-200 py-2 pr-4 align-top dark:border-zinc-800;
+    @apply border-b border-line py-2 pr-4 align-top;
   }
   .doc .doc-note {
-    @apply my-5 rounded border border-zinc-300 px-4 py-3 dark:border-zinc-700;
+    @apply my-5 rounded-2xl bg-fill px-4 py-3;
   }
   .doc .doc-meta {
-    @apply mt-12 text-xs text-zinc-500 dark:text-zinc-400;
+    @apply mt-12 text-sm text-ink-3;
   }
 }
 

@@ -1,4 +1,4 @@
-/** Minimal monochrome spinner — matches the app's plain-text/border design language, no icon set involved. */
+/** Minimal monochrome spinner in the current text colour. */
 export function Spinner({ className = "" }: { className?: string }) {
   return (
     <span

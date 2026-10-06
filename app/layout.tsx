@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { IBM_Plex_Mono } from "next/font/google";
 import { Providers } from "@/contexts/Providers";
 import { NavBar } from "@/components/NavBar";
 import { TabBar } from "@/components/TabBar";
@@ -7,15 +7,18 @@ import { SecurityWarningBanner } from "@/components/SecurityWarningBanner";
 import { SITE } from "@/lib/site";
 import { IS_ANDROID_APP } from "@/lib/platform";
 import { connection } from "next/server";
+// Pretendard, dynamic subset: ~90 unicode-range slices, so a page downloads
+// only the Hangul/Latin it actually shows. Bundled and served from this
+// origin like any other asset (font-src 'self' in proxy.ts and the Android
+// CSP), never fetched from a CDN.
+import "pretendard/dist/web/variable/pretendardvariable-dynamic-subset.css";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+// Only for backup codes and OTP digits (app/globals.css --font-mono), where
+// 0/O and 1/l have to be told apart at a glance.
+const plexMono = IBM_Plex_Mono({
+  variable: "--font-plex-mono",
+  weight: ["400", "500"],
   subsets: ["latin"],
 });
 
@@ -46,8 +49,8 @@ export const viewport: Viewport = {
   // mobile browser chrome (status bar / address bar) never mismatches the
   // page itself when switching themes.
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
-    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+    { media: "(prefers-color-scheme: light)", color: "#f4f4f4" },
+    { media: "(prefers-color-scheme: dark)", color: "#121212" },
   ],
   // Next.js sets width=device-width/initial-scale=1 by default; this only
   // adds viewport-fit=cover so safe-area-inset-* below actually has
@@ -83,7 +86,7 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ko"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${plexMono.variable} h-full antialiased`}
       data-platform={IS_ANDROID_APP ? "android" : undefined}
     >
       <body
