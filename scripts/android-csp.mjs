@@ -81,3 +81,16 @@ export function buildAppCsp(scriptHashes) {
     "upgrade-insecure-requests",
   ].join("; ");
 }
+
+/**
+ * Links to the help, privacy or terms pages as paths inside the app. Those
+ * pages aren't bundled (scripts/build-android-web.mjs); the app must link
+ * to them on the website instead (lib/site.ts docHref).
+ */
+export function internalDocLinks(text) {
+  const found = new Set();
+  for (const [, path] of text.matchAll(/href(?:=|\\?"\s*:\s*\\?)["']?(\/(?:docs|privacy|terms)(?:[/#?][^"'\\\s]*)?)["'\\]/g)) {
+    found.add(path);
+  }
+  return [...found];
+}

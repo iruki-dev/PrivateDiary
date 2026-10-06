@@ -57,6 +57,7 @@ import {
   textToRecoverySecret,
   type DecryptionMethodsConfig,
 } from "@/lib/crypto";
+import { docHref } from "@/lib/site";
 
 type ShamirConfig = { n: number; k: number } | null;
 
@@ -329,7 +330,7 @@ function DraftAutosaveRow() {
       description={
         <>
           쓰던 글을 이 기기에 남겨 둡니다. 암호화되지 않은 채 저장됩니다.{" "}
-          <MoreLink href="/docs/writing#draft" />
+          <MoreLink href={docHref("/docs/writing#draft")} />
         </>
       }
       control={<Switch label="임시 저장" checked={draftAutosave} onChange={(next) => void handleChange(next)} />}
@@ -428,7 +429,7 @@ function DailyEntryLimitRow({
         <>
           {currentLabel}
           {message && <span className="text-foreground"> · {message}</span>}{" "}
-          <MoreLink href="/docs/writing#daily-limit" />
+          <MoreLink href={docHref("/docs/writing#daily-limit")} />
         </>
       }
       control={
@@ -867,7 +868,7 @@ function OtpRow({
         <>
           {otpEnabled ? "사용 중" : "사용 안 함"} · 일기를 열 때 인증 앱 코드도 확인합니다
           {message && <span className="text-foreground"> · {message}</span>}{" "}
-          <MoreLink href="/docs/otp" />
+          <MoreLink href={docHref("/docs/otp")} />
         </>
       }
       control={
@@ -1082,14 +1083,14 @@ function ShamirRow({
           <>
             {config.n}개 중 {config.k}개로 사용 중
             {message && <span className="text-foreground"> · {message}</span>}{" "}
-            <MoreLink href="/docs/backup-codes" />
+            <MoreLink href={docHref("/docs/backup-codes")} />
           </>
         ) : (
           <>
             <span className="font-medium text-red-700 dark:text-red-400">만들지 않음</span> · 일기 암호를 잊으면
             복구할 수 없습니다
             {message && <span className="text-foreground"> · {message}</span>}{" "}
-            <MoreLink href="/docs/backup-codes" />
+            <MoreLink href={docHref("/docs/backup-codes")} />
           </>
         )
       }

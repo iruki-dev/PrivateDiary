@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
+import { docHref } from "@/lib/site";
 
 /** The three places a signed-in person moves between every day. */
 export const APP_LINKS = [
@@ -73,7 +74,7 @@ export function NavBar() {
         {!hasAccount && authStatus !== "signed-in" && (
           <nav className="flex items-center gap-1" aria-label="주 메뉴">
             <Link
-              href="/docs"
+              href={docHref("/docs")}
               aria-current={isCurrent(pathname, "/docs") ? "page" : undefined}
               className="rounded px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400"
             >

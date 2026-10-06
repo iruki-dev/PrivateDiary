@@ -27,6 +27,7 @@ import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
 import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
+import { docHref } from "@/lib/site";
 
 /** Backup codes issued during signup: any 2 of 3. Fewer pieces to place than /settings' 5-of-3 default, still no single point of failure. */
 const ONBOARDING_SHARES = { n: 3, k: 2 };
@@ -300,8 +301,8 @@ export default function SignupPage() {
           </>
         )}
         <p className="faint text-xs">
-          가입하면 <Link href="/terms" className="link">이용약관</Link>과{" "}
-          <Link href="/privacy" className="link">개인정보처리방침</Link>에 동의하는 것으로 봅니다.
+          가입하면 <Link href={docHref("/terms")} className="link">이용약관</Link>과{" "}
+          <Link href={docHref("/privacy")} className="link">개인정보처리방침</Link>에 동의하는 것으로 봅니다.
         </p>
         <p className="text-center text-sm">
           <Link href="/login" className="link">
@@ -352,7 +353,7 @@ export default function SignupPage() {
         lead={
           <>
             일기 암호를 잊으면 백업 코드로만 새 암호를 정할 수 있습니다. 지금 만들어 두는 것을 권장합니다.{" "}
-            <Link href="/docs/backup-codes" className="link whitespace-nowrap">
+            <Link href={docHref("/docs/backup-codes")} className="link whitespace-nowrap">
               자세히
             </Link>
           </>
@@ -387,7 +388,7 @@ export default function SignupPage() {
       lead={
         <>
           일기를 여는 열쇠입니다. 서버로 전송되지 않으므로 잊으면 찾아 드릴 수 없습니다.{" "}
-          <Link href="/docs/passphrase" className="link whitespace-nowrap">
+          <Link href={docHref("/docs/passphrase")} className="link whitespace-nowrap">
             자세히
           </Link>
         </>

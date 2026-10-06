@@ -13,7 +13,8 @@
 #              ANDROID_KEY_ALIAS, ANDROID_KEY_PASSWORD,
 #              FIREBASE_APP_DISTRIBUTION_CREDENTIALS (service-account JSON)
 #     vars     FIREBASE_ANDROID_APP_ID, NEXT_PUBLIC_FIREBASE_* (the same six
-#              as the website), GOOGLE_WEB_CLIENT_ID (optional),
+#              as the website), NEXT_PUBLIC_SITE_URL (the website's https
+#              address — help links open there), GOOGLE_WEB_CLIENT_ID (optional),
 #              ANDROID_VERSION_CODE_BASE (optional, default 0)
 #   Requiring a reviewer on that environment means nothing ships to
 #   testers without a second person's approval.
@@ -69,12 +70,15 @@ jobs:
         env:
           APP_ID: ${{ vars.FIREBASE_ANDROID_APP_ID }}
           API_KEY: ${{ vars.NEXT_PUBLIC_FIREBASE_API_KEY }}
+          SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL }}
           HAS_KEYSTORE: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
           HAS_CREDENTIALS: ${{ secrets.FIREBASE_APP_DISTRIBUTION_CREDENTIALS != '' }}
         run: |
           missing=""
           [ -n "$APP_ID" ] || missing="$missing FIREBASE_ANDROID_APP_ID"
           [ -n "$API_KEY" ] || missing="$missing NEXT_PUBLIC_FIREBASE_API_KEY"
+          # The app opens help, privacy and terms on the website.
+          [ -n "$SITE_URL" ] || missing="$missing NEXT_PUBLIC_SITE_URL"
           [ "$HAS_KEYSTORE" = "true" ] || missing="$missing ANDROID_KEYSTORE_BASE64"
           [ "$HAS_CREDENTIALS" = "true" ] || missing="$missing FIREBASE_APP_DISTRIBUTION_CREDENTIALS"
           if [ -n "$missing" ]; then

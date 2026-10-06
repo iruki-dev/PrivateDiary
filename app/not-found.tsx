@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { docHref } from "@/lib/site";
 
 export default function NotFound() {
   return (
@@ -13,7 +14,7 @@ export default function NotFound() {
           <Link href="/" className="btn-primary flex-1">
             오늘의 일기로
           </Link>
-          <Link href="/docs" className="btn-secondary">
+          <Link href={docHref("/docs")} className="btn-secondary">
             도움말
           </Link>
         </div>

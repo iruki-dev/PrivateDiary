@@ -1,4 +1,6 @@
+import com.android.build.api.artifact.SingleArtifact
 import java.util.Properties
+import java.util.zip.ZipFile
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
@@ -99,6 +101,15 @@ android {
 
     sourceSets["main"].assets.srcDir(webAssetsDir)
 
+    androidResources {
+        // aapt's default pattern silently drops every asset directory whose
+        // name starts with "_" ("<dir>_*") — which is Next.js' `_next/`, i.e.
+        // all of the app's JavaScript and CSS. Without this the APK shipped
+        // bare HTML. Same list as the default, minus "<dir>_*" (".*" stays:
+        // no dotfiles belong in the bundle).
+        ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+    }
+
     buildFeatures {
         buildConfig = true
     }
@@ -151,6 +162,48 @@ val checkWebAssets by tasks.registering {
     }
 }
 tasks.named("preBuild") { dependsOn(checkWebAssets) }
+
+/**
+ * After packaging, every file of the web bundle must actually be inside the
+ * APK. Packaging rules can drop assets silently (aapt's default ignore list
+ * once dropped all of `_next/`, shipping pages with no JS or CSS), and
+ * nothing else would notice until the app was opened on a phone.
+ */
+androidComponents {
+    onVariants { variant ->
+        val variantName = variant.name.replaceFirstChar { it.uppercase() }
+        val apkDir = variant.artifacts.get(SingleArtifact.APK)
+        val loader = variant.artifacts.getBuiltArtifactsLoader()
+        val bundle = webAssetsDir.map { it.dir("web") }
+        val verify = tasks.register("verify${variantName}WebAssets") {
+            description = "Checks that the ${variant.name} APK contains the whole web bundle."
+            inputs.files(apkDir)
+            inputs.dir(bundle)
+            doLast {
+                val root = bundle.get().asFile
+                val expected = root.walkTopDown().filter { it.isFile }
+                    .map { "assets/web/" + it.relativeTo(root).invariantSeparatorsPath }
+                    .toSortedSet()
+                val apks = loader.load(apkDir.get())?.elements.orEmpty()
+                check(apks.isNotEmpty()) { "No APK produced for ${variant.name}" }
+                apks.forEach { apk ->
+                    val packaged = ZipFile(apk.outputFile).use { zip ->
+                        zip.entries().asSequence().map { it.name }.toSet()
+                    }
+                    val missing = expected - packaged
+                    check(missing.isEmpty()) {
+                        "${missing.size} web files are missing from ${apk.outputFile}, e.g. " +
+                            missing.take(5).joinToString()
+                    }
+                }
+                logger.lifecycle("${expected.size} web files verified in the ${variant.name} APK")
+            }
+        }
+        afterEvaluate {
+            tasks.named("assemble$variantName") { finalizedBy(verify) }
+        }
+    }
+}
 
 dependencies {
     // WebViewAssetLoader (serves the bundled pages from a secure https

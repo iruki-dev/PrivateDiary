@@ -13,9 +13,12 @@
  *  3. Fails the build on anything that CSP would have to be loosened for
  *     (inline event-handler attributes, scripts from another origin), so a
  *     future change can't quietly weaken the app's policy.
- *  4. Drops files that only make sense on a website (robots.txt, the PWA
- *     manifest and its icons) and copies the result to where the Android
- *     Gradle build picks it up.
+ *  4. Drops what the app doesn't carry: files that only make sense on a
+ *     website (robots.txt, the PWA manifest and its icons), and the help,
+ *     privacy and terms pages — the app links to those on the website
+ *     (lib/site.ts docHref), so they stay current without a new app.
+ *     Fails if any page still links to them internally.
+ *  5. Copies the result to where the Android Gradle build picks it up.
  *
  * Usage: node scripts/build-android-web.mjs   (or: pnpm build:android-web)
  */
@@ -24,11 +27,23 @@ import { execFileSync } from "node:child_process";
 import { cpSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, mkdirSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { buildAppCsp, findCspBlockers, inlineScriptHashes } from "./android-csp.mjs";
+import { buildAppCsp, findCspBlockers, inlineScriptHashes, internalDocLinks } from "./android-csp.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const outDir = join(root, "out");
 const targetDir = join(root, "android", "app", "build", "generated", "webAssets", "web");
+
+// Help, privacy and terms open on the website from the app (docHref).
+const DOC_ROUTES = ["docs", "privacy", "terms"];
+
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+if (!/^https:\/\/[^/]+/.test(siteUrl)) {
+  console.error(
+    "NEXT_PUBLIC_SITE_URL must be the website's https address (e.g. https://privatediary.example) — " +
+      "the app opens help, privacy and terms there. Set it in .env.local or the environment."
+  );
+  process.exit(1);
+}
 
 const WEB_ONLY_FILES = [
   "robots.txt",
@@ -54,6 +69,11 @@ execFileSync("npx", ["next", "build"], {
 });
 
 for (const name of WEB_ONLY_FILES) rmSync(join(outDir, name), { force: true });
+for (const route of DOC_ROUTES) {
+  rmSync(join(outDir, route), { recursive: true, force: true });
+  rmSync(join(outDir, `${route}.html`), { force: true });
+  rmSync(join(outDir, `${route}.txt`), { force: true });
+}
 
 const problems = [];
 let pages = 0;
@@ -61,6 +81,7 @@ for (const file of walk(outDir).filter((f) => f.endsWith(".html"))) {
   const html = readFileSync(file, "utf8");
   const where = relative(outDir, file);
   for (const blocker of findCspBlockers(html)) problems.push(`${where}: ${blocker}`);
+  for (const link of internalDocLinks(html)) problems.push(`${where}: links to ${link} inside the app (use docHref)`);
   const csp = buildAppCsp(inlineScriptHashes(html));
   if (!html.includes("<head>")) {
     problems.push(`${where}: no <head> to put the Content-Security-Policy in`);
@@ -73,8 +94,14 @@ for (const file of walk(outDir).filter((f) => f.endsWith(".html"))) {
   );
   pages += 1;
 }
+// Client-side navigation payloads carry the same links.
+for (const file of walk(outDir).filter((f) => f.endsWith(".txt"))) {
+  for (const link of internalDocLinks(readFileSync(file, "utf8"))) {
+    problems.push(`${relative(outDir, file)}: links to ${link} inside the app (use docHref)`);
+  }
+}
 if (problems.length > 0) {
-  console.error("\nThe Android bundle would need a weaker CSP:\n  " + problems.join("\n  "));
+  console.error("\nThe Android bundle has problems:\n  " + problems.join("\n  "));
   process.exit(1);
 }
 

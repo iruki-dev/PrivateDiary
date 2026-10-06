@@ -3,7 +3,7 @@ import Link from "next/link";
 import { SignedInRedirect } from "@/components/SignedInRedirect";
 import { SiteFooter } from "@/components/SiteFooter";
 import { VisitorComposer } from "@/components/VisitorComposer";
-import { SITE } from "@/lib/site";
+import { SITE, docHref } from "@/lib/site";
 import { IS_ANDROID_APP } from "@/lib/platform";
 
 export const metadata: Metadata = {
@@ -30,7 +30,7 @@ export default function FrontPage() {
             <h1 className="text-xl font-semibold">{SITE.tagline}</h1>
             <p className="muted">
               일기는 이 기기에서 암호화된 뒤 저장되어, 운영자도 읽을 수 없습니다.{" "}
-              <Link href="/docs/how-it-works" className="link whitespace-nowrap">
+              <Link href={docHref("/docs/how-it-works")} className="link whitespace-nowrap">
                 자세히
               </Link>
             </p>
