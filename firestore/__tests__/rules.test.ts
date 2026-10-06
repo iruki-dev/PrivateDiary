@@ -7,7 +7,6 @@ import {
   doc,
   getDoc,
   getDocs,
-  serverTimestamp,
   setDoc,
   updateDoc,
   type Firestore,
@@ -1490,35 +1489,6 @@ describe("security-patch-v2 / H2: isB64 / isB64Url actually check the alphabet",
         createdAt: new Date(),
       })
     );
-  });
-});
-
-describe("profiles/{uid}", () => {
-  it("lets the owner set and change a nickname, and read it back", async () => {
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
-    await assertSucceeds(setDoc(doc(alice, "profiles/alice"), { nickname: "앨리스", updatedAt: serverTimestamp() }));
-    await assertSucceeds(setDoc(doc(alice, "profiles/alice"), { nickname: "앨리", updatedAt: serverTimestamp() }));
-    await assertSucceeds(getDoc(doc(alice, "profiles/alice")));
-  });
-
-  it("denies everyone else, for reading and writing", async () => {
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
-    const bob = testEnv.authenticatedContext("bob").firestore() as unknown as Firestore;
-    await assertSucceeds(setDoc(doc(alice, "profiles/alice"), { nickname: "앨리스", updatedAt: serverTimestamp() }));
-    await assertFails(getDoc(doc(bob, "profiles/alice")));
-    await assertFails(setDoc(doc(bob, "profiles/alice"), { nickname: "bob", updatedAt: serverTimestamp() }));
-  });
-
-  it("rejects an empty or overlong nickname, extra fields, a client-chosen time and deletion", async () => {
-    const alice = testEnv.authenticatedContext("alice").firestore() as unknown as Firestore;
-    await assertFails(setDoc(doc(alice, "profiles/alice"), { nickname: "", updatedAt: serverTimestamp() }));
-    await assertFails(setDoc(doc(alice, "profiles/alice"), { nickname: "가".repeat(21), updatedAt: serverTimestamp() }));
-    await assertFails(
-      setDoc(doc(alice, "profiles/alice"), { nickname: "앨리스", updatedAt: serverTimestamp(), email: "a@b.co" })
-    );
-    await assertFails(setDoc(doc(alice, "profiles/alice"), { nickname: "앨리스", updatedAt: new Date(0) }));
-    await assertSucceeds(setDoc(doc(alice, "profiles/alice"), { nickname: "앨리스", updatedAt: serverTimestamp() }));
-    await assertFails(deleteDoc(doc(alice, "profiles/alice")));
   });
 });
 

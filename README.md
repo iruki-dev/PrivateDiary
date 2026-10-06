@@ -59,7 +59,7 @@ lib/
   firebase/          # Firebase Auth(아이디/비밀번호 + Google) / Firestore 클라이언트 연동.
                       # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
     config.ts, auth.ts, users.ts, entries.ts
-    profile.ts         # 닉네임(profiles/{uid}) · 비밀번호 재설정용 이메일(setRecoveryEmail) · 재설정 메일 요청
+    profile.ts         # 닉네임(Auth 표시 이름) · 비밀번호 재설정용 이메일(setRecoveryEmail) · 재설정 메일 요청
     otp.ts             # functions/의 OTP callable 래퍼(계정 삭제 포함). 여기도 크립토 없음 — 접근 게이트일 뿐.
 
   entries/           # 복호화가 끝난 뒤의 읽기 UX 로직. 크립토·Firebase·React를 일절
@@ -256,8 +256,9 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
   이메일 중복을 막으므로 아이디도 자동으로 유일하다. 영문 소문자·숫자·밑줄 4–20자, 대소문자 무시.
 - **이전에 이메일로 가입한 계정은 그대로 동작한다.** 로그인 칸에 `@`가 있으면 이메일로 보고 그대로 로그인하고,
   비밀번호 재설정도 예전처럼 그 이메일로 간다.
-- **닉네임**은 `profiles/{uid}.nickname`. 표시 설정과 같은 급이라 재인증 없이 본인만 쓰고, 규칙이 1–20자와
-  `updatedAt == request.time`으로 모양을 묶는다.
+- **닉네임**은 Firebase Auth 계정의 표시 이름(`displayName`)에 둔다. 계정 자신의 토큰으로 Auth에 쓰므로 Firestore 규칙이
+  필요 없고, 계정을 만든 직후에도 바로 저장된다. (처음 버전은 `profiles/{uid}` 문서에 썼는데, 계정 생성 직후의 Firestore 쓰기는
+  아직 로그인 전 신원으로 나가 거부될 수 있어 가입이 막혔다.) Google 계정은 Google 이름으로 시작해 가입 중에 닉네임을 정한다.
 - **비밀번호 재설정용 이메일**(선택, 가입 화면과 설정에서 권장)은 `accountRecovery/{uid}.email`. 클라이언트는 읽기만
   하고 쓰기는 `setRecoveryEmail` 함수만 한다 — **이 주소가 로그인 비밀번호를 재설정할 수 있는 사람을 정하므로**,
   세션만 탈취한 공격자가 자기 주소로 바꿔 로그인을 가로채지 못하게 `credentialMutationAllowed()`와 같은 증명

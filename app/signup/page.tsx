@@ -13,10 +13,10 @@ import {
   signInWithGoogle,
   signUpWithLoginId,
 } from "@/lib/firebase/auth";
-import { authErrorCode, isUserCancelledPopup, signUpErrorMessage } from "@/lib/firebase/authErrors";
+import { authErrorCode, isUserCancelledPopup, signUpErrorMessage, withErrorCode } from "@/lib/firebase/authErrors";
 import { ReauthRequiredError } from "@/lib/firebase/reauth";
 import { ReauthPanel } from "@/components/settings/forms";
-import { getNickname, setNickname, setRecoveryEmail } from "@/lib/firebase/profile";
+import { setNickname, setRecoveryEmail } from "@/lib/firebase/profile";
 import {
   isPlausibleEmail,
   loginIdFromEmail,
@@ -102,8 +102,10 @@ export default function SignupPage() {
   // A nickname that couldn't be saved yet. Never holds signup up: it is
   // tried again once the diary exists, and settings can always set it.
   const [pendingNickname, setPendingNickname] = useState<string | null>(null);
+  const [nicknameErrorCode, setNicknameErrorCode] = useState("");
   // Set when the reset email couldn't be saved during signup; settings can add it later.
   const [recoveryEmailFailed, setRecoveryEmailFailed] = useState(false);
+  const [recoveryEmailErrorCode, setRecoveryEmailErrorCode] = useState("");
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSubmitting, setAccountSubmitting] = useState(false);
   const loginPasswordRef = useRef<string>("");
@@ -143,35 +145,16 @@ export default function SignupPage() {
   const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
 
   // Signed in without keys yet. Only a Google account is asked for a
-  // nickname here, and only if it hasn't got one; an id account named
-  // itself on the first form. Whatever happens, this never stops signup.
+  // nickname here (starting from the name Google gave it); an id account
+  // named itself on the first form. Whatever happens, this never stops signup.
   useEffect(() => {
     if (authStatus !== "signed-in" || !user || seedStatus !== "not-issued" || nicknameStep !== "unknown" || accountSubmitting) {
       return;
     }
-    if (!isGoogleAccount) {
-      // Reading the account's sign-in method is the external state here.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setNicknameStep("done");
-      return;
-    }
-    let cancelled = false;
-    const ask = () => {
-      setNicknameInput((current) => current || normalizeNickname(user.displayName ?? "").slice(0, NICKNAME_MAX_LENGTH));
-      setNicknameStep("ask");
-    };
-    getNickname(user.uid)
-      .then((existing) => {
-        if (cancelled) return;
-        if (existing) setNicknameStep("done");
-        else ask();
-      })
-      .catch(() => {
-        if (!cancelled) ask();
-      });
-    return () => {
-      cancelled = true;
-    };
+    // Reading the signed-in account is the external state here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNicknameInput((current) => current || normalizeNickname(user.displayName ?? "").slice(0, NICKNAME_MAX_LENGTH));
+    setNicknameStep(isGoogleAccount ? "ask" : "done");
   }, [authStatus, user, seedStatus, nicknameStep, accountSubmitting, isGoogleAccount]);
 
   // Leaving this page drops any seed staged for step 3.
@@ -212,6 +195,7 @@ export default function SignupPage() {
       } catch (err) {
         console.error("setNickname failed", err);
         setPendingNickname(name);
+        setNicknameErrorCode(authErrorCode(err));
       }
       if (email) {
         try {
@@ -219,6 +203,7 @@ export default function SignupPage() {
         } catch (err) {
           console.error("setRecoveryEmail failed", err);
           setRecoveryEmailFailed(true);
+          setRecoveryEmailErrorCode(authErrorCode(err));
         }
       }
     } catch (err) {
@@ -263,6 +248,7 @@ export default function SignupPage() {
       // Not a reason to stop: it is tried again once the diary exists.
       console.error("setNickname failed", err);
       setPendingNickname(name);
+      setNicknameErrorCode(authErrorCode(err));
     } finally {
       setNicknameSaving(false);
       setNicknameStep("done");
@@ -333,7 +319,7 @@ export default function SignupPage() {
       console.error("handleSetPassphrase failed", err);
       if (!keysCreated) {
         setOnboarding(false);
-        setPassphraseError("일기장을 만들지 못했어요. 다시 시도해 주세요.");
+        setPassphraseError(withErrorCode("일기장을 만들지 못했어요. 다시 시도해 주세요.", err));
         loginPasswordRef.current = "";
         setPassphrase("");
         setPassphraseConfirm("");
@@ -376,7 +362,7 @@ export default function SignupPage() {
       }
       console.error("confirmPendingShamir failed", err);
       setBackupError(
-        "백업 코드를 저장하지 못했어요. 방금 보인 코드는 쓸 수 없으니 설정에서 다시 만들어 주세요."
+        withErrorCode("백업 코드를 저장하지 못했어요. 방금 보인 코드는 쓸 수 없으니 설정에서 다시 만들어 주세요.", err)
       );
     } finally {
       setBackupBusy(false);
@@ -632,6 +618,8 @@ export default function SignupPage() {
                 ? "닉네임은 아직 저장하지 못했어요."
                 : "재설정용 이메일은 저장하지 못했어요."}{" "}
             가입은 그대로 이어져요. 가입을 마친 뒤 설정에서 다시 정해 주세요.
+            {[nicknameErrorCode, recoveryEmailErrorCode].filter(Boolean).length > 0 &&
+              ` (오류 코드: ${[...new Set([nicknameErrorCode, recoveryEmailErrorCode].filter(Boolean))].join(", ")})`}
           </span>
         </p>
       )}

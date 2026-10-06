@@ -1,16 +1,22 @@
 import { FirebaseError } from "firebase/app";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+import { updateProfile } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
 import { httpsCallable } from "firebase/functions";
-import { db, functions } from "./config";
+import { auth, db, functions } from "./config";
 import { REAUTH_REQUIRED_MESSAGE, ReauthRequiredError } from "./reauth";
 
 /**
  * The account's name and its password-reset email — nothing to do with the
  * diary's encryption (no lib/crypto here, like the rest of lib/firebase).
  *
- *  - `profiles/{uid}.nickname`: what the app calls its owner. Cosmetic, so
- *    firestore.rules lets the owner write it without reauthentication,
- *    like the display preferences.
+ *  - The nickname: what the app calls its owner, kept as the Firebase Auth
+ *    account's own display name. Cosmetic. Kept there rather than in a
+ *    Firestore document on purpose: it is written with the account's own
+ *    token through Firebase Auth, so it needs no security rule and works
+ *    the instant the account exists. (A Firestore write sent right after
+ *    createUserWithEmailAndPassword can still go out as the previous,
+ *    signed-out identity and be refused — which is what a first version
+ *    of this ran into.)
  *  - `accountRecovery/{uid}.email`: where a reset link for the LOGIN
  *    password goes, for accounts that sign in with an id
  *    (lib/auth/loginId.ts). Clients can read their own but never write it:
@@ -20,14 +26,20 @@ import { REAUTH_REQUIRED_MESSAGE, ReauthRequiredError } from "./reauth";
  *    the thief reads and take over the login.
  */
 
+function signedInAs(uid: string) {
+  const user = auth.currentUser;
+  if (!user || user.uid !== uid) throw new Error("Not signed in as this account");
+  return user;
+}
+
+/** For a Google account this starts out as the name Google gave; the owner can change it. */
 export async function getNickname(uid: string): Promise<string | null> {
-  const snapshot = await getDoc(doc(db, "profiles", uid));
-  const nickname = snapshot.data()?.nickname;
-  return typeof nickname === "string" && nickname.length > 0 ? nickname : null;
+  const name = signedInAs(uid).displayName?.trim();
+  return name ? name : null;
 }
 
 export async function setNickname(uid: string, nickname: string): Promise<void> {
-  await setDoc(doc(db, "profiles", uid), { nickname, updatedAt: serverTimestamp() });
+  await updateProfile(signedInAs(uid), { displayName: nickname });
 }
 
 export async function getRecoveryEmail(uid: string): Promise<string | null> {

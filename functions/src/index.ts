@@ -617,6 +617,8 @@ export const enforceEntryRateLimit = onDocumentCreated(
   }
 );
 
+// Nicknames briefly lived here in a first version (they are now the Auth
+// account's display name, which deleteUser removes); still cleaned up.
 const PROFILES_COLLECTION = "profiles";
 const ACCOUNT_RECOVERY_COLLECTION = "accountRecovery";
 const RESET_MAIL_THROTTLE_COLLECTION = "resetMailThrottle";

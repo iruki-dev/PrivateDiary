@@ -33,6 +33,17 @@ const SHARED: Record<string, string> = {
   "not-configured": "이 앱에서는 Google 로그인을 쓸 수 없어요. 아이디로 로그인해 주세요.",
 };
 
+/**
+ * For failures the messages above don't name: the code goes at the end in
+ * small print, so "다시 시도해 주세요" alone never leaves the cause unknown.
+ * Codes are Firebase's own ("permission-denied", "functions/internal"),
+ * never anything typed.
+ */
+export function withErrorCode(message: string, err: unknown): string {
+  const code = authErrorCode(err);
+  return code ? `${message} (오류 코드: ${code})` : message;
+}
+
 export function signInErrorMessage(err: unknown): string {
   const code = authErrorCode(err);
   switch (code) {
@@ -41,7 +52,7 @@ export function signInErrorMessage(err: unknown): string {
     case "auth/user-not-found":
       return "아이디나 로그인 비밀번호를 다시 확인해 주세요.";
     default:
-      return SHARED[code] ?? "로그인하지 못했어요. 다시 시도해 주세요.";
+      return SHARED[code] ?? withErrorCode("로그인하지 못했어요. 다시 시도해 주세요.", err);
   }
 }
 
@@ -55,7 +66,7 @@ export function signUpErrorMessage(err: unknown): string {
     case "auth/account-exists-with-different-credential":
       return "같은 이메일로 다른 방법(아이디 또는 Google)으로 가입한 계정이 있어요.";
     default:
-      return SHARED[code] ?? "계정을 만들지 못했어요. 다시 시도해 주세요.";
+      return SHARED[code] ?? withErrorCode("계정을 만들지 못했어요. 다시 시도해 주세요.", err);
   }
 }
 

@@ -497,22 +497,6 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // What the app calls its owner (lib/firebase/profile.ts). Cosmetic, like
-    // `preferences`: the owner writes it without reauthentication. Bounded
-    // so the document can't be used to park anything else.
-    function isValidProfile(data) {
-      return data.keys().hasOnly(['nickname', 'updatedAt'])
-          && data.nickname is string
-          && data.nickname.size() >= 1 && data.nickname.size() <= 20
-          && data.updatedAt == request.time;
-    }
-
-    match /profiles/{uid} {
-      allow read: if request.auth.uid == uid;
-      allow create, update: if request.auth.uid == uid && isValidProfile(request.resource.data);
-      allow delete: if false;
-    }
-
     // Where an id account's login-password reset link goes. The owner can
     // read it; only functions/src/index.ts's setRecoveryEmail writes it,
     // after the same proof credentialMutationAllowed() asks for — the
