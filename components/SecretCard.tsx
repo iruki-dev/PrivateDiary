@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import QRCode from "qrcode";
 import { copyWithAutoClear } from "@/lib/security/clipboard";
+import { saveTextFile } from "@/lib/saveFile";
 
 /**
  * Displays one recovery secret (a recovery key, or a single Shamir share)
@@ -45,13 +46,7 @@ export function SecretCard({
   }, [copied]);
 
   function handleDownload() {
-    const blob = new Blob([text], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-    URL.revokeObjectURL(url);
+    void saveTextFile(filename, "text/plain", text).catch(() => {});
   }
 
   async function handleCopy() {

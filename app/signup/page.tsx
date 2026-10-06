@@ -25,6 +25,7 @@ import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
 import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
 import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
 
 /** Backup codes issued during signup: any 2 of 3. Fewer pieces to place than /settings' 5-of-3 default, still no single point of failure. */
@@ -68,6 +69,7 @@ export default function SignupPage() {
   } = useSeed();
   const { hasPendingEntry, takePendingEntry, setPendingEntry, setNotice } = usePendingEntry();
   const router = useRouter();
+  const googleAvailable = useGoogleSignInAvailable();
   usePageTitle("가입");
 
   // --- step 1: account ---
@@ -284,15 +286,19 @@ export default function SignupPage() {
             {accountSubmitting ? "처리 중..." : "가입하기"}
           </button>
         </form>
-        <OrDivider />
-        <button
-          type="button"
-          onClick={() => void handleGoogleSignUp()}
-          disabled={accountSubmitting}
-          className="btn-secondary w-full"
-        >
-          Google로 계속하기
-        </button>
+        {googleAvailable && (
+          <>
+            <OrDivider />
+            <button
+              type="button"
+              onClick={() => void handleGoogleSignUp()}
+              disabled={accountSubmitting}
+              className="btn-secondary w-full"
+            >
+              Google로 계속하기
+            </button>
+          </>
+        )}
         <p className="faint text-xs">
           가입하면 <Link href="/terms" className="link">이용약관</Link>과{" "}
           <Link href="/privacy" className="link">개인정보처리방침</Link>에 동의하는 것으로 봅니다.

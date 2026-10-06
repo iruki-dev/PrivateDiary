@@ -16,6 +16,9 @@ const eslintConfig = defineConfig([
     // own npm-managed node_modules) linted/type-checked independently —
     // see functions/package.json's own build script.
     "functions/**",
+    // The Android app (Kotlin) and the copy of the built web bundle its
+    // Gradle build packages.
+    "android/**",
   ]),
 ]);
 

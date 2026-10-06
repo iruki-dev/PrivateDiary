@@ -21,6 +21,10 @@ import type { MetadataRoute } from "next";
  * The colours mirror app/globals.css's light-mode --background/--foreground
  * so the splash screen doesn't flash a different colour than the app.
  */
+// Built once; nothing here varies per request (and the Android static
+// export, next.config.ts, requires it to be stated).
+export const dynamic = "force-static";
+
 export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "PrivateDiary",

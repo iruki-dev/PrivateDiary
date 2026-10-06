@@ -1,3 +1,6 @@
+import { isNativeApp } from "@/lib/native/bridge";
+import { copySensitive } from "@/lib/native/app";
+
 /**
  * Clipboard auto-clear for one-time secret reveals (components/SecretCard.tsx
  * — recovery/Shamir backup codes). The clipboard is a real exfiltration
@@ -24,6 +27,13 @@ export async function copyWithAutoClear(
   text: string,
   clearAfterMs: number = DEFAULT_CLEAR_AFTER_MS
 ): Promise<void> {
+  // Android app: the app copies it natively instead, marked as sensitive
+  // (hidden from the clipboard preview and keyboard clipboard history) and
+  // cleared the same way — android/.../SecureClipboard.kt.
+  if (isNativeApp()) {
+    await copySensitive(text, clearAfterMs);
+    return;
+  }
   await navigator.clipboard.writeText(text);
 
   setTimeout(() => {

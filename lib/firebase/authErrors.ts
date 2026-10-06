@@ -14,7 +14,12 @@ export function authErrorCode(err: unknown): string {
 /** True when the person closed the Google popup themselves — not an error worth showing. */
 export function isUserCancelledPopup(err: unknown): boolean {
   const code = authErrorCode(err);
-  return code === "auth/popup-closed-by-user" || code === "auth/cancelled-popup-request";
+  return (
+    code === "auth/popup-closed-by-user" ||
+    code === "auth/cancelled-popup-request" ||
+    // Android app: the person dismissed the system Google account sheet.
+    code === "cancelled"
+  );
 }
 
 const SHARED: Record<string, string> = {
@@ -23,6 +28,9 @@ const SHARED: Record<string, string> = {
   "auth/invalid-email": "이메일 주소 형식이 올바르지 않습니다.",
   "auth/user-disabled": "사용이 중지된 계정입니다.",
   "auth/popup-blocked": "브라우저가 Google 로그인 창을 차단했습니다. 팝업을 허용한 뒤 다시 시도해주세요.",
+  // Android app (lib/native/app.ts googleIdToken)
+  "no-account": "이 휴대폰에 Google 계정이 없습니다. 휴대폰 설정에서 계정을 추가한 뒤 다시 시도해주세요.",
+  "not-configured": "이 앱에서는 Google 로그인을 쓸 수 없습니다. 이메일로 로그인해주세요.",
 };
 
 export function signInErrorMessage(err: unknown): string {

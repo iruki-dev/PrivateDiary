@@ -38,6 +38,7 @@ export const DOC_GROUPS: DocGroup[] = [
       { href: "/docs/writing", title: "일기 쓰기", summary: "저장, 임시 저장, 프라이빗 작성 모드, 하루 저장 개수" },
       { href: "/docs/reading", title: "지난 일기", summary: "열기, 자동 잠금, 달력, 검색, 내보내기" },
       { href: "/docs/account", title: "계정 관리", summary: "비밀번호 재설정, 로그아웃, 계정 삭제" },
+      { href: "/docs/android", title: "Android 앱", summary: "생체 인증으로 열기와 휴대폰에서 일기를 지키는 장치" },
     ],
   },
   {

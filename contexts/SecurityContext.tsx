@@ -9,8 +9,11 @@ import {
   type ReactNode,
 } from "react";
 import { checkNativeIntegrity } from "@/lib/security/nativeIntegrity";
+import { IS_ANDROID_APP } from "@/lib/platform";
+import { nativeHello } from "@/lib/native/bridge";
 import {
   collectSyncEnvironmentWarnings,
+  deviceWarnings,
   devtoolsWarning,
   probeDevtoolsOpen,
   type EnvironmentWarning,
@@ -48,6 +51,7 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
   const [tamperedApis, setTamperedApis] = useState<string[]>([]);
   const [syncWarnings, setSyncWarnings] = useState<EnvironmentWarning[]>([]);
   const [devtoolsOpen, setDevtoolsOpen] = useState(false);
+  const [phoneWarnings, setPhoneWarnings] = useState<EnvironmentWarning[]>([]);
   const [dismissed, setDismissed] = useState<ReadonlySet<EnvironmentWarning["kind"]>>(new Set());
 
   useEffect(() => {
@@ -70,7 +74,22 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Android app: the phone's own state, reported once by the app.
   useEffect(() => {
+    if (!IS_ANDROID_APP) return;
+    let cancelled = false;
+    void nativeHello().then((hello) => {
+      if (!cancelled && hello) setPhoneWarnings(deviceWarnings(hello.signals));
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    // The app's release build has no way to open DevTools at all
+    // (MainActivity only enables WebView inspection in debug builds).
+    if (IS_ANDROID_APP) return;
     let cancelled = false;
     async function pollDevtools() {
       const open = await probeDevtoolsOpen();
@@ -88,7 +107,7 @@ export function SecurityProvider({ children }: { children: ReactNode }) {
     setDismissed((prev) => new Set(prev).add(kind));
   }, []);
 
-  const allWarnings = [...syncWarnings, ...(devtoolsOpen ? [devtoolsWarning()] : [])].filter(
+  const allWarnings = [...syncWarnings, ...phoneWarnings, ...(devtoolsOpen ? [devtoolsWarning()] : [])].filter(
     (warning) => !dismissed.has(warning.kind)
   );
 

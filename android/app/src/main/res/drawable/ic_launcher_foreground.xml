@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The same padlock as the website's icon (app/icon.svg), redrawn for the
+  108dp adaptive-icon canvas and kept inside its 66dp safe zone so no
+  launcher mask clips it. The keyhole is a real hole (evenOdd), so the
+  same drawable also works as the themed monochrome icon.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2"
+        android:scaleY="2"
+        android:translateX="22"
+        android:translateY="23.7">
+        <path
+            android:pathData="M11,14.5V11.5A5,5 0 0,1 21,11.5V14.5"
+            android:strokeWidth="2.4"
+            android:strokeColor="@color/icon_mark"
+            android:strokeLineCap="round" />
+        <path
+            android:fillType="evenOdd"
+            android:fillColor="@color/icon_mark"
+            android:pathData="M11.1,14H20.9A2.6,2.6 0 0,1 23.5,16.6V22.4A2.6,2.6 0 0,1 20.9,25H11.1A2.6,2.6 0 0,1 8.5,22.4V16.6A2.6,2.6 0 0,1 11.1,14Z M15.2,20.1A1.7,1.7 0 1,1 16.8,20.1V21.4A0.8,0.8 0 0,1 15.2,21.4Z" />
+    </group>
+</vector>

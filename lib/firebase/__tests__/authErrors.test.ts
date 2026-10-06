@@ -36,3 +36,13 @@ describe("auth error messages", () => {
     expect(isUserCancelledPopup(err("auth/popup-blocked"))).toBe(false);
   });
 });
+
+describe("Android app Google sign-in errors", () => {
+  it("treats a dismissed account sheet like a closed popup", () => {
+    expect(isUserCancelledPopup({ code: "cancelled" })).toBe(true);
+  });
+
+  it("explains a phone without a Google account", () => {
+    expect(signInErrorMessage({ code: "no-account" })).toContain("Google 계정이 없습니다");
+  });
+});

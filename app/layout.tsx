@@ -5,6 +5,8 @@ import { NavBar } from "@/components/NavBar";
 import { TabBar } from "@/components/TabBar";
 import { SecurityWarningBanner } from "@/components/SecurityWarningBanner";
 import { SITE } from "@/lib/site";
+import { IS_ANDROID_APP } from "@/lib/platform";
+import { connection } from "next/server";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -54,7 +56,7 @@ export const viewport: Viewport = {
 };
 
 /**
- * Forces every route to render per-request instead of being statically
+ * Web: every route renders per-request instead of being statically
  * prerendered at build time. This app has no per-request server data (it's
  * entirely client-driven auth/Firestore calls), so the only reason for this
  * is proxy.ts's CSP nonce: Next.js can only embed a matching nonce into a
@@ -64,14 +66,25 @@ export const viewport: Viewport = {
  * avoid breaking hydration. Given ARCHITECTURE.md §7's "인라인 스크립트
  * 차단" requirement, the (small, personal-app-scale) cost of dynamic
  * rendering everywhere is worth it to keep script-src nonce-only.
+ *
+ * Android: the opposite. The app ships these pages as static files inside
+ * the signed APK, so there is no server and no request — and that is the
+ * point: the code the app runs can't be swapped by whoever controls a
+ * server. Its CSP pins each inline script by hash instead of a nonce
+ * (scripts/build-android-web.mjs).
+ *
+ * `await connection()` rather than `export const dynamic = "force-dynamic"`
+ * because segment config has to be a literal, and the Android build is
+ * the same source with IS_ANDROID_APP inlined at build time.
  */
-export const dynamic = "force-dynamic";
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  if (!IS_ANDROID_APP) await connection();
   return (
     <html
       lang="ko"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      data-platform={IS_ANDROID_APP ? "android" : undefined}
     >
       <body
         className="flex min-h-full flex-col"

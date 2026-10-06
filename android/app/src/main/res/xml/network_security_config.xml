@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  HTTPS only, and only certificate authorities that ship with Android —
+  a CA certificate the user (or an MDM profile, or malware that talked the
+  user into it) installed is NOT trusted, so it can't be used to read the
+  app's traffic.
+
+  No certificate pinning, deliberately: the app only talks to Google's
+  Firebase endpoints, whose certificates Google rotates on its own
+  schedule; a pin would eventually lock every user out. What a pin would
+  protect is already protected another way — entries leave the phone
+  encrypted end-to-end, so the traffic carries ciphertext only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

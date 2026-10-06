@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PrivateDiary</string>
+    <string name="biometric_unlock_title">일기 열기</string>
+    <string name="biometric_enroll_title">생체 인증 켜기</string>
+    <string name="biometric_enroll_subtitle">이 기기에서 일기를 열 때 사용합니다</string>
+    <string name="biometric_use_passphrase">일기 암호 사용</string>
+    <string name="biometric_cancel">취소</string>
+    <string name="external_link_failed">링크를 열 수 있는 앱이 없습니다.</string>
+    <string name="renderer_gone">화면을 다시 불러왔습니다. 저장하지 않은 글은 사라졌을 수 있습니다.</string>
+</resources>

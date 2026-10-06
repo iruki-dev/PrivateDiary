@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type FormEvent } from "react";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
@@ -14,16 +14,31 @@ import {
 import { AuthShell, OrDivider } from "@/components/AuthShell";
 import { PasswordField, TextField } from "@/components/PasswordField";
 import { usePageTitle } from "@/hooks/usePageTitle";
+import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
+import { LoadingScreen } from "@/components/LoadingState";
 import { safeNextPath } from "@/lib/navigation";
 
 type Mode = "sign-in" | "reset";
 
+/**
+ * useSearchParams() needs a Suspense boundary for the page to be
+ * prerendered as a static file (the Android build, next.config.ts).
+ */
 export default function LoginPage() {
+  return (
+    <Suspense fallback={<LoadingScreen />}>
+      <LoginForm />
+    </Suspense>
+  );
+}
+
+function LoginForm() {
   const { status } = useAuth();
   const router = useRouter();
   // Where the visitor was headed before useAccountGate sent them here.
   const next = safeNextPath(useSearchParams().get("next"));
   const [mode, setMode] = useState<Mode>("sign-in");
+  const googleAvailable = useGoogleSignInAvailable();
   usePageTitle(mode === "reset" ? "비밀번호 재설정" : "로그인");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -169,16 +184,19 @@ export default function LoginPage() {
         </button>
       </div>
 
-      <OrDivider />
-
-      <button
-        type="button"
-        onClick={() => void handleGoogle()}
-        disabled={submitting}
-        className="btn-secondary w-full"
-      >
-        Google로 계속하기
-      </button>
+      {googleAvailable && (
+        <>
+          <OrDivider />
+          <button
+            type="button"
+            onClick={() => void handleGoogle()}
+            disabled={submitting}
+            className="btn-secondary w-full"
+          >
+            Google로 계속하기
+          </button>
+        </>
+      )}
     </AuthShell>
   );
 }
