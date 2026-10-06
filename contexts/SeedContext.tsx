@@ -20,11 +20,8 @@ import {
 } from "@/lib/firebase/users";
 import { assertNativeIntegrity } from "@/lib/security/nativeIntegrity";
 import { isNativeApp, onNativeEvent } from "@/lib/native/bridge";
-import {
-  enrollDeviceUnlock as enrollDeviceUnlockNative,
-  forgetDeviceUnlock,
-  unwrapSeedWithDevice,
-} from "@/lib/native/app";
+import { BiometricGateError } from "@/lib/native/app";
+import { useBiometricGate } from "./BiometricGateContext";
 import {
   combineSeedShamir,
   deriveHybridKeyPair,
@@ -160,18 +157,6 @@ interface SeedContextValue {
   /** Disables Shamir. Requires a staged seed (via either co-equal credential). */
   disableShamir: () => Promise<void>;
 
-  /**
-   * Android app only: unlocks with the seed the app keeps wrapped by a
-   * biometric-bound hardware key (android/.../BiometricVault.kt). Throws
-   * NativeError ("cancelled", "use-passphrase", "invalidated", …).
-   */
-  unlockWithDevice: () => Promise<void>;
-  /**
-   * Android app only: wraps the STAGED seed (stageSeedFromPassphrase /
-   * stageSeedFromShamirShares first) for biometric unlock on this phone,
-   * then discards the staged copy whatever happens.
-   */
-  enrollDeviceUnlock: () => Promise<void>;
 }
 
 const SeedContext = createContext<SeedContextValue | undefined>(undefined);
@@ -250,9 +235,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void refresh();
     } else if (authStatus === "signed-out") {
-      // Signed out, nothing of the account stays usable on this phone —
-      // including the biometric-wrapped seed (Android app).
-      if (isNativeApp()) void forgetDeviceUnlock().catch(() => {});
       wipePrivateKeys();
       clearStagedSeed();
       // Signing out must not leave the previous account's half-written
@@ -268,6 +250,18 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     }
     // "loading" leaves seed state as-is until auth resolves.
   }, [authStatus, refresh, wipePrivateKeys, clearStagedSeed]);
+
+  /**
+   * Android app: the biometric check (contexts/BiometricGateContext.tsx)
+   * sits IN FRONT OF the passphrase, like OTP. Every passphrase path below
+   * refuses to start — before touching any crypto — while the check is
+   * required, so a passphrase can't even be tried without it. The backup
+   * codes stand in for the check (as they do for OTP) and mark it passed.
+   */
+  const { required: biometricRequired, markPassed, clearPass } = useBiometricGate();
+  const requireBiometricPass = useCallback(() => {
+    if (biometricRequired) throw new BiometricGateError("required");
+  }, [biometricRequired]);
 
   const deriveAndUnlock = useCallback((seed: Uint8Array) => {
     const derived = deriveHybridKeyPair(seed);
@@ -288,6 +282,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
   const unlock = useCallback(
     async (passphrase: string) => {
       assertNativeIntegrity();
+      requireBiometricPass();
       if (!wrappedSeedRef.current) {
         throw new Error("No wrapped seed available to unlock");
       }
@@ -295,7 +290,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       deriveAndUnlock(seed);
       wipeBytes(seed);
     },
-    [deriveAndUnlock]
+    [deriveAndUnlock, requireBiometricPass]
   );
 
   const unlockWithShamirShares = useCallback(
@@ -305,10 +300,11 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         throw new InvalidShamirSharesError();
       }
       const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
+      markPassed();
       deriveAndUnlock(seed);
       wipeBytes(seed);
     },
-    [deriveAndUnlock]
+    [deriveAndUnlock, markPassed]
   );
 
   const lock = useCallback(
@@ -322,15 +318,18 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       // staged seed still dies with its own flow (cancel, confirm, leaving
       // the page) and with any idle or manual lock.
       if (reason !== "background") clearStagedSeed();
+      // The biometric check is passed again before the next unlock.
+      clearPass();
       setStatus((prev) => (prev === "unlocked" ? "locked" : prev));
       setLockReason(reason);
     },
-    [wipePrivateKeys, clearStagedSeed]
+    [wipePrivateKeys, clearStagedSeed, clearPass]
   );
 
   const changePassphrase = useCallback(
     async (oldPassphrase: string, newPassphrase: string) => {
       assertNativeIntegrity();
+      requireBiometricPass();
       if (!user || !wrappedSeedRef.current) {
         throw new Error("No wrapped seed available");
       }
@@ -338,7 +337,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       await updateWrappedSeed(user.uid, rewrapped);
       wrappedSeedRef.current = rewrapped;
     },
-    [user]
+    [user, requireBiometricPass]
   );
 
   const resetPassphraseWithShamirShares = useCallback(
@@ -348,18 +347,20 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         throw new InvalidShamirSharesError();
       }
       const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
+      markPassed();
       const wrapped = await wrapSeed(seed, newPassphrase);
       await updateWrappedSeed(user.uid, wrapped);
       wrappedSeedRef.current = wrapped;
       deriveAndUnlock(seed);
       wipeBytes(seed);
     },
-    [user, deriveAndUnlock]
+    [user, deriveAndUnlock, markPassed]
   );
 
   const stageSeedFromPassphrase = useCallback(
     async (passphrase: string) => {
       assertNativeIntegrity();
+      requireBiometricPass();
       if (!wrappedSeedRef.current) {
         throw new Error("No wrapped seed available");
       }
@@ -367,7 +368,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
       clearStagedSeed();
       stagedSeedRef.current = seed;
     },
-    [clearStagedSeed]
+    [clearStagedSeed, requireBiometricPass]
   );
 
   const stageSeedFromShamirShares = useCallback(
@@ -377,10 +378,11 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         throw new InvalidShamirSharesError();
       }
       const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
+      markPassed();
       clearStagedSeed();
       stagedSeedRef.current = seed;
     },
-    [clearStagedSeed]
+    [clearStagedSeed, markPassed]
   );
 
   const discardStagedSeed = useCallback(() => clearStagedSeed(), [clearStagedSeed]);
@@ -422,29 +424,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     shamirWrappedSeedRef.current = null;
     clearStagedSeed();
     setDecryptionMethods({ shamir: null });
-  }, [user, clearStagedSeed]);
-
-  const unlockWithDevice = useCallback(async () => {
-    assertNativeIntegrity();
-    if (!user) throw new Error("Not signed in");
-    const seed = await unwrapSeedWithDevice(user.uid);
-    try {
-      deriveAndUnlock(seed);
-    } finally {
-      wipeBytes(seed);
-    }
-  }, [user, deriveAndUnlock]);
-
-  const enrollDeviceUnlock = useCallback(async () => {
-    assertNativeIntegrity();
-    if (!user || !stagedSeedRef.current) {
-      throw new Error("No staged seed to enroll");
-    }
-    try {
-      await enrollDeviceUnlockNative(user.uid, stagedSeedRef.current);
-    } finally {
-      clearStagedSeed();
-    }
   }, [user, clearStagedSeed]);
 
   /**
@@ -545,8 +524,6 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         prepareShamir,
         confirmPendingShamir,
         disableShamir,
-        unlockWithDevice,
-        enrollDeviceUnlock,
       }}
     >
       {children}

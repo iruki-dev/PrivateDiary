@@ -3,34 +3,55 @@
  * Each one is only meaningful inside the app; callers check isNativeApp()
  * (or a capability from nativeHello()) first.
  */
-import { callNative, callNativeForSecret } from "./bridge";
+import { callNative } from "./bridge";
 
-export type DeviceUnlockAvailability = "ready" | "no-hardware" | "none-enrolled" | "no-device-lock" | "unavailable";
+export type BiometricAvailability = "ready" | "no-hardware" | "none-enrolled" | "no-device-lock" | "unavailable";
 
-export interface DeviceUnlockStatus {
-  availability: DeviceUnlockAvailability;
-  enrolled: boolean;
-  /** Where the wrapping key lives: a separate security chip, or the main chip's secure area. */
+/**
+ * The biometric check (android/.../BiometricGate.kt): an ADDITIONAL factor
+ * on top of the diary passphrase, like OTP — never a replacement for it.
+ */
+export interface BiometricGateStatus {
+  availability: BiometricAvailability;
+  enabled: boolean;
+  /** On, but a fingerprint or face was added since: the check can't pass until it's set up again. */
+  invalidated: boolean;
+  /** Where the check's key lives: a separate security chip, or the main chip's secure area. */
   hardware: "strongbox" | "tee" | null;
 }
 
-export function deviceUnlockStatus(uid: string): Promise<DeviceUnlockStatus> {
-  return callNative("vault.status", { uid }) as Promise<unknown> as Promise<DeviceUnlockStatus>;
+/** The biometric check didn't pass; `code` is the app's reason ("cancelled", "invalidated", "lockout", …). */
+export class BiometricGateError extends Error {
+  readonly code: string;
+  constructor(code: string) {
+    super(`biometric check: ${code}`);
+    this.name = "BiometricGateError";
+    this.code = code;
+  }
 }
 
-/** Shows the biometric prompt and stores `seed` wrapped by a hardware key. The caller still wipes `seed`. */
-export async function enrollDeviceUnlock(uid: string, seed: Uint8Array): Promise<void> {
-  await callNative("vault.enroll", { uid }, { secret: seed, timeoutMs: null });
+export function biometricGateStatus(uid: string): Promise<BiometricGateStatus> {
+  return callNative("gate.status", { uid }) as Promise<unknown> as Promise<BiometricGateStatus>;
 }
 
-/** Shows the biometric prompt and returns the seed. The caller must wipe it. */
-export function unwrapSeedWithDevice(uid: string): Promise<Uint8Array> {
-  return callNativeForSecret("vault.unlock", { uid }, { timeoutMs: null });
+/** Creates the check's key and passes one check with it. */
+export async function enableBiometricGate(uid: string): Promise<void> {
+  await callNative("gate.enable", { uid }, { timeoutMs: null });
 }
 
-/** With no uid: every account's key on this phone (sign-out). */
-export async function forgetDeviceUnlock(uid?: string): Promise<void> {
-  await callNative("vault.forget", uid ? { uid } : {});
+/** Shows the biometric prompt; resolves only if the check passed (or the gate is off). */
+export async function verifyBiometricGate(uid: string): Promise<void> {
+  await callNative("gate.verify", { uid }, { timeoutMs: null });
+}
+
+/** Turning it off takes a passing check. */
+export async function disableBiometricGate(uid: string): Promise<void> {
+  await callNative("gate.disable", { uid }, { timeoutMs: null });
+}
+
+/** Only after the person re-proved the login (Firebase reauthentication). */
+export async function resetBiometricGate(uid: string): Promise<void> {
+  await callNative("gate.reset", { uid });
 }
 
 export async function copySensitive(text: string, clearAfterMs: number): Promise<void> {
@@ -56,8 +77,9 @@ export function haptic(kind: "confirm" | "reject" | "tick"): void {
   void callNative("haptic", { kind }).catch(() => {});
 }
 
-export function reportRoute(path: string): void {
-  void callNative("app.route", { path }).catch(() => {});
+/** Whether Android's autofill may serve the page right now (lib/native/autofill.ts). */
+export function reportAutofillAllowed(allowed: boolean): void {
+  void callNative("app.autofill", { allowed }).catch(() => {});
 }
 
 export function reportReady(): void {

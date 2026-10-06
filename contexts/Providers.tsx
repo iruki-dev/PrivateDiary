@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { AuthProvider } from "./AuthContext";
+import { BiometricGateProvider } from "./BiometricGateContext";
 import { NativeProvider } from "./NativeContext";
 import { OtpProvider } from "./OtpContext";
 import { PendingEntryProvider } from "./PendingEntryContext";
@@ -23,13 +24,15 @@ export function Providers({ children }: { children: ReactNode }) {
     <SecurityProvider>
       <AuthProvider>
         <NativeProvider>
-          <PreferencesProvider>
-            <OtpProvider>
-              <SeedProvider>
-                <PendingEntryProvider>{children}</PendingEntryProvider>
-              </SeedProvider>
-            </OtpProvider>
-          </PreferencesProvider>
+          <BiometricGateProvider>
+            <PreferencesProvider>
+              <OtpProvider>
+                <SeedProvider>
+                  <PendingEntryProvider>{children}</PendingEntryProvider>
+                </SeedProvider>
+              </OtpProvider>
+            </PreferencesProvider>
+          </BiometricGateProvider>
         </NativeProvider>
       </AuthProvider>
     </SecurityProvider>

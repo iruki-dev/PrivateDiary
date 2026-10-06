@@ -70,7 +70,7 @@ export function CredentialProof({
       {mode === "passphrase" || shamirK === null ? (
         <PasswordField
           label="일기 암호"
-          autoComplete="current-password"
+          autoComplete="passphrase"
           autoFocus={autoFocus}
           value={passphrase}
           onChange={onPassphraseChange}

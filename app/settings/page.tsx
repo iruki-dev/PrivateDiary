@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { OtpGate } from "@/components/OtpGate";
+import { BiometricGate } from "@/components/BiometricGate";
 import { useSeed } from "@/contexts/SeedContext";
 import { usePreferences } from "@/contexts/PreferencesContext";
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
@@ -18,7 +19,7 @@ import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
 import { AccountGroup } from "@/components/settings/AccountGroup";
-import { DeviceUnlockRow } from "@/components/settings/DeviceUnlockRow";
+import { BiometricGateRow } from "@/components/settings/BiometricGateRow";
 import { IS_ANDROID_APP } from "@/lib/platform";
 import {
   MoreLink,
@@ -145,57 +146,70 @@ export default function SettingsPage() {
             )
           }
         >
-          <div className="space-y-8">
-            <SettingsGroup id="security" title="일기 보호">
-              {IS_ANDROID_APP && <DeviceUnlockRow shamirK={shamirConfig?.k ?? null} />}
-              <ShamirRow
-                config={shamirConfig}
-                stageSeedFromPassphrase={stageSeedFromPassphrase}
-                stageSeedFromShamirShares={stageSeedFromShamirShares}
-                discardStagedSeed={discardStagedSeed}
-                prepareShamir={prepareShamir}
-                confirmPendingShamir={confirmPendingShamir}
-                disableShamir={disableShamir}
-              />
-              <ChangePassphraseRow changePassphrase={changePassphrase} />
-              {shamirConfig && (
-                <ResetPassphraseRow
+          {/* Same as OTP: the biometric check (Android app) comes before
+              anything here that takes the diary passphrase. */}
+          <BiometricGate
+            footer={
+              shamirConfig && (
+                <Link href="/entries" className="block w-full text-center text-xs link">
+                  생체 인증을 할 수 없다면: 백업 코드로 일기를 연 뒤 다시 오기
+                </Link>
+              )
+            }
+          >
+            <div className="space-y-8">
+              <SettingsGroup id="security" title="일기 보호">
+                <ShamirRow
                   config={shamirConfig}
-                  resetPassphraseWithShamirShares={resetPassphraseWithShamirShares}
+                  stageSeedFromPassphrase={stageSeedFromPassphrase}
+                  stageSeedFromShamirShares={stageSeedFromShamirShares}
+                  discardStagedSeed={discardStagedSeed}
+                  prepareShamir={prepareShamir}
+                  confirmPendingShamir={confirmPendingShamir}
+                  disableShamir={disableShamir}
                 />
-              )}
-              <AutoLockRow />
-              <OtpRow
-                stageSeedFromPassphrase={stageSeedFromPassphrase}
-                discardStagedSeed={discardStagedSeed}
-              />
-            </SettingsGroup>
+                <ChangePassphraseRow changePassphrase={changePassphrase} />
+                {shamirConfig && (
+                  <ResetPassphraseRow
+                    config={shamirConfig}
+                    resetPassphraseWithShamirShares={resetPassphraseWithShamirShares}
+                  />
+                )}
+                <AutoLockRow />
+                <OtpRow
+                  stageSeedFromPassphrase={stageSeedFromPassphrase}
+                  discardStagedSeed={discardStagedSeed}
+                />
+                {/* Same footing as OTP: an extra check, never a replacement for the passphrase. */}
+                {IS_ANDROID_APP && <BiometricGateRow />}
+              </SettingsGroup>
 
-            <SettingsGroup id="writing" title="쓰기">
-              <PrivateWritingRows />
-              <DraftAutosaveRow />
-              <DailyEntryLimitRow
-                shamirConfig={shamirConfig}
-                stageSeedFromPassphrase={stageSeedFromPassphrase}
-                stageSeedFromShamirShares={stageSeedFromShamirShares}
-                discardStagedSeed={discardStagedSeed}
-              />
-            </SettingsGroup>
+              <SettingsGroup id="writing" title="쓰기">
+                <PrivateWritingRows />
+                <DraftAutosaveRow />
+                <DailyEntryLimitRow
+                  shamirConfig={shamirConfig}
+                  stageSeedFromPassphrase={stageSeedFromPassphrase}
+                  stageSeedFromShamirShares={stageSeedFromShamirShares}
+                  discardStagedSeed={discardStagedSeed}
+                />
+              </SettingsGroup>
 
-            <SettingsGroup id="data" title="데이터">
-              <SettingsLinkRow
-                href="/entries"
-                label="일기 내보내기"
-                description="지난 일기 화면 맨 아래에서 Markdown 또는 JSON으로 받을 수 있습니다."
-              />
-              <DeleteAccountRow
-                stageSeedFromPassphrase={stageSeedFromPassphrase}
-                stageSeedFromShamirShares={stageSeedFromShamirShares}
-                discardStagedSeed={discardStagedSeed}
-                decryptionMethods={decryptionMethods}
-              />
-            </SettingsGroup>
-          </div>
+              <SettingsGroup id="data" title="데이터">
+                <SettingsLinkRow
+                  href="/entries"
+                  label="일기 내보내기"
+                  description="지난 일기 화면 맨 아래에서 Markdown 또는 JSON으로 받을 수 있습니다."
+                />
+                <DeleteAccountRow
+                  stageSeedFromPassphrase={stageSeedFromPassphrase}
+                  stageSeedFromShamirShares={stageSeedFromShamirShares}
+                  discardStagedSeed={discardStagedSeed}
+                  decryptionMethods={decryptionMethods}
+                />
+              </SettingsGroup>
+            </div>
+          </BiometricGate>
         </OtpGate>
 
         <AccountGroup />
@@ -550,7 +564,7 @@ function ChangePassphraseRow({
         <form onSubmit={handleSubmit} className="space-y-4">
           <PasswordField
             label="기존 일기 암호"
-            autoComplete="current-password"
+            autoComplete="passphrase"
             autoFocus
             value={oldPassphrase}
             onChange={setOldPassphrase}
@@ -558,7 +572,7 @@ function ChangePassphraseRow({
           <div className="space-y-2">
             <PasswordField
               label="새 일기 암호"
-              autoComplete="new-password"
+              autoComplete="passphrase"
               value={newPassphrase}
               onChange={setNewPassphrase}
             />
@@ -566,7 +580,7 @@ function ChangePassphraseRow({
           </div>
           <PasswordField
             label="새 일기 암호 확인"
-            autoComplete="new-password"
+            autoComplete="passphrase"
             value={confirmPassphrase}
             onChange={setConfirmPassphrase}
           />
@@ -676,7 +690,7 @@ function ResetPassphraseRow({
           <div className="space-y-2">
             <PasswordField
               label="새 일기 암호"
-              autoComplete="new-password"
+              autoComplete="passphrase"
               value={newPassphrase}
               onChange={setNewPassphrase}
             />
@@ -684,7 +698,7 @@ function ResetPassphraseRow({
           </div>
           <PasswordField
             label="새 일기 암호 확인"
-            autoComplete="new-password"
+            autoComplete="passphrase"
             value={confirmPassphrase}
             onChange={setConfirmPassphrase}
           />
@@ -891,7 +905,7 @@ function OtpRow({
         <form onSubmit={handleConfirmPassphrase} className="space-y-4">
           <PasswordField
             label="일기 암호"
-            autoComplete="current-password"
+            autoComplete="passphrase"
             autoFocus
             value={passphrase}
             onChange={setPassphrase}

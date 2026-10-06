@@ -12,6 +12,7 @@ import android.os.SystemClock
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.view.autofill.AutofillManager
 import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
@@ -67,7 +68,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var container: FrameLayout
     private lateinit var webView: SecureWebView
     private lateinit var bridge: NativeBridge
-    private lateinit var vault: BiometricVault
+    private lateinit var gate: BiometricGate
     private lateinit var clipboard: SecureClipboard
     private lateinit var assetLoader: WebViewAssetLoader
 
@@ -125,7 +126,8 @@ class MainActivity : FragmentActivity() {
         // Remote inspection of the page (chrome://inspect) only in debug builds.
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
-        vault = BiometricVault(this)
+        BiometricGate.removeLegacySeedVault(this)
+        gate = BiometricGate(this)
         clipboard = SecureClipboard(this)
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(AppOrigin.HOST)
@@ -185,13 +187,13 @@ class MainActivity : FragmentActivity() {
             setAcceptThirdPartyCookies(webView, false)
         }
         webView.setDownloadListener { _, _, _, _, _ -> /* Downloads go through file.save only. */ }
-        // Autofill off by default; turned on only on the sign-in pages (onRouteChanged).
+        // Autofill off by default; the page turns it on for the login password only (setAutofillAllowed).
         webView.importantForAutofill = View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
 
         webView.webViewClient = AppWebViewClient()
         webView.webChromeClient = AppChromeClient()
 
-        bridge = NativeBridge(this, webView, vault, clipboard, GoogleSignIn(this))
+        bridge = NativeBridge(this, webView, gate, clipboard, GoogleSignIn(this))
         bridge.install()
     }
 
@@ -254,18 +256,20 @@ class MainActivity : FragmentActivity() {
     }
 
     /**
-     * Android's autofill (password managers) only on the sign-in pages.
-     * Elsewhere the page holds diary text and the diary passphrase, and an
-     * autofill service is handed the content of the fields it's asked
-     * about — so it isn't asked.
+     * Android's autofill (password managers) is off unless the page says
+     * otherwise — and it only does for the login password, never while a
+     * diary passphrase field is on screen (lib/native/autofill.ts). The
+     * passphrase is never stored anywhere, a password manager included.
+     * Turning it off also cancels any autofill session already in progress,
+     * so nothing typed so far is handed to the service.
      */
-    fun onRouteChanged(path: String) {
-        val signInPage = path == "/login" || path == "/signup"
-        webView.importantForAutofill = if (signInPage) {
+    fun setAutofillAllowed(allowed: Boolean) {
+        webView.importantForAutofill = if (allowed) {
             View.IMPORTANT_FOR_AUTOFILL_AUTO
         } else {
             View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
         }
+        if (!allowed) getSystemService(AutofillManager::class.java)?.cancel()
     }
 
     /** The app's own system UI (biometric prompt, file picker) isn't "leaving the app". */

@@ -15,8 +15,7 @@ import java.io.File
  * Root detection is a cat-and-mouse game a determined attacker always
  * wins, so it is NOT treated as a defence; it's here so a user whose phone
  * is rooted (often without knowing what that means for apps like this)
- * hears it from the app. The defences that matter don't depend on it: the
- * seed's wrapping key is in secure hardware either way.
+ * hears it from the app. The defences that matter don't depend on it.
  */
 object DeviceSignals {
     fun collect(context: Context): JSONArray {

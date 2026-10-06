@@ -7,7 +7,6 @@ import android.webkit.WebView
 import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
-import androidx.webkit.WebViewFeature
 import org.json.JSONObject
 
 /**
@@ -23,35 +22,29 @@ import org.json.JSONObject
  *
  * The surface is a short, fixed list of methods; nothing here evaluates
  * strings, loads URLs it is handed (except a user-tapped https/mailto link
- * opened outside the app), or touches files the page names.
+ * opened outside the app), or touches files the page names. No secret
+ * crosses it in either direction (BridgeProtocol).
  */
-// Every WebView feature used here is checked before this class exists:
-// MainActivity refuses to start without WEB_MESSAGE_LISTENER, and binary
-// frames are only posted when `binarySupported` (WEB_MESSAGE_ARRAY_BUFFER).
+// The one WebView feature used here is checked before this class exists:
+// MainActivity refuses to start without WEB_MESSAGE_LISTENER.
 @SuppressLint("RequiresFeature")
 class NativeBridge(
     private val activity: MainActivity,
     private val webView: WebView,
-    private val vault: BiometricVault,
+    private val gate: BiometricGate,
     private val clipboard: SecureClipboard,
     private val google: GoogleSignIn,
 ) : WebViewCompat.WebMessageListener {
 
     private var reply: JavaScriptReplyProxy? = null
-    /** Secrets sent ahead of their JSON request, keyed by request id. Wiped if unused. */
-    private val pendingSecrets = HashMap<Int, ByteArray>()
-
-    val binarySupported: Boolean =
-        WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_ARRAY_BUFFER)
 
     fun install() {
         WebViewCompat.addWebMessageListener(webView, JS_OBJECT_NAME, setOf(AppOrigin.ORIGIN), this)
     }
 
-    /** A new page is loading: forget its predecessor's channel and anything it left behind. */
+    /** A new page is loading: forget its predecessor's channel. */
     fun reset() {
         reply = null
-        wipePendingSecrets()
     }
 
     override fun onPostMessage(
@@ -63,93 +56,45 @@ class NativeBridge(
     ) {
         if (!isMainFrame || !AppOrigin.isAppOrigin(sourceOrigin.toString())) return
         reply = replyProxy
-        when (message.type) {
-            WebMessageCompat.TYPE_STRING -> message.data?.let(::onRequest)
-            WebMessageCompat.TYPE_ARRAY_BUFFER -> if (binarySupported) onBinary(message.arrayBuffer)
-        }
+        // Text only; anything else (binary frames) is ignored.
+        if (message.type == WebMessageCompat.TYPE_STRING) message.data?.let(::onRequest)
     }
 
     fun emit(name: String, data: JSONObject = JSONObject()) {
         reply?.postMessage(BridgeProtocol.event(name, data))
     }
 
-    private fun onBinary(bytes: ByteArray) {
-        val frame = BridgeProtocol.decodeFrame(bytes)
-        bytes.fill(0)
-        if (frame == null || frame.kind != BridgeProtocol.FRAME_SECRET_TO_APP) {
-            frame?.payload?.fill(0)
-            return
-        }
-        pendingSecrets.remove(frame.id)?.fill(0)
-        // One secret in flight at most; anything else waiting is stale.
-        wipePendingSecrets()
-        pendingSecrets[frame.id] = frame.payload
-    }
-
     private fun onRequest(text: String) {
         val request = BridgeProtocol.parseRequest(text) ?: return
         val id = request.id
         val params = request.params
-        // Only vault.enroll consumes a secret (and owns wiping it from then
-        // on); one sent along with anything else is wiped unread.
-        val secret = pendingSecrets.remove(id)
-        if (secret != null && request.method != "vault.enroll") secret.fill(0)
         when (request.method) {
             "app.hello" -> ok(id, hello())
             "app.ready" -> {
                 activity.onPageReady()
                 ok(id)
             }
-            "app.route" -> {
-                activity.onRouteChanged(params.optString("path", "/"))
+            "app.autofill" -> {
+                // Anything but an explicit true keeps autofill off.
+                activity.setAutofillAllowed(params.optBoolean("allowed", false))
                 ok(id)
             }
-            "vault.status" -> {
-                val uid = params.optString("uid", "")
+            "gate.status" -> {
+                val status = gate.status(params.optString("uid", ""))
                 ok(
                     id,
                     JSONObject()
-                        .put("availability", vault.availability().wire)
-                        .put("enrolled", vault.isEnrolled(uid))
-                        .put("hardware", vault.hardwareLevel(uid) ?: JSONObject.NULL),
+                        .put("availability", status.availability.wire)
+                        .put("enabled", status.enabled)
+                        .put("invalidated", status.invalidated)
+                        .put("hardware", status.hardware ?: JSONObject.NULL),
                 )
             }
-            "vault.enroll" -> {
-                if (secret == null) return fail(id, "invalid")
-                activity.whileOwnUiShown()
-                vault.enroll(activity, params.optString("uid", ""), secret) { outcome ->
-                    activity.ownUiDone()
-                    when (outcome) {
-                        is BiometricVault.Outcome.Success -> ok(id)
-                        is BiometricVault.Outcome.Failure -> fail(id, outcome.code)
-                    }
-                }
-            }
-            "vault.unlock" -> {
-                activity.whileOwnUiShown()
-                vault.unlock(activity, params.optString("uid", "")) { outcome ->
-                    activity.ownUiDone()
-                    when (outcome) {
-                        is BiometricVault.Outcome.Success -> {
-                            val seed = outcome.seed ?: return@unlock fail(id, "failed")
-                            val frame = BridgeProtocol.encodeFrame(BridgeProtocol.FRAME_SECRET_TO_PAGE, id, seed)
-                            seed.fill(0)
-                            val channel = reply
-                            if (channel == null || !binarySupported) {
-                                frame.fill(0)
-                                return@unlock fail(id, "failed")
-                            }
-                            channel.postMessage(frame)
-                            frame.fill(0)
-                            ok(id, JSONObject().put("binary", true))
-                        }
-                        is BiometricVault.Outcome.Failure -> fail(id, outcome.code)
-                    }
-                }
-            }
-            "vault.forget" -> {
-                val uid = params.optString("uid", "")
-                if (uid.isEmpty()) vault.forgetAll() else vault.forget(uid)
+            "gate.enable" -> withOwnUi(id) { done -> gate.enable(activity, params.optString("uid", ""), done) }
+            "gate.verify" -> withOwnUi(id) { done -> gate.verify(activity, params.optString("uid", ""), done) }
+            "gate.disable" -> withOwnUi(id) { done -> gate.disable(activity, params.optString("uid", ""), done) }
+            "gate.reset" -> {
+                gate.reset(params.optString("uid", ""))
                 ok(id)
             }
             "clipboard.copySensitive" -> {
@@ -194,9 +139,7 @@ class NativeBridge(
         .put("commit", BuildConfig.BUILD_COMMIT)
         .put(
             "capabilities",
-            JSONObject()
-                .put("binary", binarySupported)
-                .put("googleSignIn", google.isConfigured),
+            JSONObject().put("googleSignIn", google.isConfigured),
         )
         .put("signals", DeviceSignals.collect(activity))
         .put("keyboardOpen", activity.keyboardOpen)
@@ -209,9 +152,13 @@ class NativeBridge(
         reply?.postMessage(BridgeProtocol.failure(id, error))
     }
 
-    private fun wipePendingSecrets() {
-        pendingSecrets.values.forEach { it.fill(0) }
-        pendingSecrets.clear()
+    /** Runs a biometric prompt (the app's own UI — not "leaving the app") and answers with its outcome. */
+    private fun withOwnUi(id: Int, run: (done: (String?) -> Unit) -> Unit) {
+        activity.whileOwnUiShown()
+        run { error ->
+            activity.ownUiDone()
+            if (error == null) ok(id) else fail(id, error)
+        }
     }
 
     companion object {

@@ -1,7 +1,6 @@
 package dev.iruki.privatediary
 
 import org.json.JSONObject
-import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -9,9 +8,9 @@ import org.junit.Test
 
 class BridgeProtocolTest {
     @Test fun parsesWellFormedRequests() {
-        val request = BridgeProtocol.parseRequest("""{"id":3,"method":"vault.status","params":{"uid":"abc"}}""")!!
+        val request = BridgeProtocol.parseRequest("""{"id":3,"method":"gate.status","params":{"uid":"abc"}}""")!!
         assertEquals(3, request.id)
-        assertEquals("vault.status", request.method)
+        assertEquals("gate.status", request.method)
         assertEquals("abc", request.params.getString("uid"))
         assertEquals(0, BridgeProtocol.parseRequest("""{"id":0,"method":"haptic"}""")!!.params.length())
     }
@@ -33,21 +32,5 @@ class BridgeProtocolTest {
         assertEquals("cancelled", fail.getString("error"))
         val event = JSONObject(BridgeProtocol.event("lifecycle", JSONObject().put("state", "background")))
         assertEquals("lifecycle", event.getString("event"))
-    }
-
-    @Test fun framesRoundTrip() {
-        val seed = ByteArray(32) { it.toByte() }
-        val bytes = BridgeProtocol.encodeFrame(BridgeProtocol.FRAME_SECRET_TO_PAGE, 0x01020304, seed)
-        assertEquals(37, bytes.size)
-        assertEquals(2.toByte(), bytes[0])
-        val frame = BridgeProtocol.decodeFrame(bytes)!!
-        assertEquals(BridgeProtocol.FRAME_SECRET_TO_PAGE, frame.kind)
-        assertEquals(0x01020304, frame.id)
-        assertArrayEquals(seed, frame.payload)
-    }
-
-    @Test fun shortOrNegativeFramesAreRejected() {
-        assertNull(BridgeProtocol.decodeFrame(ByteArray(4)))
-        assertNull(BridgeProtocol.decodeFrame(byteArrayOf(1, -1, -1, -1, -1, 9)))
     }
 }
