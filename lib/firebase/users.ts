@@ -98,13 +98,8 @@ interface UserDocData {
   createdAt?: Timestamp;
 }
 
-export interface UserKeyRecord {
-  publicKeys: HybridPublicKeysRaw;
-  wrappedSeed: WrappedSeed;
-  decryptionMethods: DecryptionMethodsConfig;
-  /** The Shamir wrap-key indirection (lib/crypto/recovery.ts) — null unless Shamir is configured. */
-  shamirWrappedSeed: ShamirWrappedSeed | null;
-}
+export type { UserKeyRecord } from "@/lib/store/types";
+import type { UserKeyRecord } from "@/lib/store/types";
 
 /** Reads the entry-sequence counter. `null` for accounts predating the field. */
 export async function getLastEntrySeq(uid: string): Promise<number | null> {

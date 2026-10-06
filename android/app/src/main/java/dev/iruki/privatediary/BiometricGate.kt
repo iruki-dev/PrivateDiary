@@ -12,6 +12,9 @@ import androidx.biometric.BiometricPrompt
 import androidx.core.content.ContextCompat
 import androidx.core.content.edit
 import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.LifecycleOwner
 import java.io.File
 import java.security.KeyPairGenerator
 import java.security.KeyStore
@@ -49,8 +52,26 @@ import java.security.spec.ECGenParameterSpec
  * the server. Clearing the app's data removes it — and the Firebase session
  * with it, so getting back in then needs the login password, the diary
  * passphrase and OTP if it's on.
+ *
+ * The prompt is only ever shown while the activity is resumed. The page
+ * asks for a check the moment the diary locks — and leaving the app is
+ * what locks it, so that request typically arrives while the activity is
+ * stopped. androidx's BiometricPrompt silently ignores authenticate()
+ * after onSaveInstanceState ("Unable to start authentication"): no prompt,
+ * no callback, ever. An earlier version called it anyway, so the check
+ * stayed "in flight" forever and every later attempt answered "busy" —
+ * the gate could never be passed again until the app was killed. Requests
+ * made while the activity isn't resumed now wait for it to come back.
  */
 class BiometricGate(private val context: Context) {
+
+    /** Told when the system prompt really appears and goes away (MainActivity: not "leaving the app"). */
+    interface PromptListener {
+        fun shown()
+        fun dismissed()
+    }
+
+    var promptListener: PromptListener? = null
 
     enum class Availability(val wire: String) {
         READY("ready"),
@@ -147,22 +168,69 @@ class BiometricGate(private val context: Context) {
 
     private fun check(activity: FragmentActivity, tag: String, titleRes: Int, done: (String?) -> Unit) {
         if (inFlight) return done("busy")
-        val signer = signerFor(tag) ?: return done("invalidated")
-        val challenge = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        if (signerFor(tag) == null) return done("invalidated")
         inFlight = true
+        val finish: (String?) -> Unit = { error ->
+            inFlight = false
+            done(error)
+        }
+        whenResumed(activity, onDestroyed = { finish("cancelled") }) {
+            // Taken again now: the key may have been invalidated while waiting.
+            val signer = signerFor(tag) ?: return@whenResumed finish("invalidated")
+            prompt(activity, tag, signer, titleRes, finish)
+        }
+    }
+
+    /**
+     * Runs [show] once the activity is resumed — right away if it already
+     * is. See the class comment for why the prompt must never be started
+     * from a stopped activity.
+     */
+    private fun whenResumed(activity: FragmentActivity, onDestroyed: () -> Unit, show: () -> Unit) {
+        val lifecycle = activity.lifecycle
+        when {
+            lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) -> show()
+            lifecycle.currentState == Lifecycle.State.DESTROYED -> onDestroyed()
+            else -> lifecycle.addObserver(
+                object : LifecycleEventObserver {
+                    override fun onStateChanged(source: LifecycleOwner, event: Lifecycle.Event) {
+                        when (event) {
+                            Lifecycle.Event.ON_RESUME -> {
+                                lifecycle.removeObserver(this)
+                                show()
+                            }
+                            Lifecycle.Event.ON_DESTROY -> {
+                                lifecycle.removeObserver(this)
+                                onDestroyed()
+                            }
+                            else -> Unit
+                        }
+                    }
+                },
+            )
+        }
+    }
+
+    private fun prompt(activity: FragmentActivity, tag: String, signer: Signature, titleRes: Int, finish: (String?) -> Unit) {
+        val challenge = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        var open = true
+        fun close(error: String?) {
+            if (!open) return
+            open = false
+            promptListener?.dismissed()
+            finish(error)
+        }
         val prompt = BiometricPrompt(
             activity,
             ContextCompat.getMainExecutor(activity),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                    inFlight = false
-                    val signature = result.cryptoObject?.signature ?: return done("failed")
-                    done(if (signedByKey(tag, signature, challenge)) null else "failed")
+                    val signature = result.cryptoObject?.signature ?: return close("failed")
+                    close(if (signedByKey(tag, signature, challenge)) null else "failed")
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                    inFlight = false
-                    done(
+                    close(
                         when (errorCode) {
                             BiometricPrompt.ERROR_NEGATIVE_BUTTON,
                             BiometricPrompt.ERROR_USER_CANCELED,
@@ -181,7 +249,12 @@ class BiometricGate(private val context: Context) {
             .setNegativeButtonText(activity.getString(R.string.biometric_cancel))
             .setAllowedAuthenticators(BIOMETRIC_STRONG)
             .build()
-        prompt.authenticate(info, BiometricPrompt.CryptoObject(signer))
+        promptListener?.shown()
+        try {
+            prompt.authenticate(info, BiometricPrompt.CryptoObject(signer))
+        } catch (_: Exception) {
+            close("failed")
+        }
     }
 
     /** Signs the challenge with the just-authorized key, verifies with the public key. */

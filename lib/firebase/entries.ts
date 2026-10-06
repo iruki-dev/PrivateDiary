@@ -21,11 +21,11 @@ import {
   encryptEntry,
   entryFromStorage,
   entryToStorage,
-  type EncryptedEntryPayload,
   type EncryptedEntryStorage,
   type EntryAAD,
   type HybridPublicKeysRaw,
 } from "@/lib/crypto";
+import type { StoredEntry, StoredEntryMetadata, WriteEntryOptions } from "@/lib/store/types";
 
 /**
  * `entries` collection I/O (ARCHITECTURE.md §4, §5: append-only — no
@@ -45,24 +45,14 @@ interface EntryDocData extends EncryptedEntryStorage {
   createdAt: Timestamp;
 }
 
-export interface StoredEntryMetadata {
-  id: string;
-  uid: string;
-  entrySeq: number;
-  createdAt: Timestamp;
-}
+export type { StoredEntry, StoredEntryMetadata } from "@/lib/store/types";
 
-export interface StoredEntry extends StoredEntryMetadata {
-  /**
-   * security-patch-v2 / H2: null means this document exists (its
-   * uid/entrySeq/createdAt are real and counted for integrity purposes)
-   * but entryFromStorage() couldn't decode one of its base64 fields — see
-   * listEntries()'s doc comment. Distinct from a decryption failure
-   * (TamperedCiphertextError), which only ever happens for a payload that
-   * DID decode; the caller (app/entries/page.tsx) should show a decode
-   * failure for these without ever calling decryptEntry on them.
-   */
-  payload: EncryptedEntryPayload | null;
+/** What writeEntryRecord stored, for the phone's own copy of the diary (lib/store/backup.ts). */
+export interface WrittenEntry {
+  id: string;
+  entrySeq: number;
+  createdAt: Date;
+  storage: EncryptedEntryStorage;
 }
 
 /**
@@ -108,27 +98,37 @@ async function getNextEntrySeq(uid: string): Promise<number> {
 /**
  * Encrypts and writes one diary entry (ARCHITECTURE.md §3.2). Needs only
  * the recipient's public keys — works while the seed is locked.
+ *
+ * `options.createdAt` is for entries brought in from an export file
+ * (lib/entries/import.ts): they keep the moment they were first written,
+ * both in the stored timestamp (so the calendar files them under their own
+ * day) and in the authenticated AAD. firestore.rules has never required
+ * `createdAt` to be the server's clock — only a timestamp — and the AAD
+ * value was always client-chosen; an imported entry still gets the next
+ * entrySeq, so the sequence check is unaffected.
  */
-export async function writeEntry(
+export async function writeEntryRecord(
   uid: string,
   recipientPublicKeys: HybridPublicKeysRaw,
-  plaintext: string
-): Promise<string> {
+  plaintext: string,
+  options: WriteEntryOptions = {}
+): Promise<WrittenEntry> {
   // lib/security/nativeIntegrity.ts: refuses to encrypt (and therefore to
   // hand the plaintext to encryptEntry at all) if a security-critical API
   // this app's own crypto depends on has been tampered with.
   assertNativeIntegrity();
   const entrySeq = await getNextEntrySeq(uid);
-  const aad: EntryAAD = { uid, entrySeq, createdAt: new Date().toISOString() };
+  const writtenAt = options.createdAt ?? new Date();
+  const aad: EntryAAD = { uid, entrySeq, createdAt: writtenAt.toISOString() };
 
   const payload = await encryptEntry(recipientPublicKeys, plaintext, aad);
   const storage = entryToStorage(payload);
 
-  const docData: Omit<EntryDocData, "createdAt"> & { createdAt: ReturnType<typeof serverTimestamp> } = {
+  const docData: Omit<EntryDocData, "createdAt"> & { createdAt: ReturnType<typeof serverTimestamp> | Timestamp } = {
     ...storage,
     uid,
     entrySeq,
-    createdAt: serverTimestamp(),
+    createdAt: options.createdAt ? Timestamp.fromDate(options.createdAt) : serverTimestamp(),
   };
 
   // One batch so the entry and the counter that allocated its sequence
@@ -139,7 +139,17 @@ export async function writeEntry(
   batch.set(ref, docData);
   batch.update(doc(db, "users", uid), { lastEntrySeq: entrySeq });
   await batch.commit();
-  return ref.id;
+  return { id: ref.id, entrySeq, createdAt: writtenAt, storage };
+}
+
+/** writeEntryRecord, for callers that only need the new entry's id. */
+export async function writeEntry(
+  uid: string,
+  recipientPublicKeys: HybridPublicKeysRaw,
+  plaintext: string,
+  options: WriteEntryOptions = {}
+): Promise<string> {
+  return (await writeEntryRecord(uid, recipientPublicKeys, plaintext, options)).id;
 }
 
 /**

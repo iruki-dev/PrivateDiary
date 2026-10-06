@@ -74,6 +74,11 @@ class NativeBridge(
                 activity.onPageReady()
                 ok(id)
             }
+            "app.network" -> {
+                // Anything but an explicit false keeps the block as it is.
+                if (params.has("blocked")) activity.setNetworkBlocked(params.optBoolean("blocked", true))
+                ok(id, JSONObject().put("blocked", activity.networkBlocked))
+            }
             "app.autofill" -> {
                 // Anything but an explicit true keeps autofill off.
                 activity.setAutofillAllowed(params.optBoolean("allowed", false))
@@ -90,9 +95,9 @@ class NativeBridge(
                         .put("hardware", status.hardware ?: JSONObject.NULL),
                 )
             }
-            "gate.enable" -> withOwnUi(id) { done -> gate.enable(activity, params.optString("uid", ""), done) }
-            "gate.verify" -> withOwnUi(id) { done -> gate.verify(activity, params.optString("uid", ""), done) }
-            "gate.disable" -> withOwnUi(id) { done -> gate.disable(activity, params.optString("uid", ""), done) }
+            "gate.enable" -> gate.enable(activity, params.optString("uid", ""), answer(id))
+            "gate.verify" -> gate.verify(activity, params.optString("uid", ""), answer(id))
+            "gate.disable" -> gate.disable(activity, params.optString("uid", ""), answer(id))
             "gate.reset" -> {
                 gate.reset(params.optString("uid", ""))
                 ok(id)
@@ -109,6 +114,14 @@ class NativeBridge(
                 val content = params.optString("content", "")
                 if (name == null || mime !in FileNames.ALLOWED_MIME_TYPES) return fail(id, "invalid")
                 activity.saveDocument(name, mime, content) { saved -> ok(id, JSONObject().put("saved", saved)) }
+            }
+            "file.open" -> activity.openTextDocument { opened ->
+                val error = opened.error
+                if (error != null) {
+                    fail(id, error)
+                } else {
+                    ok(id, JSONObject().put("name", opened.name ?: JSONObject.NULL).put("content", opened.content ?: ""))
+                }
             }
             "google.idToken" -> google.requestIdToken { result ->
                 result.fold(
@@ -143,6 +156,7 @@ class NativeBridge(
         )
         .put("signals", DeviceSignals.collect(activity))
         .put("keyboardOpen", activity.keyboardOpen)
+        .put("networkBlocked", activity.networkBlocked)
 
     private fun ok(id: Int, result: JSONObject = JSONObject()) {
         reply?.postMessage(BridgeProtocol.success(id, result))
@@ -152,14 +166,13 @@ class NativeBridge(
         reply?.postMessage(BridgeProtocol.failure(id, error))
     }
 
-    /** Runs a biometric prompt (the app's own UI — not "leaving the app") and answers with its outcome. */
-    private fun withOwnUi(id: Int, run: (done: (String?) -> Unit) -> Unit) {
-        activity.whileOwnUiShown()
-        run { error ->
-            activity.ownUiDone()
-            if (error == null) ok(id) else fail(id, error)
-        }
-    }
+    /**
+     * Answers a biometric request with its outcome. The prompt itself tells
+     * MainActivity when it is on screen (BiometricGate.PromptListener), so
+     * a request still waiting for the app to come back to the foreground
+     * doesn't count as "the app's own UI".
+     */
+    private fun answer(id: Int): (String?) -> Unit = { error -> if (error == null) ok(id) else fail(id, error) }
 
     companion object {
         const val JS_OBJECT_NAME = "PrivateDiaryNative"

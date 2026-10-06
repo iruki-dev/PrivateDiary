@@ -11,7 +11,7 @@ import { WrongPassphraseError } from "./errors";
 import { wipeBytes } from "./memory";
 import type { WrappedSeed } from "./types";
 
-async function derivePbkdf2WrappingKey(
+export async function derivePbkdf2WrappingKey(
   passphrase: string,
   salt: Uint8Array,
   iterations: number

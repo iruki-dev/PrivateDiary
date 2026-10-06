@@ -2,20 +2,20 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useOtp } from "@/contexts/OtpContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { OtpGate } from "@/components/OtpGate";
 import { PasswordField } from "@/components/PasswordField";
 import { EntryBrowser } from "@/components/EntryBrowser";
-import { LoadingScreen, LoadingState } from "@/components/LoadingState";
+import { LoadingState } from "@/components/LoadingState";
+import { AccountGateFallback } from "@/components/AccountGateFallback";
+import { ImportEntriesCard } from "@/components/ImportEntriesCard";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
-import {
-  listEntries,
-  type EntrySequenceIntegrity,
-  type StoredEntry,
-} from "@/lib/firebase/entries";
+import type { EntrySequenceIntegrity, StoredEntry } from "@/lib/store/types";
+import { getBackupSummary } from "@/lib/store/backup";
+import { IS_ANDROID_APP } from "@/lib/platform";
 import { ShamirNotConfiguredError } from "@/lib/firebase/otp";
 import { BiometricGateError, haptic } from "@/lib/native/app";
 import { BiometricGate } from "@/components/BiometricGate";
@@ -77,7 +77,7 @@ function biometricGateMessage(code: string): string | null {
  * OTP-blocking-and-not-yet-bypassed state, nothing has been fetched yet.
  */
 export default function EntriesPage() {
-  const { user } = useAuth();
+  const { account, store, openBackup, closeBackup } = useAccount();
   const {
     status: seedStatus,
     privateKeys,
@@ -95,6 +95,14 @@ export default function EntriesPage() {
 
   const [metadataLoaded, setMetadataLoaded] = useState(false);
   const [metadata, setMetadata] = useState<StoredEntry[]>([]);
+  // The list couldn't be fetched (no internet, the server down). Shown as
+  // such — never as an empty diary — with a way to try again and, in the
+  // Android app, to open the phone's backup of this account.
+  const [listError, setListError] = useState(false);
+  const [backupAvailable, setBackupAvailable] = useState<{ label: string } | null>(null);
+  // Bumped to fetch the list again (after 불러오기, or "다시 시도").
+  const [reloadKey, setReloadKey] = useState(0);
+  const [importOpen, setImportOpen] = useState(false);
   // Sequence-level integrity of the fetched list (lib/firebase/entries.ts's
   // checkEntrySequence). Per-entry tampering already surfaces as a
   // decryption failure via the AAD binding; this catches the case that
@@ -113,26 +121,58 @@ export default function EntriesPage() {
   // instead, in the "unlocked but still can't read" branch further down.
   const [otpBypassError, setOtpBypassError] = useState<string | null>(null);
 
+  // Another diary (the phone's backup opened, say): nothing of the previous
+  // one's list may show while the new one loads.
+  const [listedStore, setListedStore] = useState(store);
+  if (listedStore !== store) {
+    setListedStore(store);
+    setMetadata([]);
+    setIntegrity(null);
+    setListError(false);
+    setMetadataLoaded(false);
+    setImportOpen(false);
+  }
+
   useEffect(() => {
     // firestore.rules denies `entries` reads until OTP (if enabled on this
     // account) is verified — wait for that instead of letting the query
     // fail with permission-denied.
-    if (!user || !canReadEntries) return;
+    if (!store || !canReadEntries) return;
     let cancelled = false;
-    listEntries(user.uid)
+    store
+      .listEntries()
       .then((result) => {
         if (cancelled) return;
         setMetadata(result.entries);
         setIntegrity(result.integrity);
+        setListError(false);
         setMetadataLoaded(true);
       })
-      .catch(() => {
-        if (!cancelled) setMetadataLoaded(true);
+      .catch((err) => {
+        console.error("listing entries failed", err);
+        if (cancelled) return;
+        setListError(true);
+        setMetadataLoaded(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [user, canReadEntries]);
+  }, [store, canReadEntries, reloadKey]);
+
+  // Android app: whether this account has a backup on the phone to fall back on.
+  const cloudId = account?.kind === "cloud" ? account.id : null;
+  useEffect(() => {
+    if (!listError || !cloudId || !IS_ANDROID_APP) return;
+    let cancelled = false;
+    getBackupSummary(cloudId)
+      .then((summary) => {
+        if (!cancelled) setBackupAvailable(summary ? { label: summary.label } : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [listError, cloudId]);
 
   // Incremental decryption (native-integrity check, chunking, per-entry
   // failure isolation including the payload: null case from
@@ -192,7 +232,7 @@ export default function EntriesPage() {
   }
 
   if (!ready) {
-    return <LoadingScreen />;
+    return <AccountGateFallback />;
   }
 
   const otherModes: { mode: UnlockMode; label: string }[] = [
@@ -252,17 +292,75 @@ export default function EntriesPage() {
     canReadEntries &&
     !!privateKeys &&
     metadataLoaded &&
+    !listError &&
     metadata.length > 0;
 
+  const readOnly = store?.readOnly ?? false;
   const emptyState = (
-    <div className="card space-y-4 py-9 text-center">
-      <div className="space-y-1.5">
-        <p className="text-[1.0625rem] font-bold">첫 일기를 써 보세요</p>
-        <p className="muted text-sm">쓴 일기는 나만 열 수 있게 잠겨서 여기에 모여요.</p>
+    <div className="space-y-3">
+      <div className="card space-y-4 py-9 text-center">
+        <div className="space-y-1.5">
+          <p className="text-[1.0625rem] font-bold">{readOnly ? "백업에 일기가 없어요" : "첫 일기를 써 보세요"}</p>
+          <p className="muted text-sm">
+            {readOnly ? "이 휴대폰에 백업된 일기가 아직 없어요." : "쓴 일기는 나만 열 수 있게 잠겨서 여기에 모여요."}
+          </p>
+        </div>
+        {!readOnly && (
+          <Link href="/write" className="btn-primary">
+            쓰기
+          </Link>
+        )}
       </div>
-      <Link href="/write" className="btn-primary">
-        쓰기
-      </Link>
+      {/* Bringing a diary over (another account, the phone's local diary,
+          an older export) starts here, once it's open. */}
+      {/* Nothing to compare against yet, so this needs only the public keys,
+          like writing does — the diary can stay locked. */}
+      {!readOnly &&
+        (importOpen ? (
+          <ImportEntriesCard
+            existing={[]}
+            onImported={() => setReloadKey((key) => key + 1)}
+            onClose={() => setImportOpen(false)}
+          />
+        ) : (
+          <button type="button" onClick={() => setImportOpen(true)} className="btn-text w-full">
+            <Icon name="upload" size={18} />
+            내보낸 파일에서 일기 불러오기
+          </button>
+        ))}
+    </div>
+  );
+
+  const listErrorCard = (
+    <div role="alert" className="card space-y-4">
+      <div className="flex gap-3">
+        <Icon name="alert-circle" size={22} className="mt-0.5 shrink-0" />
+        <div className="space-y-1">
+          <p className="text-[1.0625rem] font-bold">일기를 불러오지 못했어요</p>
+          <p className="muted text-sm">
+            일기는 그대로 있어요. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.
+            {backupAvailable && " 이 휴대폰에 백업해 둔 일기장은 지금 바로 읽을 수 있어요."}
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <button
+          type="button"
+          onClick={() => {
+            setMetadataLoaded(false);
+            setReloadKey((key) => key + 1);
+          }}
+          className="btn-primary w-full"
+        >
+          다시 시도
+        </button>
+        {backupAvailable && cloudId && (
+          <button type="button" onClick={() => openBackup(cloudId, backupAvailable.label)} className="btn-secondary w-full">
+            <Icon name="phone" size={18} />
+            휴대폰 백업 열기
+          </button>
+        )}
+      </div>
     </div>
   );
 
@@ -309,15 +407,35 @@ export default function EntriesPage() {
     </button>
   );
 
-  // The locked diary's cover, from the metadata alone. `metadata` arrives
-  // newest-first (entrySeq desc).
+  // The locked diary's cover, from the metadata alone. Earliest and latest
+  // by date rather than by position: an imported entry keeps its own date
+  // but arrives with the newest entrySeq.
+  const times = metadata
+    .map((entry) => entry.createdAt?.toDate?.()?.getTime())
+    .filter((time): time is number => typeof time === "number");
   const cover = metadata.length > 0 && (
     <DiaryCover
       total={metadata.length}
-      first={metadata[metadata.length - 1].createdAt?.toDate?.() ?? null}
-      last={metadata[0].createdAt?.toDate?.() ?? null}
+      first={times.length > 0 ? new Date(Math.min(...times)) : null}
+      last={times.length > 0 ? new Date(Math.max(...times)) : null}
       compact={unlockMode === "shamir"}
     />
+  );
+
+  const listReady = metadataLoaded && !listError;
+  const backupBanner = account?.kind === "backup" && (
+    <div role="status" className="note-warn">
+      <Icon name="phone" size={18} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1 space-y-2">
+        <p>
+          <b>휴대폰 백업을 보고 있어요.</b> {account.label}의 일기를 이 휴대폰에 남겨 둔 사본이에요. 읽기와 내보내기만 할 수
+          있어요.
+        </p>
+        <button type="button" onClick={closeBackup} className="btn-secondary btn-sm">
+          백업 닫기
+        </button>
+      </div>
+    </div>
   );
 
   return (
@@ -343,6 +461,8 @@ export default function EntriesPage() {
           )}
         </div>
 
+        {backupBanner}
+
         {otpLoading && <LoadingState />}
 
         {!otpLoading && seedStatus === "unlocked" && !canReadEntries && (
@@ -360,13 +480,17 @@ export default function EntriesPage() {
           <>
             {!metadataLoaded && <LoadingState label="불러오는 중…" />}
 
-            {metadataLoaded && metadata.length === 0 && emptyState}
+            {metadataLoaded && listError && listErrorCard}
 
-            {metadataLoaded && metadata.length > 0 && (
+            {listReady && metadata.length === 0 && emptyState}
+
+            {listReady && metadata.length > 0 && (
               <EntryBrowser
                 entries={metadata}
                 integrity={integrity}
                 privateKeys={privateKeys}
+                onImported={() => setReloadKey((key) => key + 1)}
+                readOnly={readOnly}
               />
             )}
           </>
@@ -414,11 +538,13 @@ export default function EntriesPage() {
           <OtpGate>
             {!metadataLoaded && <LoadingState label="불러오는 중…" />}
 
-            {metadataLoaded && metadata.length === 0 && emptyState}
+            {metadataLoaded && listError && listErrorCard}
 
-            {metadataLoaded && cover}
+            {listReady && metadata.length === 0 && emptyState}
 
-            {metadataLoaded && metadata.length > 0 &&
+            {listReady && cover}
+
+            {listReady && metadata.length > 0 &&
               (unlockMode === "shamir" ? (
                 unlockForm
               ) : (

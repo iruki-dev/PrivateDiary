@@ -4,12 +4,28 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
-import { signInWithGoogle, signUpWithEmail } from "@/lib/firebase/auth";
-import { isUserCancelledPopup, signUpErrorMessage } from "@/lib/firebase/authErrors";
-import { createUserKeyRecord } from "@/lib/firebase/users";
-import { writeEntry } from "@/lib/firebase/entries";
+import {
+  reauthenticateWithGoogle,
+  reauthenticateWithPassword,
+  signInWithGoogle,
+  signUpWithLoginId,
+} from "@/lib/firebase/auth";
+import { authErrorCode, isUserCancelledPopup, signUpErrorMessage, withErrorCode } from "@/lib/firebase/authErrors";
+import { ReauthRequiredError } from "@/lib/firebase/reauth";
+import { ReauthPanel } from "@/components/settings/forms";
+import { setNickname, setRecoveryEmail } from "@/lib/firebase/profile";
+import {
+  isPlausibleEmail,
+  loginIdFromEmail,
+  loginIdProblem,
+  nicknameProblem,
+  normalizeLoginId,
+  normalizeNickname,
+  NICKNAME_MAX_LENGTH,
+} from "@/lib/loginId";
 import {
   deriveHybridKeyPair,
   generateMasterSeed,
@@ -24,6 +40,7 @@ import { AuthShell, OrDivider, StepProgress } from "@/components/AuthShell";
 import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
 import { LoadingScreen } from "@/components/LoadingState";
+import { Icon } from "@/components/Icon";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
 import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
@@ -38,7 +55,9 @@ type Step = "passphrase" | "backup-intro" | "backup-reveal";
 /**
  * Onboarding (ARCHITECTURE.md §3.1 step 1-5), in three steps:
  *
- *  1. Account — email/password or Google (Firebase Auth only).
+ *  1. Account — id + nickname + login password (and, recommended, an
+ *     email for resetting that password), or Google + nickname
+ *     (Firebase Auth only; lib/loginId.ts).
  *  2. Diary passphrase — the master seed is generated here, wrapped with a
  *     passphrase that must differ from the login password and meet a
  *     minimum strength, and the key-issuance document is written.
@@ -57,6 +76,7 @@ type Step = "passphrase" | "backup-intro" | "backup-reveal";
  */
 export default function SignupPage() {
   const { user, status: authStatus } = useAuth();
+  const { account, store } = useAccount();
   const {
     status: seedStatus,
     refresh,
@@ -71,8 +91,21 @@ export default function SignupPage() {
   usePageTitle("가입");
 
   // --- step 1: account ---
-  const [email, setEmail] = useState("");
+  const [loginId, setLoginId] = useState("");
+  const [nickname, setNicknameInput] = useState("");
+  const [recoveryEmail, setRecoveryEmailInput] = useState("");
   const [accountPassword, setAccountPassword] = useState("");
+  // Google accounts name themselves before the passphrase step (an id
+  // account gave its nickname with the id). "unknown": still checking.
+  const [nicknameStep, setNicknameStep] = useState<"unknown" | "ask" | "done">("unknown");
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+  // A nickname that couldn't be saved yet. Never holds signup up: it is
+  // tried again once the diary exists, and settings can always set it.
+  const [pendingNickname, setPendingNickname] = useState<string | null>(null);
+  const [nicknameErrorCode, setNicknameErrorCode] = useState("");
+  // Set when the reset email couldn't be saved during signup; settings can add it later.
+  const [recoveryEmailFailed, setRecoveryEmailFailed] = useState(false);
+  const [recoveryEmailErrorCode, setRecoveryEmailErrorCode] = useState("");
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSubmitting, setAccountSubmitting] = useState(false);
   const loginPasswordRef = useRef<string>("");
@@ -88,6 +121,12 @@ export default function SignupPage() {
   const [shares, setShares] = useState<Uint8Array[]>([]);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
+  // Saving backup codes changes a credential, which firestore.rules only
+  // allows right after a real sign-in. A signup finished later than that
+  // (an earlier attempt that stopped halfway, a page left open) proves the
+  // login again here — the codes stay on screen — and then saves them.
+  const [backupReauth, setBackupReauth] = useState(false);
+  const [reauthPassword, setReauthPassword] = useState("");
   // Set once this page creates the keys, so the "already onboarded →
   // leave" redirect below doesn't fire mid-onboarding when refresh() flips
   // seedStatus to "locked".
@@ -97,8 +136,26 @@ export default function SignupPage() {
   useEffect(() => {
     if (alreadyOnboarded) {
       router.replace(DEFAULT_SIGNED_IN_PATH);
+    } else if (account?.kind === "local") {
+      // The phone's local diary is set up on its own page, without an account.
+      router.replace("/local");
     }
-  }, [alreadyOnboarded, router]);
+  }, [alreadyOnboarded, account?.kind, router]);
+
+  const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
+
+  // Signed in without keys yet. Only a Google account is asked for a
+  // nickname here (starting from the name Google gave it); an id account
+  // named itself on the first form. Whatever happens, this never stops signup.
+  useEffect(() => {
+    if (authStatus !== "signed-in" || !user || seedStatus !== "not-issued" || nicknameStep !== "unknown" || accountSubmitting) {
+      return;
+    }
+    // Reading the signed-in account is the external state here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNicknameInput((current) => current || normalizeNickname(user.displayName ?? "").slice(0, NICKNAME_MAX_LENGTH));
+    setNicknameStep(isGoogleAccount ? "ask" : "done");
+  }, [authStatus, user, seedStatus, nicknameStep, accountSubmitting, isGoogleAccount]);
 
   // Leaving this page drops any seed staged for step 3.
   useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
@@ -113,13 +170,44 @@ export default function SignupPage() {
   async function handleCreateAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAccountError(null);
+    const id = normalizeLoginId(loginId);
+    const name = normalizeNickname(nickname);
+    const email = recoveryEmail.trim();
+    const problem =
+      loginIdProblem(id) ??
+      nicknameProblem(name) ??
+      (email && !isPlausibleEmail(email) ? "재설정용 이메일 주소를 다시 확인해 주세요." : null);
+    if (problem) {
+      setAccountError(problem);
+      return;
+    }
     setAccountSubmitting(true);
     try {
-      await signUpWithEmail(email, accountPassword);
+      const created = await signUpWithLoginId(id, accountPassword);
       loginPasswordRef.current = accountPassword;
       setAccountPassword("");
+      // The nickname was given on this form, so there is no nickname step.
+      setNicknameStep("done");
+      // The account exists from here on; naming it and the reset email are
+      // extras that settings can redo, so a failure here doesn't stop signup.
+      try {
+        await setNickname(created.uid, name);
+      } catch (err) {
+        console.error("setNickname failed", err);
+        setPendingNickname(name);
+        setNicknameErrorCode(authErrorCode(err));
+      }
+      if (email) {
+        try {
+          await setRecoveryEmail(email);
+        } catch (err) {
+          console.error("setRecoveryEmail failed", err);
+          setRecoveryEmailFailed(true);
+          setRecoveryEmailErrorCode(authErrorCode(err));
+        }
+      }
     } catch (err) {
-      console.error("signUpWithEmail failed", err);
+      console.error("signUpWithLoginId failed", err);
       setAccountError(signUpErrorMessage(err));
     } finally {
       setAccountSubmitting(false);
@@ -143,6 +231,30 @@ export default function SignupPage() {
     }
   }
 
+  async function handleSaveNickname(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!store) return;
+    const name = normalizeNickname(nickname);
+    const problem = nicknameProblem(name);
+    if (problem) {
+      setAccountError(problem);
+      return;
+    }
+    setAccountError(null);
+    setNicknameSaving(true);
+    try {
+      await store.setNickname(name);
+    } catch (err) {
+      // Not a reason to stop: it is tried again once the diary exists.
+      console.error("setNickname failed", err);
+      setPendingNickname(name);
+      setNicknameErrorCode(authErrorCode(err));
+    } finally {
+      setNicknameSaving(false);
+      setNicknameStep("done");
+    }
+  }
+
   async function handleSetPassphrase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPassphraseError(null);
@@ -152,7 +264,7 @@ export default function SignupPage() {
       setPassphraseError("두 칸에 같은 일기 암호를 넣어 주세요.");
       return;
     }
-    const userInputs = [email, user.email ?? ""].filter(Boolean);
+    const userInputs = [loginIdFromEmail(user.email) ?? user.email ?? "", normalizeNickname(nickname)].filter(Boolean);
     if (!checkPassphraseStrength(passphrase, userInputs).isStrongEnough) {
       setPassphraseError("일기 암호가 너무 짧아요. 서로 상관없는 단어를 더 이어 붙여 보세요.");
       return;
@@ -170,16 +282,25 @@ export default function SignupPage() {
       const wrapped = await wrapSeed(seed, passphrase);
       wipeBytes(seed, privateKeys.x25519SecretKey, privateKeys.mlkem768SecretKey);
 
+      if (!store) throw new Error("No account to create the diary in");
       setOnboarding(true);
       keysCreated = true;
-      await createUserKeyRecord(user.uid, publicKeys, wrapped);
+      await store.createKeyRecord(publicKeys, wrapped);
+      if (pendingNickname) {
+        try {
+          await store.setNickname(pendingNickname);
+          setPendingNickname(null);
+        } catch (err) {
+          console.error("setNickname retry failed", err);
+        }
+      }
       loginPasswordRef.current = "";
       await refresh();
 
       const pendingText = takePendingEntry();
       if (pendingText) {
         try {
-          await writeEntry(user.uid, publicKeys, pendingText);
+          await store.writeEntry(publicKeys, pendingText);
           setNotice("첫 일기를 저장했어요");
         } catch (err) {
           console.error("saving the pre-signup entry failed", err);
@@ -198,7 +319,7 @@ export default function SignupPage() {
       console.error("handleSetPassphrase failed", err);
       if (!keysCreated) {
         setOnboarding(false);
-        setPassphraseError("일기장을 만들지 못했어요. 다시 시도해 주세요.");
+        setPassphraseError(withErrorCode("일기장을 만들지 못했어요. 다시 시도해 주세요.", err));
         loginPasswordRef.current = "";
         setPassphrase("");
         setPassphraseConfirm("");
@@ -232,15 +353,40 @@ export default function SignupPage() {
     try {
       await confirmPendingShamir();
       setShares([]);
+      setBackupReauth(false);
       finish();
     } catch (err) {
+      if (err instanceof ReauthRequiredError) {
+        setBackupReauth(true);
+        return;
+      }
       console.error("confirmPendingShamir failed", err);
       setBackupError(
-        "백업 코드를 저장하지 못했어요. 방금 보인 코드는 쓸 수 없으니 설정에서 다시 만들어 주세요."
+        withErrorCode("백업 코드를 저장하지 못했어요. 방금 보인 코드는 쓸 수 없으니 설정에서 다시 만들어 주세요.", err)
       );
     } finally {
       setBackupBusy(false);
     }
+  }
+
+  async function reauthThenConfirm(prove: () => Promise<void>) {
+    setBackupError(null);
+    setBackupBusy(true);
+    try {
+      await prove();
+      setReauthPassword("");
+    } catch (err) {
+      setBackupBusy(false);
+      if (isUserCancelledPopup(err)) return;
+      const code = authErrorCode(err);
+      setBackupError(
+        code === "auth/invalid-credential" || code === "auth/wrong-password"
+          ? "로그인 비밀번호를 다시 확인해 주세요."
+          : "다시 로그인하지 못했어요. 다시 시도해 주세요."
+      );
+      return;
+    }
+    await handleConfirmBackupCodes();
   }
 
   if (
@@ -259,12 +405,21 @@ export default function SignupPage() {
       >
         <form onSubmit={handleCreateAccount} className="space-y-4">
           <TextField
-            label="이메일"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={setEmail}
-            placeholder="name@example.com"
+            label="아이디"
+            autoComplete="username"
+            plain
+            maxLength={20}
+            value={loginId}
+            onChange={setLoginId}
+            hint="영문 소문자, 숫자, 밑줄(_)로 4–20자. 로그인할 때 써요."
+          />
+          <TextField
+            label="닉네임"
+            autoComplete="nickname"
+            maxLength={NICKNAME_MAX_LENGTH}
+            value={nickname}
+            onChange={setNicknameInput}
+            hint="앱에서 부를 이름이에요. 나중에 바꿀 수 있어요."
           />
           <PasswordField
             label="로그인 비밀번호"
@@ -272,6 +427,17 @@ export default function SignupPage() {
             value={accountPassword}
             onChange={setAccountPassword}
             hint="6자 이상이면 돼요. 일기 암호는 다음 단계에서 따로 정해요."
+          />
+          <TextField
+            label="비밀번호 재설정용 이메일 (선택)"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            required={false}
+            value={recoveryEmail}
+            onChange={setRecoveryEmailInput}
+            placeholder="name@example.com"
+            hint="넣어 두길 권해요. 로그인 비밀번호를 잊었을 때 이 주소로 재설정 링크를 받아요. 다른 데에는 쓰지 않아요."
           />
           {accountError && (
             <p role="alert" className="error-text">
@@ -308,6 +474,35 @@ export default function SignupPage() {
     );
   }
 
+  if (!onboarding && nicknameStep === "unknown") {
+    return <LoadingScreen />;
+  }
+
+  if (!onboarding && nicknameStep === "ask") {
+    return (
+      <AuthShell title="닉네임을 정해 주세요" step={1} lead="앱에서 부를 이름이에요. 나중에 설정에서 바꿀 수 있어요.">
+        <form onSubmit={(event) => void handleSaveNickname(event)} className="space-y-4">
+          <TextField
+            label="닉네임"
+            autoComplete="nickname"
+            autoFocus
+            maxLength={NICKNAME_MAX_LENGTH}
+            value={nickname}
+            onChange={setNicknameInput}
+          />
+          {accountError && (
+            <p role="alert" className="error-text">
+              {accountError}
+            </p>
+          )}
+          <button type="submit" disabled={nicknameSaving} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+            {nicknameSaving ? "저장하는 중…" : "다음"}
+          </button>
+        </form>
+      </AuthShell>
+    );
+  }
+
   if (step === "backup-reveal" && shares.length > 0) {
     return (
       <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-6 sm:px-6 sm:py-16">
@@ -331,10 +526,33 @@ export default function SignupPage() {
               ))}
             </div>
           </SecretReveal>
-          {backupError && (
-            <p role="alert" className="error-text">
-              {backupError}
-            </p>
+          {backupReauth && user ? (
+            <div className="card">
+              <ReauthPanel
+                reason="가입을 시작한 지 시간이 지나서, 백업 코드를 저장하려면 로그인을 한 번 더 확인해야 해요. 위의 코드는 그대로예요."
+                isGoogleAccount={isGoogleAccount}
+                password={reauthPassword}
+                onPasswordChange={setReauthPassword}
+                onSubmitPassword={(event) => {
+                  event.preventDefault();
+                  void reauthThenConfirm(() => reauthenticateWithPassword(user, reauthPassword));
+                }}
+                onGoogle={() => void reauthThenConfirm(() => reauthenticateWithGoogle(user))}
+                busy={backupBusy}
+                error={backupError}
+                onCancel={() => {
+                  setBackupReauth(false);
+                  setReauthPassword("");
+                  setBackupError(null);
+                }}
+              />
+            </div>
+          ) : (
+            backupError && (
+              <p role="alert" className="error-text">
+                {backupError}
+              </p>
+            )
           )}
         </div>
       </main>
@@ -390,6 +608,21 @@ export default function SignupPage() {
         </>
       }
     >
+      {(recoveryEmailFailed || pendingNickname) && (
+        <p className="note-warn">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+          <span>
+            {recoveryEmailFailed && pendingNickname
+              ? "닉네임과 재설정용 이메일은 아직 저장하지 못했어요."
+              : pendingNickname
+                ? "닉네임은 아직 저장하지 못했어요."
+                : "재설정용 이메일은 저장하지 못했어요."}{" "}
+            가입은 그대로 이어져요. 가입을 마친 뒤 설정에서 다시 정해 주세요.
+            {[nicknameErrorCode, recoveryEmailErrorCode].filter(Boolean).length > 0 &&
+              ` (오류 코드: ${[...new Set([nicknameErrorCode, recoveryEmailErrorCode].filter(Boolean))].join(", ")})`}
+          </span>
+        </p>
+      )}
       <form onSubmit={handleSetPassphrase} className="space-y-5">
         <div className="space-y-2">
           <PasswordField
@@ -400,7 +633,7 @@ export default function SignupPage() {
           />
           <PassphraseStrengthMeter
             passphrase={passphrase}
-            userInputs={[email, user?.email ?? ""].filter(Boolean)}
+            userInputs={[loginIdFromEmail(user?.email) ?? user?.email ?? "", normalizeNickname(nickname)].filter(Boolean)}
           />
           <p className="text-[0.8125rem] leading-relaxed text-ink-3">
             로그인 비밀번호와 다르게, 서로 상관없는 단어 4개 정도를 띄어 쓰면 기억하기 쉽고 안전해요. 비밀번호

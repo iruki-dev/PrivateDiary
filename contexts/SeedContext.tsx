@@ -9,15 +9,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useAuth } from "./AuthContext";
+import { useAccount } from "./AccountContext";
 import { usePreferences } from "./PreferencesContext";
 import { clearAllDrafts } from "@/lib/drafts";
-import {
-  getUserKeyRecord,
-  setShamirMethod as setShamirMethodFirestore,
-  disableShamirMethod as disableShamirMethodFirestore,
-  updateWrappedSeed,
-} from "@/lib/firebase/users";
 import { assertNativeIntegrity } from "@/lib/security/nativeIntegrity";
 import { isNativeApp, onNativeEvent } from "@/lib/native/bridge";
 import { BiometricGateError } from "@/lib/native/app";
@@ -125,8 +119,14 @@ interface SeedContextValue {
   lock: (reason?: LockReason) => void;
   /** Why the last lock happened, or null if the session was never unlocked (or has since been). */
   lockReason: LockReason | null;
-  /** Re-reads users/{uid} from Firestore (e.g. right after key issuance). */
+  /** Re-reads the diary's key record (e.g. right after key issuance). */
   refresh: () => Promise<void>;
+  /**
+   * The key record couldn't be read (the server unreachable, most often).
+   * Status stays "unknown"; the pages offer to try again — and, in the
+   * Android app, to open the phone's copy (lib/store/backup.ts).
+   */
+  loadError: boolean;
   /**
    * Passphrase change: requires the correct current passphrase. Throws
    * WrongPassphraseError otherwise, and changes nothing.
@@ -162,8 +162,9 @@ interface SeedContextValue {
 const SeedContext = createContext<SeedContextValue | undefined>(undefined);
 
 export function SeedProvider({ children }: { children: ReactNode }) {
-  const { user, status: authStatus } = useAuth();
+  const { store, status: accountStatus } = useAccount();
   const [status, setStatus] = useState<SeedStatus>("unknown");
+  const [loadError, setLoadError] = useState(false);
   const [publicKeys, setPublicKeys] = useState<HybridPublicKeysRaw | null>(null);
   const [privateKeys, setPrivateKeys] = useState<HybridPrivateKeys | null>(null);
   const [decryptionMethods, setDecryptionMethods] = useState<DecryptionMethodsConfig | null>(
@@ -198,23 +199,36 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     clearPendingShamir();
   }, [clearPendingShamir]);
 
+  const resetRecord = useCallback(() => {
+    wrappedSeedRef.current = null;
+    shamirWrappedSeedRef.current = null;
+    publicKeysRef.current = null;
+    setPublicKeys(null);
+    setDecryptionMethods(null);
+  }, []);
+
+  // Which store the last refresh() was for — a slow read for a diary that
+  // has since been switched away from must not land on the new one.
+  const storeRef = useRef(store);
+
   const refresh = useCallback(async () => {
-    if (!user) {
-      wrappedSeedRef.current = null;
-      shamirWrappedSeedRef.current = null;
-      publicKeysRef.current = null;
-      setPublicKeys(null);
-      setDecryptionMethods(null);
+    if (!store) {
+      resetRecord();
       setStatus("unknown");
       return;
     }
-    const record = await getUserKeyRecord(user.uid);
+    let record;
+    try {
+      record = await store.getKeyRecord();
+    } catch (err) {
+      console.error("reading the key record failed", err);
+      if (storeRef.current === store) setLoadError(true);
+      return;
+    }
+    if (storeRef.current !== store) return;
+    setLoadError(false);
     if (!record) {
-      wrappedSeedRef.current = null;
-      shamirWrappedSeedRef.current = null;
-      publicKeysRef.current = null;
-      setPublicKeys(null);
-      setDecryptionMethods(null);
+      resetRecord();
       setStatus("not-issued");
       return;
     }
@@ -224,32 +238,38 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     setPublicKeys(record.publicKeys);
     setDecryptionMethods(record.decryptionMethods);
     setStatus((prev) => (prev === "unlocked" ? "unlocked" : "locked"));
-  }, [user]);
+  }, [store, resetRecord]);
+
+  // A different diary (signing out, switching to the local diary, opening
+  // the phone's copy): nothing of the previous one's unlocked state may
+  // carry over.
+  useEffect(() => {
+    storeRef.current = store;
+    // Wiping in-memory keys when the diary changes is the point here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    wipePrivateKeys();
+    clearStagedSeed();
+    resetRecord();
+    setLoadError(false);
+    setLockReason(null);
+    setStatus("unknown");
+  }, [store, wipePrivateKeys, clearStagedSeed, resetRecord]);
 
   useEffect(() => {
-    if (authStatus === "signed-in") {
-      // refresh() reads Firestore (browser-only, async) to learn whether
-      // this uid has issued keys yet; it's also called imperatively later
+    if (accountStatus === "signed-in") {
+      // refresh() reads the store (browser-only, async) to learn whether
+      // this diary has issued keys yet; it's also called imperatively later
       // (e.g. right after onboarding writes the key-issuance doc), so it
       // can't be reduced to state derived purely from props during render.
       // eslint-disable-next-line react-hooks/set-state-in-effect
       void refresh();
-    } else if (authStatus === "signed-out") {
-      wipePrivateKeys();
-      clearStagedSeed();
+    } else if (accountStatus === "signed-out") {
       // Signing out must not leave the previous account's half-written
       // entry readable on a shared machine (lib/drafts.ts).
       clearAllDrafts();
-      setLockReason(null);
-      wrappedSeedRef.current = null;
-      shamirWrappedSeedRef.current = null;
-      publicKeysRef.current = null;
-      setPublicKeys(null);
-      setDecryptionMethods(null);
-      setStatus("unknown");
     }
-    // "loading" leaves seed state as-is until auth resolves.
-  }, [authStatus, refresh, wipePrivateKeys, clearStagedSeed]);
+    // "loading" leaves seed state as-is until the account resolves.
+  }, [accountStatus, refresh]);
 
   /**
    * Android app: the biometric check (contexts/BiometricGateContext.tsx)
@@ -258,17 +278,23 @@ export function SeedProvider({ children }: { children: ReactNode }) {
    * required, so a passphrase can't even be tried without it. The backup
    * codes stand in for the check (as they do for OTP) and mark it passed.
    */
-  const { required: biometricRequired, markPassed, clearPass } = useBiometricGate();
+  const { required: biometricRequired, markPassed, clearPass, settleDegraded } = useBiometricGate();
   const requireBiometricPass = useCallback(() => {
     if (biometricRequired) throw new BiometricGateError("required");
   }, [biometricRequired]);
 
-  const deriveAndUnlock = useCallback((seed: Uint8Array) => {
-    const derived = deriveHybridKeyPair(seed);
-    setPrivateKeys(derived.privateKeys);
-    setStatus("unlocked");
-    setLockReason(null);
-  }, []);
+  const deriveAndUnlock = useCallback(
+    (seed: Uint8Array) => {
+      const derived = deriveHybridKeyPair(seed);
+      setPrivateKeys(derived.privateKeys);
+      setStatus("unlocked");
+      setLockReason(null);
+      // A local diary whose biometric check was invalidated just proved its
+      // passphrase: the stale check is switched off (BiometricGateContext).
+      void settleDegraded().catch(() => {});
+    },
+    [settleDegraded]
+  );
 
   // Every function below that touches the raw seed or private keys calls
   // assertNativeIntegrity() first (lib/security/nativeIntegrity.ts) — the
@@ -330,31 +356,31 @@ export function SeedProvider({ children }: { children: ReactNode }) {
     async (oldPassphrase: string, newPassphrase: string) => {
       assertNativeIntegrity();
       requireBiometricPass();
-      if (!user || !wrappedSeedRef.current) {
+      if (!store || !wrappedSeedRef.current) {
         throw new Error("No wrapped seed available");
       }
       const rewrapped = await rewrapSeed(wrappedSeedRef.current, oldPassphrase, newPassphrase);
-      await updateWrappedSeed(user.uid, rewrapped);
+      await store.updateWrappedSeed(rewrapped);
       wrappedSeedRef.current = rewrapped;
     },
-    [user, requireBiometricPass]
+    [store, requireBiometricPass]
   );
 
   const resetPassphraseWithShamirShares = useCallback(
     async (shares: Uint8Array[], newPassphrase: string) => {
       assertNativeIntegrity();
-      if (!user || !shamirWrappedSeedRef.current) {
+      if (!store || !shamirWrappedSeedRef.current) {
         throw new InvalidShamirSharesError();
       }
       const seed = await combineSeedShamir(shares, shamirWrappedSeedRef.current);
       markPassed();
       const wrapped = await wrapSeed(seed, newPassphrase);
-      await updateWrappedSeed(user.uid, wrapped);
+      await store.updateWrappedSeed(wrapped);
       wrappedSeedRef.current = wrapped;
       deriveAndUnlock(seed);
       wipeBytes(seed);
     },
-    [user, deriveAndUnlock, markPassed]
+    [store, deriveAndUnlock, markPassed]
   );
 
   const stageSeedFromPassphrase = useCallback(
@@ -406,25 +432,25 @@ export function SeedProvider({ children }: { children: ReactNode }) {
   );
 
   const confirmPendingShamir = useCallback(async () => {
-    if (!user || !pendingShamirRef.current) {
+    if (!store || !pendingShamirRef.current) {
       throw new Error("No prepared Shamir shares to confirm");
     }
     const { n, k, wrappedSeed, otpBypassVerifier } = pendingShamirRef.current;
-    await setShamirMethodFirestore(user.uid, n, k, wrappedSeed, otpBypassVerifier);
+    await store.setShamir(n, k, wrappedSeed, otpBypassVerifier);
     shamirWrappedSeedRef.current = wrappedSeed;
     setDecryptionMethods({ shamir: { n, k } });
     clearStagedSeed();
-  }, [user, clearStagedSeed]);
+  }, [store, clearStagedSeed]);
 
   const disableShamir = useCallback(async () => {
-    if (!user || !stagedSeedRef.current) {
+    if (!store || !stagedSeedRef.current) {
       throw new Error("No staged seed to prove removal with");
     }
-    await disableShamirMethodFirestore(user.uid);
+    await store.disableShamir();
     shamirWrappedSeedRef.current = null;
     clearStagedSeed();
     setDecryptionMethods({ shamir: null });
-  }, [user, clearStagedSeed]);
+  }, [store, clearStagedSeed]);
 
   /**
    * Android app: leaving the app locks the diary at once — home button,
@@ -515,6 +541,7 @@ export function SeedProvider({ children }: { children: ReactNode }) {
         lock,
         lockReason,
         refresh,
+        loadError,
         changePassphrase,
         resetPassphraseWithShamirShares,
         decryptionMethods,

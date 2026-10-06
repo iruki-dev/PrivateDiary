@@ -2,7 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, useSyncExternalStore, type ReactNode } from "react";
 import { usePathname } from "next/navigation";
-import { useAuth } from "./AuthContext";
+import { useAccount } from "./AccountContext";
 import { isNativeApp, nativeHello, onNativeEvent, type NativeHello } from "@/lib/native/bridge";
 import { reportAutofillAllowed, reportReady } from "@/lib/native/app";
 import { autofillAllowed, isAutofillBlocked, subscribeAutofillBlocks } from "@/lib/native/autofill";
@@ -27,7 +27,7 @@ interface NativeContextValue {
 const NativeContext = createContext<NativeContextValue>({ hello: null, keyboardOpen: false });
 
 export function NativeProvider({ children }: { children: ReactNode }) {
-  const { status } = useAuth();
+  const { status } = useAccount();
   const pathname = usePathname();
   const [hello, setHello] = useState<NativeHello | null>(null);
   const [keyboardOpen, setKeyboardOpen] = useState(false);

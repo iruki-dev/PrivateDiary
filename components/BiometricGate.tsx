@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "rea
 import { useAuth } from "@/contexts/AuthContext";
 import { useBiometricGate } from "@/contexts/BiometricGateContext";
 import { BiometricGateError, haptic, resetBiometricGate } from "@/lib/native/app";
+import { onNativeEvent } from "@/lib/native/bridge";
 import { reauthenticateWithGoogle, reauthenticateWithPassword } from "@/lib/firebase/auth";
 import { authErrorCode, isUserCancelledPopup } from "@/lib/firebase/authErrors";
 import { LoadingState } from "@/components/LoadingState";
@@ -13,6 +14,9 @@ import { Icon } from "@/components/Icon";
 function gateMessage(code: string): string | null {
   switch (code) {
     case "cancelled":
+    // A prompt is already up (or waiting for the app to come back) — that
+    // one answers; nothing went wrong.
+    case "busy":
       return null;
     case "lockout":
       return "생체 인증을 여러 번 실패했어요. 잠시 뒤에 다시 해 주세요.";
@@ -36,7 +40,7 @@ function gateMessage(code: string): string | null {
  */
 export function BiometricGate({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
   const { user } = useAuth();
-  const { loading, status, required, verify, refresh } = useBiometricGate();
+  const { loading, status, required, verify, refresh, degraded } = useBiometricGate();
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [revealed, setRevealed] = useState(!required);
@@ -69,15 +73,38 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
     }
   }
 
-  // The prompt opens by itself the first time the gate shows.
+  // The prompt opens by itself each time the gate goes up (the diary
+  // locked), and again when the person comes back to the app with the gate
+  // still up. A request made while the app is in the background waits in
+  // the app until it is back on screen (android/.../BiometricGate.kt).
   useEffect(() => {
-    if (!required || loading || unknown || invalidated || autoPromptedRef.current) return;
+    if (!required) {
+      autoPromptedRef.current = false;
+      return;
+    }
+    if (loading || unknown || invalidated || autoPromptedRef.current) return;
     autoPromptedRef.current = true;
     // Opening the system biometric prompt is the external effect here.
     void check();
     // check() is recreated every render; the ref guards re-runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [required, loading, unknown, invalidated]);
+
+  // Read by the lifecycle listener below, which is registered once.
+  const latestRef = useRef({ promptable: false, checking: false, check });
+  useEffect(() => {
+    latestRef.current = { promptable: required && !loading && !unknown && !invalidated, checking, check };
+  });
+  useEffect(
+    () =>
+      onNativeEvent("lifecycle", (data) => {
+        // Only a real return (time away), never the app's own prompt closing.
+        const returned = data.state === "foreground" && typeof data.awayMs === "number" && data.awayMs > 0;
+        const latest = latestRef.current;
+        if (returned && latest.promptable && !latest.checking) void latest.check();
+      }),
+    []
+  );
 
   async function afterReauth() {
     if (!user) return;
@@ -127,6 +154,20 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
     </div>
   ) : null;
 
+  if (degraded && !required) {
+    return (
+      <>
+        <p className="note-warn w-full">
+          <Icon name="fingerprint" size={18} className="mt-0.5 shrink-0" />
+          <span>
+            휴대폰에 새 지문이나 얼굴이 등록돼서 생체 인증을 확인할 수 없어요. 일기 암호로 열 수 있고, 생체 인증은 설정에서
+            다시 켤 수 있어요.
+          </span>
+        </p>
+        {content}
+      </>
+    );
+  }
   if (!required) return content;
   if (loading) return <LoadingState />;
 

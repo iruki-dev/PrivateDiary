@@ -10,12 +10,15 @@ export function AuthShell({
   lead,
   step,
   children,
+  after,
 }: {
   title: string;
   lead?: ReactNode;
   /** Signup's place in its three steps, shown as a progress bar above the title. */
   step?: 1 | 2 | 3;
   children: ReactNode;
+  /** Below the card: other ways in (the Android app's on-phone diaries). */
+  after?: ReactNode;
 }) {
   return (
     // Top-aligned rather than .page-center: the signup steps swap content
@@ -31,6 +34,7 @@ export function AuthShell({
         {/* Fields sit on a white card: the --fill input colour needs the
             lighter surface around it to read as a field. */}
         <div className="space-y-5 rounded-3xl bg-surface p-5 sm:p-6">{children}</div>
+        {after}
       </div>
     </main>
   );

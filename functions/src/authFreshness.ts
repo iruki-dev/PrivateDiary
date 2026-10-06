@@ -47,3 +47,28 @@ export function isAuthTimeFresh(
 
 /** Sentinel HttpsError message the client (lib/firebase/otp.ts) matches on to know a reauth prompt, not a wrong code, is needed. */
 export const REAUTH_REQUIRED_MESSAGE = "REAUTH_REQUIRED";
+
+const OTP_SESSION_MS = 12 * 60 * 60 * 1000;
+
+/**
+ * The server-side twin of firestore.rules' credentialMutationAllowed():
+ * an account with 2-step verification needs a verified code from the last
+ * 12 hours; any other account needs a sign-in from the last few minutes.
+ * Returns which proof is missing, or null when the change may go ahead.
+ */
+export function missingCredentialProof(
+  token: { auth_time?: unknown; otpEnabled?: unknown; otpVerified?: unknown; otpVerifiedAt?: unknown },
+  nowMs: number,
+  maxAuthAgeMs: number
+): "otp" | "reauth" | null {
+  if (token.otpEnabled === true) {
+    const verifiedAt = typeof token.otpVerifiedAt === "number" ? token.otpVerifiedAt : 0;
+    return token.otpVerified === true && verifiedAt > nowMs - OTP_SESSION_MS ? null : "otp";
+  }
+  return typeof token.auth_time === "number" && isAuthTimeFresh(token.auth_time, nowMs, maxAuthAgeMs)
+    ? null
+    : "reauth";
+}
+
+/** Sentinel for "verify the authenticator code first" (lib/firebase/profile.ts matches on it). */
+export const OTP_REQUIRED_MESSAGE = "OTP_REQUIRED";

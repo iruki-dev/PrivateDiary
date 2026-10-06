@@ -50,14 +50,16 @@ lib/
                             # WrongPassphraseError와 동일한 패턴)
     hybridKem.ts             # encapsulateContentKey / decapsulateContentKey (X25519+ML-KEM-768)
     entry.ts                  # encryptEntry / decryptEntry (일기 항목 단위)
+    archive.ts                # lockExport / unlockExport — "잠긴 파일" 내보내기 (파일 암호 + PBKDF2 + AES-GCM)
     padding.ts                 # 항목 길이 패딩 (Padmé + 길이 접두사) — 암호문 크기로 새던
                                 # 평문 길이를 가린다. 순수 바이트 조작만 하고 크립토는 없다.
     codec.ts                    # 위 타입들의 base64 Firestore 저장 변환 (암호화 로직 없음)
     __tests__/                  # Vitest 단위 테스트
 
-  firebase/          # Firebase Auth(이메일/비밀번호 + Google) / Firestore 클라이언트 연동.
+  firebase/          # Firebase Auth(아이디/비밀번호 + Google) / Firestore 클라이언트 연동.
                       # 평문·키를 다루지 않고, lib/crypto의 공개 API만 호출한다.
     config.ts, auth.ts, users.ts, entries.ts
+    profile.ts         # 닉네임(Auth 표시 이름) · 비밀번호 재설정용 이메일(setRecoveryEmail) · 재설정 메일 요청
     otp.ts             # functions/의 OTP callable 래퍼(계정 삭제 포함). 여기도 크립토 없음 — 접근 게이트일 뿐.
 
   entries/           # 복호화가 끝난 뒤의 읽기 UX 로직. 크립토·Firebase·React를 일절
@@ -65,6 +67,19 @@ lib/
     search.ts          # 클라이언트 검색(NFC 정규화, AND 결합, 하이라이트 범위, 스니펫) + 월별 그룹핑
     calendar.ts         # 달력 그리드 · 일자별 개수 · 연속 기록 · "이날의 기록" — createdAt만 사용
     export.ts            # 복호화된 일기를 Markdown/JSON 아카이브로 직렬화
+    import.ts            # 불러오기: JSON/잠긴 파일 해석, 이미 있는 일기 건너뛰기, 하루 한도 계산
+    importLog.ts         # 최근 24시간에 이 기기에서 불러온 개수(하루 한도 추정용, 개수만)
+
+  store/             # "일기장이 사는 곳" 한 가지 인터페이스(DiaryStore) — 아래 "일기장이 사는 곳" 참조
+    types.ts           # DiaryStore · StoredEntry · UserKeyRecord
+    cloud.ts           # 계정(Firestore) — lib/firebase를 그대로 쓰고, 켜져 있으면 휴대폰 백업에 복사
+    local.ts           # Android 휴대폰 일기장(완전 로컬) — 앱 IndexedDB
+    backup.ts          # Android 휴대폰 백업 — 계정 일기의 잠긴 사본(읽기 전용으로 열림)
+    idb.ts, records.ts # IndexedDB 래퍼 / 저장 형태 변환 (순수)
+
+  loginId.ts            # 아이디 ↔ 예약 도메인 이메일(id.privatediary.invalid), 닉네임·이메일 검증 (순수)
+  deviceMode.ts         # 이 기기의 모드(cloud | local)와 휴대폰 일기장 id
+  openFile.ts           # 파일 고르기: 웹은 <input type=file>, 앱은 Android 문서 선택기(file.open)
 
   preferences.ts          # 계정 설정의 형태·기본값·검증. `preferences`(표시 설정, 게이트 없음)와
                            # `security`(자동 잠금·임시 저장, credentialMutationAllowed() 게이트)로
@@ -89,6 +104,8 @@ hooks/
 
 contexts/
   AuthContext.tsx    # Firebase 로그인 상태만 추적
+  AccountContext.tsx # 지금 열린 일기장: 계정(cloud) / 휴대폰 일기장(local) / 휴대폰 백업(backup)과 그 store.
+                     # 아래 컨텍스트와 화면은 Firebase 사용자 대신 이것을 본다
   PreferencesContext.tsx  # 계정 단위 설정 — users/{uid}.preferences (쓰는 글 가리기, 자동 잠금
                            # 시간, 임시 저장 여부). AuthContext 바로 아래이자 SeedContext 위에
                            # 위치해야 한다 — SeedContext가 여기서 자동 잠금 시간을 읽는다
@@ -118,7 +135,10 @@ components/
   EntryReader.tsx                        # 일기 한 건을 읽기 크기로 — 라우트가 아니라 일기장 안의 화면(히스토리에 흔적을 남기지 않음)
   DiaryCover.tsx                          # 잠긴 일기장의 표지 — 개수와 날짜(평문 메타데이터)만으로 그린다
   HighlightedText.tsx                    # 검색어 일치 구간을 <mark>로 표시
-  ExportEntriesCard.tsx                   # 복호화된 일기를 파일로 내려받기 (평문 경고 포함)
+  ExportEntriesCard.tsx                   # 복호화된 일기를 파일로 내려받기 (평문 경고 포함) + 잠긴 파일
+  ImportEntriesCard.tsx                   # 내보낸 JSON/잠긴 파일에서 불러오기
+  AccountGateFallback.tsx                 # 일기장을 못 불러왔을 때(서버 연결 실패) — 다시 시도 / 휴대폰 백업 열기
+  DeviceOptions.tsx                       # Android 로그인 화면 아래: 휴대폰 백업 목록, 서버 없이 쓰기
   NavBar.tsx, TabBar.tsx                    # 넓은 화면 상단 바 / 휴대폰 하단 탭 바(쓰기·일기장·설정)
   Icon.tsx, Toast.tsx                       # 하나뿐인 아이콘 세트(24 격자, 선 1.75) / 저장 확인 토스트
   settings/                                 # /settings의 그룹·행·스위치(ui.tsx), 본인 확인·재로그인 공용 폼(forms.tsx)
@@ -128,7 +148,8 @@ app/                  # Next.js App Router 페이지
   page.tsx             # 첫 화면 = 방문자용 오늘의 일기(서버 렌더링). 저장하면 가입으로 이어지고,
                        # 쓴 글은 메모리에만 들고 있다가 가입 직후 첫 일기로 저장(contexts/PendingEntryContext.tsx)
   login/, signup/, settings/, write/, entries/
-                       # signup: 계정 → 일기 암호 → 백업 코드(3개 중 2개) 3단계
+                       # signup: 계정(아이디·닉네임·로그인 비밀번호·재설정용 이메일) → 일기 암호 → 백업 코드(3개 중 2개)
+  local/               # Android: 서버 없이 이 휴대폰에만 쓰기 — 안내, 휴대폰 일기장 만들기
   (docs)/              # 서비스와 분리된 도움말·정책 영역: /docs/*, /privacy, /terms.
                        # 서비스 화면은 라벨과 한 줄 설명만 두고 "자세히"로 여기에 연결한다
   manifest.ts          # 웹 앱 매니페스트 (홈 화면 설치 — "설치형 앱(PWA)" 참조)
@@ -140,7 +161,7 @@ app/                  # Next.js App Router 페이지
 functions/             # Firebase Cloud Functions — 이 프로젝트에서 유일한 서버 로직.
                         # OTP 코드 검증과 계정 삭제만 담당하고 시드·개인키·평문은 절대 다루지 않는다.
                         # startOtpSetup / confirmOtpSetup / verifyOtp / verifyShamirOtpBypass /
-                        # disableOtp / deleteAccount
+                        # disableOtp / deleteAccount / setRecoveryEmail / requestLoginPasswordReset
                         # (자세한 설계 근거는 functions/src/index.ts 모듈 주석 참조)
 
 firestore.rules, firestore.indexes.json, firebase.json, .firebaserc
@@ -224,9 +245,78 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
 
 > **일부러 넣지 않은 것 두 가지.** (1) **필터 상태를 URL에 넣지 않는다** — `?day=2026-09-14` 같은 쿼리스트링은 브라우저 히스토리(와 그걸 동기화하는 모든 것)에 "어느 날짜를 다시 들춰봤는가"의 흔적을 남긴다. 쓰는 글 가리기가 걱정하는 바로 그 공용 기기 시나리오다. (2) **최근 검색어를 저장하지 않는다** — "장례식"을 기억하는 검색창은 이 앱의 암호화가 막는 어떤 것보다 나쁜 유출이다. 필터는 React 상태로만 존재하고 탭과 함께 사라진다.
 
+## 아이디 로그인과 비밀번호 재설정 메일
+
+이메일 대신 **아이디 + 로그인 비밀번호 + 닉네임**으로 가입한다. Google 로그인은 그대로이고, Google 계정도 가입 중에
+닉네임을 정한다.
+
+- **아이디는 예약 도메인의 이메일로 저장한다** (`lib/loginId.ts`, `functions/src/loginId.ts` — 두 패키지가 모듈을
+  공유하지 않아 상수를 관례로 복제한다). Firebase Auth의 비밀번호 로그인은 이메일을 키로 쓰므로 `diary_kim`은
+  `diary_kim@id.privatediary.invalid`로 가입한다. `.invalid`는 RFC 2606 예약 TLD라 메일이 갈 수 없다. Firebase가
+  이메일 중복을 막으므로 아이디도 자동으로 유일하다. 영문 소문자·숫자·밑줄 4–20자, 대소문자 무시.
+- **이전에 이메일로 가입한 계정은 그대로 동작한다.** 로그인 칸에 `@`가 있으면 이메일로 보고 그대로 로그인하고,
+  비밀번호 재설정도 예전처럼 그 이메일로 간다.
+- **닉네임**은 Firebase Auth 계정의 표시 이름(`displayName`)에 둔다. 계정 자신의 토큰으로 Auth에 쓰므로 Firestore 규칙이
+  필요 없고, 계정을 만든 직후에도 바로 저장된다. (처음 버전은 `profiles/{uid}` 문서에 썼는데, 계정 생성 직후의 Firestore 쓰기는
+  아직 로그인 전 신원으로 나가 거부될 수 있어 가입이 막혔다.) Google 계정은 Google 이름으로 시작해 가입 중에 닉네임을 정한다.
+- **비밀번호 재설정용 이메일**(선택, 가입 화면과 설정에서 권장)은 `accountRecovery/{uid}.email`. 클라이언트는 읽기만
+  하고 쓰기는 `setRecoveryEmail` 함수만 한다 — **이 주소가 로그인 비밀번호를 재설정할 수 있는 사람을 정하므로**,
+  세션만 탈취한 공격자가 자기 주소로 바꿔 로그인을 가로채지 못하게 `credentialMutationAllowed()`와 같은 증명
+  (OTP 계정은 12시간 내 OTP, 아니면 5분 내 실제 로그인 — `missingCredentialProof`)을 서버에서 요구한다. 아이디
+  계정에서만 받는다(이메일·Google 계정은 이미 자기 주소로 재설정 메일이 간다).
+- **재설정 요청**(`requestLoginPasswordReset`)은 로그인 없이 부르는 함수다. 아이디 → 사용자 → 재설정용 이메일을
+  찾아, Admin SDK `generatePasswordResetLink`로 Firebase의 재설정 링크를 만들어 `mail` 컬렉션에 쓴다.
+  존재하지 않는 아이디, 이메일이 없는 아이디, 제한에 걸린 요청 모두 같은 `{ ok: true }`로 답해 계정 존재 여부가
+  드러나지 않는다. 계정당 2분에 한 통(`resetMailThrottle/{uid}`, 트랜잭션). 메일 본문은 일기 암호는 바뀌지
+  않는다고 적는다.
+
+> **배포 전 필요한 것**: 메일 발송은 Firebase 확장 프로그램 **Trigger Email from Firestore**(`firebase/firestore-send-email`)가
+> `mail` 컬렉션을 보고 보낸다. Firebase 콘솔 > Extensions에서 설치하고 SMTP 연결 정보와 보내는 주소를 넣는다
+> (컬렉션 이름 `mail`). 설치하지 않으면 재설정 요청은 성공으로 답하지만 메일이 나가지 않는다. `mail`·`resetMailThrottle`은
+> 규칙에서 클라이언트 접근이 막혀 있다(매치 없음 / `if false`).
+
+## 일기장이 사는 곳 (`lib/store`)
+
+화면과 컨텍스트는 이제 Firebase를 직접 부르지 않고 `contexts/AccountContext.tsx`가 주는 **store**(`DiaryStore`)를 쓴다.
+store는 서버가 늘 갖던 것만 다룬다 — 공개키, 일기 암호로 잠긴 시드, 백업 코드로 잠긴 시드, 암호화된 일기. 어떤
+store에도 일기 암호·시드·평문은 들어가지 않고, 그 위에서 같은 `lib/crypto`가 돈다.
+
+| 종류 | 어디에 | 쓰기 | 언제 |
+| --- | --- | --- | --- |
+| `cloud` | Firestore (`users`, `entries`) | 예 | 로그인한 계정 |
+| `local` | Android 앱 IndexedDB | 예 | 휴대폰 일기장(완전 로컬) |
+| `backup` | Android 앱 IndexedDB | 아니요 | 계정 일기의 휴대폰 사본을 열었을 때 |
+
+일기장이 바뀌면(로그아웃, 모드 전환, 백업 열기) `SeedContext`가 열린 키·스테이징된 시드를 먼저 지우고 새 store를
+읽는다. 생체 인증은 store의 id(계정 uid 또는 휴대폰 일기장 id)별로 따로라 서로의 통과를 공유하지 않는다. 키 레코드를
+읽지 못하면(서버 연결 실패) 무한 로딩 대신 `AccountGateFallback`이 이유와 다시 시도, 휴대폰 백업 열기를 보여 준다.
+
+## 불러오기와 잠긴 파일
+
+- **잠긴 파일로 내보내기** (`lib/crypto/archive.ts`): JSON 내보내기를 이용자가 정한 **파일 암호**로 잠근다.
+  PBKDF2-SHA-256(앱과 같은 60만 회, 새 salt) + AES-256-GCM, 헤더(형식·버전·KDF·cipher 매개변수)를 AAD로 묶어
+  반복 횟수를 낮추는 식의 변조도 열리지 않게 했다. 여는 쪽은 60만 회 미만·1천만 회 초과를 아예 거부한다. 파일
+  암호는 오프라인 추측 대상이라 일기 암호와 같은 강도 기준을 요구하고, `autoComplete="passphrase"`로 비밀번호
+  관리자에 남기지 않는다.
+- **불러오기** (`lib/entries/import.ts`, `components/ImportEntriesCard.tsx`): JSON 내보내기와 잠긴 파일을 받는다
+  (Markdown은 `## `가 본문과 구별되지 않아 받지 않는다). 각 일기를 **이 일기장의 공개키로 새로 암호화**해 일반 쓰기와
+  같은 길(`store.writeEntry`)로 저장하므로 파일 내용이 그대로 서버에 올라가지 않는다.
+  - **처음 쓴 시각을 유지한다.** `writeEntry`의 `createdAt` 옵션이 Firestore `createdAt`과 AAD의 `createdAt`을 원래
+    시각으로 쓴다. 규칙은 원래부터 `createdAt is timestamp`만 요구했고 AAD 값은 늘 클라이언트가 정했다. 불러온
+    일기도 다음 `entrySeq`를 받으므로 순번 무결성 검사는 그대로다. 대신 목록·달력·표지·내보내기는 이제 `entrySeq`가
+    아니라 **날짜순**(같은 시각은 `entrySeq`)으로 정렬한다.
+  - **같은 시각 + 같은 내용(NFC)은 건너뛴다.** 두 번 불러와도 늘지 않고, 중간에 멈춘 불러오기는 다시 돌리면 나머지만
+    가져온다. 그래서 일기가 있는 일기장은 열린 뒤에만 불러올 수 있다(비교하려면 평문이 필요). 빈 일기장은 쓰기처럼
+    공개키만으로 불러온다.
+  - **하루 한도와 충돌하지 않는다.** 서버 트리거(`enforceEntryRateLimit`)는 한도를 넘는 일기를 지워 순번에 빈칸을
+    만든다. 그래서 불러오기 전에 남은 여유(최근 24시간에 쓴 일기 + 이 기기가 불러온 개수 `importLog`, 낮게 잡힌다)만큼만
+    가져오고, 나머지는 다음 날이나 한도를 바꾼 뒤 다시 불러오라고 안내한다.
+- Android 앱은 WebView에 파일 선택기가 없어 `file.open` 브리지(`MainActivity.openTextDocument`, Android 문서 선택기,
+  32MB 상한)로 사람이 고른 파일 하나의 텍스트만 받는다.
+
 ## 내보내기
 
-`/entries`의 "내보내기"에서 복호화된 일기 전체를 Markdown(`.md`) 또는 JSON(`.json`)으로 내려받는다. 정렬은 `entrySeq` 기준 오래된 순(아카이브의 읽기 순서이며, 타임스탬프가 아직 확정되지 않은 항목도 올바른 자리에 들어간다).
+`/entries`의 "내보내기"에서 복호화된 일기 전체를 Markdown(`.md`), JSON(`.json`), 또는 잠긴 파일(위 "불러오기와 잠긴 파일")로 내려받는다. 정렬은 쓴 시각 기준 오래된 순, 같은 시각은 `entrySeq` 순(아카이브의 읽기 순서이며, 타임스탬프가 아직 확정되지 않은 항목은 맨 뒤 — 불러온 옛 일기도 자기 날짜 자리에 들어간다).
 
 이 기능이 있어야 하는 이유는 이 앱의 엄격함 그 자체다. §3.6 규칙 5와 §9는 암호와 백업 코드를 모두 잃으면 일기가 영구히 사라진다고 못박고, §1.1 규칙 4는 그게 버그가 아니라 설계 목표라고 한다. **비밀번호 하나를 잊는 것만으로 사용자의 글을 정말로 파괴할 수 있는 설계라면, 스스로 사본을 들고 있을 수단을 반드시 줘야 한다** — 그러지 않으면 "당신만의 데이터"는 조용히 "삐끗하기 전까지만 당신의 데이터"가 된다.
 
@@ -295,6 +385,22 @@ proxy.ts               # 요청마다 CSP nonce를 발급하는 Next.js Proxy(�
   StrongBox/TEE에 둡니다). 일기가 잠기거나 앱을 벗어나면 다시 확인합니다.
 - **앱을 벗어나면 즉시 잠금**, 화면 캡처·녹화·최근 앱 미리보기 차단, 오버레이 숨김, 키보드 학습 차단,
   접근성 악용 차단, 백업·기기 이동 제외, 네트워크 허용 목록.
+- **휴대폰 백업** (설정 → 데이터, 계정마다 켜기): 계정의 키 레코드와 암호화된 일기를 앱 IndexedDB에 복사해 둔다
+  (`lib/store/backup.ts`). 켜져 있는 동안 `CloudStore`가 읽고 쓸 때마다 덧붙이고, 서버에서 사라진 일기도 지우지
+  않는다. 일기 암호를 바꾸거나 백업 코드를 다시 만들면 사본의 래핑도 바로 새것으로 바꿔 옛 자격 증명이 사본도 열지
+  못하게 한다. 서버에 연결할 수 없으면 일기장/로그인 화면에서 읽기 전용으로 연다(로그인 불필요). OTP는 서버의
+  게이트라 휴대폰 사본은 지키지 못한다 — 화면과 도움말에 그렇게 적었다.
+- **서버 없이 이 휴대폰에만 쓰기 (완전 로컬)** (`/local`, `lib/store/local.ts`, `lib/deviceMode.ts`): 계정 없는
+  일기장을 앱 IndexedDB에 둔다. 같은 암호화, 같은 일기 암호·백업 코드·자동 잠금·생체 인증. 이 모드에서는
+  `MainActivity`가 **모든 네트워크 요청을 막고**(`app.network`, SharedPreferences에 저장해 재시작 직후 첫 요청부터 적용)
+  페이지의 CSP와 별개로 두 번째 벽이 된다. 계정과 섞이지 않도록 전환할 때 로그아웃하고, 일기장 id·생체 인증·설정이
+  따로다. 계정으로 돌아가도 휴대폰 일기장은 남는다. 옮길 때는 잠긴 파일로 내보내고 불러온다.
+- **생체 인증이 영영 통과되지 않던 버그 수정**: 앱을 벗어나 일기가 잠기면 페이지가 곧바로 생체 인증을 요청하는데,
+  그 순간 액티비티는 멈춰 있다. androidx `BiometricPrompt.authenticate()`는 `onSaveInstanceState` 이후 호출되면
+  아무 콜백 없이 무시하므로 `inFlight`가 영원히 남아, 이후 모든 시도가 `busy` → "생체 인증을 확인하지 못했어요"로
+  끝났다(그리고 `ownUiShown`도 남아 앱을 벗어나도 잠기지 않았다). 이제 액티비티가 resumed가 될 때까지 기다렸다가
+  띄우고(`whenResumed`), 화면에 실제로 떴을 때만 "앱 자체 UI"로 센다. 페이지는 돌아왔을 때 다시 자동으로 띄우고,
+  `busy`는 오류로 보이지 않는다.
 
 빌드·서명·Firebase 설정과 위협별 보호 장치 표는 [android/README.md](android/README.md)에 있습니다.
 Play 출시 전 테스터 빌드는 Actions의 **Android tester build** 워크플로로 Firebase App Distribution에
@@ -347,6 +453,8 @@ pnpm exec firebase deploy --only firestore:rules,firestore:indexes,functions --p
 - **항목 길이 패딩 때문에 배포 순서가 중요하다** — 클라이언트(Vercel)를 먼저 올리고 그 다음 `firestore:rules`를 배포할 것. 자세한 이유는 "항목 길이 패딩" 참조.
 - **Cloud Functions는 Firebase Blaze(종량제) 요금제가 필요하다** — Spark(무료) 요금제에서는 배포되지 않는다. Firebase 콘솔에서 결제 계정을 연결해 Blaze로 전환한 뒤 배포할 것. 이 앱 규모(개인용, 월 수십~수백 건의 OTP 검증)에서는 Cloud Functions 무료 한도(월 200만 건 호출) 안에 들어올 가능성이 높다.
 - `deleteAccount`(계정 삭제)도 같은 배포 단위에 들어 있다 — 이 함수를 배포하지 않으면 `/settings`의 계정 삭제가 동작하지 않는다.
+- `setRecoveryEmail` · `requestLoginPasswordReset`(아이디 계정의 재설정용 이메일 / 재설정 메일)도 같은 배포 단위다. 메일을
+  실제로 보내려면 **Trigger Email from Firestore** 확장 프로그램이 필요하다 — "아이디 로그인과 비밀번호 재설정 메일" 참조.
 - `functions/`는 루트와 별도로 `npm install`한다 (Cloud Functions 배포 단위 관례) — `cd functions && npm install`.
 
 ## Vercel 배포

@@ -14,8 +14,10 @@ export default function GettingStartedPage() {
 
       <h2 id="account">1. 계정 만들기</h2>
       <p>
-        이메일과 로그인 비밀번호로 가입하거나 Google 계정으로 계속할 수 있습니다. 로그인 비밀번호는
-        계정을 확인하는 데만 쓰이며, 일기를 여는 데는 쓰이지 않습니다.
+        아이디·닉네임·로그인 비밀번호로 가입하거나 Google 계정으로 계속할 수 있습니다. 로그인 비밀번호는
+        계정을 확인하는 데만 쓰이며, 일기를 여는 데는 쓰이지 않습니다. 로그인 비밀번호를 잊을 때를 대비해{" "}
+        <Link href="/docs/account#reset-email">비밀번호 재설정용 이메일</Link>을 넣어 두길 권합니다. Android 앱에서는 계정 없이{" "}
+        <Link href="/docs/android#local">이 휴대폰에만 쓰는 일기장</Link>을 만들 수도 있습니다.
       </p>
 
       <h2 id="passphrase">2. 일기 암호 정하기</h2>

@@ -13,8 +13,10 @@ import {
   type User,
 } from "firebase/auth";
 import { auth } from "./config";
+import { requestLoginPasswordReset } from "./profile";
 import { isNativeApp } from "@/lib/native/bridge";
 import { googleIdToken } from "@/lib/native/app";
+import { isEmailLike, loginIdToEmail, normalizeLoginId, signInEmailFor } from "@/lib/loginId";
 
 /**
  * Firebase Authentication only (ARCHITECTURE.md §2: "계정 로그인(신원 확인)만
@@ -23,19 +25,22 @@ import { googleIdToken } from "@/lib/native/app";
  * only in contexts/SeedContext.tsx.
  *
  * Two sign-in methods, matching what was enabled in the Firebase console:
- * email/password and Google. Note for Phase 4 onboarding: ARCHITECTURE.md
- * §3.6 rule 2 (passphrase must differ from the login password) only applies
- * to the email/password path — Google-authenticated users have no login
- * password to compare against.
+ * id/password (Firebase's email/password provider under a reserved
+ * domain — lib/loginId.ts) and Google. Accounts made with a real email
+ * before ids existed sign in with that email through the same field. Note
+ * for Phase 4 onboarding: ARCHITECTURE.md §3.6 rule 2 (passphrase must
+ * differ from the login password) only applies to the password path —
+ * Google-authenticated users have no login password to compare against.
  */
 
-export async function signUpWithEmail(email: string, password: string): Promise<User> {
-  const credential = await createUserWithEmailAndPassword(auth, email, password);
+export async function signUpWithLoginId(loginId: string, password: string): Promise<User> {
+  const credential = await createUserWithEmailAndPassword(auth, loginIdToEmail(loginId), password);
   return credential.user;
 }
 
-export async function signInWithEmail(email: string, password: string): Promise<User> {
-  const credential = await signInWithEmailAndPassword(auth, email, password);
+/** `identifier`: an id, or the email of an account made before ids. */
+export async function signInWithLoginId(identifier: string, password: string): Promise<User> {
+  const credential = await signInWithEmailAndPassword(auth, signInEmailFor(identifier), password);
   return credential.user;
 }
 
@@ -57,11 +62,19 @@ export async function signInWithGoogle(): Promise<User> {
  * Resets the LOGIN password only. The diary passphrase is a different
  * secret that never reaches Firebase (rule 5), so nothing here can reset
  * it — the UI that calls this must say so. Resolves the same way whether
- * or not the address has an account (Firebase's email enumeration
- * protection), so the caller can't and shouldn't tell the two apart.
+ * or not the account exists (Firebase's email enumeration protection for
+ * emails; requestLoginPasswordReset answers alike for ids), so the caller
+ * can't and shouldn't tell the cases apart.
+ *
+ * An id account's link goes to the reset email its owner added, if any
+ * (lib/firebase/profile.ts); an email account's to its own address.
  */
-export async function sendLoginPasswordReset(email: string): Promise<void> {
-  await sendPasswordResetEmail(auth, email);
+export async function sendLoginPasswordReset(identifier: string): Promise<void> {
+  if (isEmailLike(identifier)) {
+    await sendPasswordResetEmail(auth, identifier.trim());
+    return;
+  }
+  await requestLoginPasswordReset(normalizeLoginId(identifier));
 }
 
 export function subscribeToAuthState(callback: (user: User | null) => void): () => void {

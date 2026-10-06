@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { docHref } from "@/lib/site";
 
@@ -19,9 +19,9 @@ function isCurrent(pathname: string, href: string): boolean {
 
 /** True once there's a finished account — the app chrome only makes sense then. */
 export function useHasAccount(): boolean {
-  const { status: authStatus } = useAuth();
+  const { status: accountStatus } = useAccount();
   const { status: seedStatus } = useSeed();
-  return authStatus === "signed-in" && seedStatus !== "not-issued" && seedStatus !== "unknown";
+  return accountStatus === "signed-in" && seedStatus !== "not-issued" && seedStatus !== "unknown";
 }
 
 /**
@@ -36,7 +36,7 @@ export function useHasAccount(): boolean {
  * links is easy to hit by accident. Both live in /settings' 계정 group.
  */
 export function NavBar() {
-  const { status: authStatus } = useAuth();
+  const { status: authStatus } = useAccount();
   const hasAccount = useHasAccount();
   const pathname = usePathname();
 

@@ -21,15 +21,8 @@
  * (the unused `signingPublicKey` in the original schema was headed that
  * way), which would change the storage format.
  */
-export interface EntrySequenceIntegrity {
-  ok: boolean;
-  /** Sequence numbers that should exist between 1 and the highest seen, but don't. */
-  missingSeqs: number[];
-  /** Sequence numbers that appear on more than one entry. */
-  duplicateSeqs: number[];
-  /** Entries the counter says were written but that came back missing from the tail. */
-  missingTailCount: number;
-}
+export type { EntrySequenceIntegrity } from "@/lib/store/types";
+import type { EntrySequenceIntegrity } from "@/lib/store/types";
 
 export function checkEntrySequence(
   // Structural, not `Pick<StoredEntry, ...>`: keeping this module free of

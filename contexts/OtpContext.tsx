@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import { onIdTokenChanged, type User } from "firebase/auth";
 import { auth } from "@/lib/firebase/config";
+import { useAccount } from "./AccountContext";
 import {
   confirmOtpSetup,
   disableOtp as disableOtpCall,
@@ -122,12 +123,17 @@ export function OtpProvider({ children }: { children: ReactNode }) {
     [refreshClaims]
   );
 
+  // 2-step verification guards an account on the server. A local diary
+  // and the phone's copy of an account have no server gate to pass.
+  const { account } = useAccount();
+  const serverAccount = account?.kind === "cloud";
+
   return (
     <OtpContext.Provider
       value={{
-        loading,
-        otpEnabled,
-        otpVerified,
+        loading: serverAccount ? loading : false,
+        otpEnabled: serverAccount ? otpEnabled : false,
+        otpVerified: serverAccount ? otpVerified : false,
         verify,
         verifyViaShamirBypass,
         startSetup,

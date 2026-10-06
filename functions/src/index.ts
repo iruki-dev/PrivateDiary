@@ -6,7 +6,20 @@ import { onCall, HttpsError, type CallableRequest } from "firebase-functions/v2/
 import { onDocumentCreated } from "firebase-functions/v2/firestore";
 import { logger } from "firebase-functions/v2";
 import { generateSecret, generateURI, verify } from "otplib";
-import { isAuthTimeFresh, REAUTH_REQUIRED_MESSAGE } from "./authFreshness";
+import {
+  isAuthTimeFresh,
+  missingCredentialProof,
+  OTP_REQUIRED_MESSAGE,
+  REAUTH_REQUIRED_MESSAGE,
+} from "./authFreshness";
+import {
+  loginIdFromEmail,
+  loginIdToEmail,
+  mayResendResetMail,
+  parseLoginId,
+  parseRecoveryEmail,
+  resetMailMessage,
+} from "./loginId";
 import {
   decideRateLimit,
   resolveDailyEntryLimit,
@@ -504,6 +517,9 @@ export const deleteAccount = onCall({ invoker: "public" }, async (request) => {
 
   await getFirestore().collection("users").doc(uid).delete();
   await secretRef.delete();
+  await getFirestore().collection(PROFILES_COLLECTION).doc(uid).delete();
+  await getFirestore().collection(ACCOUNT_RECOVERY_COLLECTION).doc(uid).delete();
+  await getFirestore().collection(RESET_MAIL_THROTTLE_COLLECTION).doc(uid).delete();
 
   // Last: once the auth user is gone the caller's session is void, so
   // anything after this would be unreachable on a retry. Doing it last
@@ -600,3 +616,97 @@ export const enforceEntryRateLimit = onDocumentCreated(
     }
   }
 );
+
+// Nicknames briefly lived here in a first version (they are now the Auth
+// account's display name, which deleteUser removes); still cleaned up.
+const PROFILES_COLLECTION = "profiles";
+const ACCOUNT_RECOVERY_COLLECTION = "accountRecovery";
+const RESET_MAIL_THROTTLE_COLLECTION = "resetMailThrottle";
+// Read by the "Trigger Email from Firestore" extension, which does the
+// actual sending (README.md → "아이디 로그인과 비밀번호 재설정 메일").
+// Clients can't touch it: firestore.rules has no match for it.
+const MAIL_COLLECTION = "mail";
+
+/**
+ * Sets or removes the email a LOGIN-password reset link goes to, for an
+ * account that signs in with an id (functions/src/loginId.ts).
+ *
+ * Gated like every other credential-bearing change (firestore.rules'
+ * credentialMutationAllowed()): this address decides who can reset the
+ * login password, so a session-only attacker who could change it could
+ * take over the login — a 2-step-verification account needs a verified
+ * code, any other account a sign-in from the last few minutes. Clients
+ * can read their own accountRecovery/{uid} but never write it; only this
+ * function does.
+ *
+ * Nothing here touches the diary's encryption: the login password and the
+ * diary passphrase are separate secrets, and resetting the first never
+ * opens the second.
+ */
+export const setRecoveryEmail = onCall({ invoker: "public" }, async (request) => {
+  requireAuth(request.auth?.uid);
+  const uid = request.auth.uid;
+  if (!loginIdFromEmail(request.auth.token.email)) {
+    // Email and Google accounts already get reset mail at their own address.
+    throw new HttpsError("failed-precondition", "Only id accounts keep a separate reset email.");
+  }
+  const missing = missingCredentialProof(request.auth.token, Date.now(), REAUTH_MAX_AGE_MS);
+  if (missing === "otp") throw new HttpsError("failed-precondition", OTP_REQUIRED_MESSAGE);
+  if (missing === "reauth") throw new HttpsError("failed-precondition", REAUTH_REQUIRED_MESSAGE);
+
+  const input = parseRecoveryEmail(request.data);
+  if (input.kind === "invalid") throw new HttpsError("invalid-argument", "A valid email address is required.");
+  const ref = getFirestore().collection(ACCOUNT_RECOVERY_COLLECTION).doc(uid);
+  if (input.kind === "clear") {
+    await ref.delete();
+    return { email: null };
+  }
+  await ref.set({ email: input.email, updatedAt: FieldValue.serverTimestamp() });
+  return { email: input.email };
+});
+
+/**
+ * "비밀번호를 잊었어요" for an id account: mails a Firebase password-reset
+ * link to the account's reset email, if it has one.
+ *
+ * Answers `{ ok: true }` in every case — unknown id, no reset email,
+ * throttled — so it can't be used to learn which ids exist or which have
+ * an address. At most one mail per account per RESET_MAIL_INTERVAL_MS
+ * (a transaction, so a burst of calls can't slip several through), so it
+ * can't be used to flood someone's inbox either.
+ *
+ * The link is Firebase's own (Admin SDK generatePasswordResetLink) and
+ * resets the LOGIN password only. The diary passphrase is never on the
+ * server, and the mail says so.
+ */
+export const requestLoginPasswordReset = onCall({ invoker: "public" }, async (request) => {
+  const loginId = parseLoginId(request.data);
+  if (!loginId) throw new HttpsError("invalid-argument", "A valid id is required.");
+  const email = loginIdToEmail(loginId);
+
+  let uid: string;
+  try {
+    uid = (await getAuth().getUserByEmail(email)).uid;
+  } catch {
+    return { ok: true };
+  }
+  const db = getFirestore();
+  const recovery = await db.collection(ACCOUNT_RECOVERY_COLLECTION).doc(uid).get();
+  const to = recovery.data()?.email;
+  if (typeof to !== "string" || to.length === 0) return { ok: true };
+
+  const throttleRef = db.collection(RESET_MAIL_THROTTLE_COLLECTION).doc(uid);
+  const now = Date.now();
+  const allowed = await db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(throttleRef);
+    const last = snapshot.data()?.lastSentAt as Timestamp | undefined;
+    if (!mayResendResetMail(last ? last.toMillis() : null, now)) return false;
+    tx.set(throttleRef, { lastSentAt: Timestamp.fromMillis(now) });
+    return true;
+  });
+  if (!allowed) return { ok: true };
+
+  const link = await getAuth().generatePasswordResetLink(email);
+  await db.collection(MAIL_COLLECTION).add({ to, message: resetMailMessage(loginId, link) });
+  return { ok: true };
+});

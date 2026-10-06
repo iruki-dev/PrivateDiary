@@ -147,6 +147,8 @@ export interface NativeHello {
   /** Soft warnings about the phone (android/.../DeviceSignals.kt). */
   signals: string[];
   keyboardOpen: boolean;
+  /** Fully local mode: the app is refusing every network request (lib/native/app.ts setNetworkBlocked). */
+  networkBlocked?: boolean;
 }
 
 let helloPromise: Promise<NativeHello | null> | null = null;
