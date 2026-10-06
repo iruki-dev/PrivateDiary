@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Same as --bg and --ink in app/globals.css. -->
+    <!-- Same as the bg and ink tokens in app/globals.css. -->
     <color name="background">#F4F4F4</color>
     <color name="foreground">#111111</color>
     <color name="splash_icon_plate">#18181B</color>
