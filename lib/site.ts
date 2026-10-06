@@ -9,6 +9,8 @@
  * repository's public issue tracker — real and reachable, never invented.
  */
 
+import { IS_ANDROID_APP } from "@/lib/platform";
+
 const repositoryUrl = "https://github.com/iruki-dev/PrivateDiary";
 
 function siteUrl(): string {
@@ -42,4 +44,15 @@ export function contactHref(): string {
 
 export function contactLabel(): string {
   return SITE.contactEmail ?? "GitHub 이슈";
+}
+
+/**
+ * A help, privacy or terms page (app/(docs)). On the website that's a page
+ * of this site. In the Android app it's the same page on the website,
+ * which the app opens in the phone's browser: the docs aren't bundled into
+ * the app (scripts/build-android-web.mjs), so they can be updated without
+ * shipping a new app and are never out of date inside an old one.
+ */
+export function docHref(path: string): string {
+  return IS_ANDROID_APP ? `${SITE.url}${path}` : path;
 }

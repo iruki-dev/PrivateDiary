@@ -29,7 +29,9 @@ Requirements: Node 24 + pnpm, JDK 17+, Android SDK (platform 36, build-tools 36)
 ```sh
 # 1. The web app as static files, with every inline script pinned by hash.
 #    Needs the same NEXT_PUBLIC_FIREBASE_* values as the website (.env.local
-#    or the environment) — they are inlined at build time.
+#    or the environment) — they are inlined at build time — and
+#    NEXT_PUBLIC_SITE_URL, the website's https address: help, privacy and
+#    terms aren't bundled; the app opens them there.
 pnpm install
 pnpm build:android-web
 
@@ -37,6 +39,11 @@ pnpm build:android-web
 cd android
 ./gradlew testReleaseUnitTest lintRelease assembleRelease
 ```
+
+Every `assemble*` run ends with `verify<Variant>WebAssets`, which fails
+the build unless every file of the web bundle is inside the APK (Android's
+packager drops `_`-prefixed folders such as `_next/` by default; the build
+config overrides that).
 
 `assembleDebug` installs as `dev.iruki.privatediary.debug` next to the real
 app, with WebView inspection (`chrome://inspect`) enabled — never in release.
@@ -128,7 +135,8 @@ Play 스토어에 올리기 전까지 테스터 빌드는 Firebase App Distribut
    - Secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`(`upload`),
      `ANDROID_KEY_PASSWORD`, `FIREBASE_APP_DISTRIBUTION_CREDENTIALS`
    - Variables: `FIREBASE_ANDROID_APP_ID`, 웹과 같은 `NEXT_PUBLIC_FIREBASE_*` 여섯 개,
-     `NEXT_PUBLIC_SITE_URL`·`NEXT_PUBLIC_OPERATOR_NAME`·`NEXT_PUBLIC_CONTACT_EMAIL`,
+     `NEXT_PUBLIC_SITE_URL`(**필수** — 웹사이트의 https 주소. 앱의 도움말·개인정보처리방침·이용약관
+     링크가 이 주소로 열립니다), `NEXT_PUBLIC_OPERATOR_NAME`·`NEXT_PUBLIC_CONTACT_EMAIL`,
      `GOOGLE_WEB_CLIENT_ID`(Google 로그인을 쓸 때), `ANDROID_VERSION_CODE_BASE`(선택, 기본 0)
 6. **첫 실행 후**: 워크플로의 *Verify signature and version* 단계 로그에 찍힌 인증서 SHA-1·SHA-256을
    Firebase의 Android 앱 설정 → 디지털 지문 추가에 등록합니다. Google 로그인에 필요합니다.

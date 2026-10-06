@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { signOut } from "@/lib/firebase/auth";
 import { SettingsGroup, SettingsLinkRow, SettingsRow } from "@/components/settings/ui";
 import { useNative } from "@/contexts/NativeContext";
+import { docHref } from "@/lib/site";
 
 /**
  * Who is signed in, the help docs, and sign-out — the occasional account
@@ -32,7 +33,7 @@ export function AccountGroup() {
         label={user?.email ?? "로그인됨"}
         description={usesGoogle ? "Google 계정으로 로그인" : "이메일로 로그인"}
       />
-      <SettingsLinkRow href="/docs" label="도움말" />
+      <SettingsLinkRow href={docHref("/docs")} label="도움말" />
       {hello && (
         <SettingsRow
           label="앱 버전"

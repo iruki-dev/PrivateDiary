@@ -87,6 +87,7 @@ jobs:
       - name: Build web bundle
         run: pnpm build:android-web
         env:
+          NEXT_PUBLIC_SITE_URL: https://ci.example.com
           NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
           NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.example.com
           NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder

@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { buildAppCsp, findCspBlockers, inlineScriptHashes, inlineScripts } from "../android-csp.mjs";
+import { buildAppCsp, findCspBlockers, inlineScriptHashes, inlineScripts, internalDocLinks } from "../android-csp.mjs";
 
 const sha = (s: string) => createHash("sha256").update(s, "utf8").digest("base64");
 
@@ -47,5 +47,20 @@ describe("Android bundle CSP", () => {
     expect(findCspBlockers('<button onclick="x()">a</button>')).toHaveLength(1);
     expect(findCspBlockers('<script src="https://cdn.example.com/x.js"></script>')).toHaveLength(1);
     expect(findCspBlockers('<a href="javascript:alert(1)">a</a>')).toHaveLength(1);
+  });
+});
+
+describe("doc links in the Android bundle", () => {
+  it("finds help/privacy/terms links that stay inside the app", () => {
+    expect(internalDocLinks('<a href="/docs/otp">a</a><a href="/privacy">b</a>')).toEqual(["/docs/otp", "/privacy"]);
+    expect(internalDocLinks('<a class="x" href="/docs">a</a>')).toEqual(["/docs"]);
+    // RSC payloads: JSON with (sometimes escaped) quotes.
+    expect(internalDocLinks('["$","a",null,{"href":"/terms","children":"t"}]')).toEqual(["/terms"]);
+    expect(internalDocLinks('{\\"href\\":\\"/docs/writing#draft\\"}')).toEqual(["/docs/writing#draft"]);
+  });
+
+  it("ignores website links and other routes", () => {
+    expect(internalDocLinks('<a href="https://privatediary.example/docs/otp">a</a>')).toEqual([]);
+    expect(internalDocLinks('<a href="/write">a</a><a href="/docsx">b</a>')).toEqual([]);
   });
 });
