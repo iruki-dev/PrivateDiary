@@ -7,8 +7,15 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useAccount } from "@/contexts/AccountContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
-import { signInWithGoogle, signUpWithLoginId } from "@/lib/firebase/auth";
-import { isUserCancelledPopup, signUpErrorMessage } from "@/lib/firebase/authErrors";
+import {
+  reauthenticateWithGoogle,
+  reauthenticateWithPassword,
+  signInWithGoogle,
+  signUpWithLoginId,
+} from "@/lib/firebase/auth";
+import { authErrorCode, isUserCancelledPopup, signUpErrorMessage } from "@/lib/firebase/authErrors";
+import { ReauthRequiredError } from "@/lib/firebase/reauth";
+import { ReauthPanel } from "@/components/settings/forms";
 import { getNickname, setNickname, setRecoveryEmail } from "@/lib/firebase/profile";
 import {
   isPlausibleEmail,
@@ -112,6 +119,12 @@ export default function SignupPage() {
   const [shares, setShares] = useState<Uint8Array[]>([]);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
+  // Saving backup codes changes a credential, which firestore.rules only
+  // allows right after a real sign-in. A signup finished later than that
+  // (an earlier attempt that stopped halfway, a page left open) proves the
+  // login again here — the codes stay on screen — and then saves them.
+  const [backupReauth, setBackupReauth] = useState(false);
+  const [reauthPassword, setReauthPassword] = useState("");
   // Set once this page creates the keys, so the "already onboarded →
   // leave" redirect below doesn't fire mid-onboarding when refresh() flips
   // seedStatus to "locked".
@@ -354,8 +367,13 @@ export default function SignupPage() {
     try {
       await confirmPendingShamir();
       setShares([]);
+      setBackupReauth(false);
       finish();
     } catch (err) {
+      if (err instanceof ReauthRequiredError) {
+        setBackupReauth(true);
+        return;
+      }
       console.error("confirmPendingShamir failed", err);
       setBackupError(
         "백업 코드를 저장하지 못했어요. 방금 보인 코드는 쓸 수 없으니 설정에서 다시 만들어 주세요."
@@ -363,6 +381,26 @@ export default function SignupPage() {
     } finally {
       setBackupBusy(false);
     }
+  }
+
+  async function reauthThenConfirm(prove: () => Promise<void>) {
+    setBackupError(null);
+    setBackupBusy(true);
+    try {
+      await prove();
+      setReauthPassword("");
+    } catch (err) {
+      setBackupBusy(false);
+      if (isUserCancelledPopup(err)) return;
+      const code = authErrorCode(err);
+      setBackupError(
+        code === "auth/invalid-credential" || code === "auth/wrong-password"
+          ? "로그인 비밀번호를 다시 확인해 주세요."
+          : "다시 로그인하지 못했어요. 다시 시도해 주세요."
+      );
+      return;
+    }
+    await handleConfirmBackupCodes();
   }
 
   if (
@@ -502,10 +540,33 @@ export default function SignupPage() {
               ))}
             </div>
           </SecretReveal>
-          {backupError && (
-            <p role="alert" className="error-text">
-              {backupError}
-            </p>
+          {backupReauth && user ? (
+            <div className="card">
+              <ReauthPanel
+                reason="가입을 시작한 지 시간이 지나서, 백업 코드를 저장하려면 로그인을 한 번 더 확인해야 해요. 위의 코드는 그대로예요."
+                isGoogleAccount={isGoogleAccount}
+                password={reauthPassword}
+                onPasswordChange={setReauthPassword}
+                onSubmitPassword={(event) => {
+                  event.preventDefault();
+                  void reauthThenConfirm(() => reauthenticateWithPassword(user, reauthPassword));
+                }}
+                onGoogle={() => void reauthThenConfirm(() => reauthenticateWithGoogle(user))}
+                busy={backupBusy}
+                error={backupError}
+                onCancel={() => {
+                  setBackupReauth(false);
+                  setReauthPassword("");
+                  setBackupError(null);
+                }}
+              />
+            </div>
+          ) : (
+            backupError && (
+              <p role="alert" className="error-text">
+                {backupError}
+              </p>
+            )
           )}
         </div>
       </main>
