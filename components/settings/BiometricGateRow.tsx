@@ -18,30 +18,30 @@ import { ReauthPanel } from "./forms";
 
 function describe(status: BiometricGateStatus): string {
   if (status.invalidated) {
-    return "휴대폰에 새 지문이나 얼굴이 등록되어 확인할 수 없습니다. 로그인 비밀번호로 본인을 확인한 뒤 다시 설정하세요.";
+    return "휴대폰에 새 지문이나 얼굴이 등록됐어요. 로그인 비밀번호로 본인을 확인하면 다시 설정할 수 있어요.";
   }
   if (status.enabled) {
-    return "OTP처럼, 일기 암호를 입력하기 전에 지문이나 얼굴을 먼저 확인합니다. 백업 코드로는 바로 열 수 있습니다. 이 휴대폰에만 적용됩니다.";
+    return "2단계 인증처럼, 일기 암호를 넣기 전에 지문이나 얼굴로 먼저 확인해요. 백업 코드로는 바로 열 수 있어요. 이 휴대폰에서만 적용돼요.";
   }
   switch (status.availability) {
     case "ready":
-      return "OTP처럼, 일기 암호를 입력하기 전에 지문이나 얼굴을 먼저 확인합니다. 일기 암호를 대신하지는 않습니다.";
+      return "2단계 인증처럼, 일기 암호를 넣기 전에 지문이나 얼굴로 먼저 확인해요. 일기 암호를 대신하지는 않아요.";
     case "no-device-lock":
-      return "휴대폰에 화면 잠금을 먼저 설정해야 쓸 수 있습니다.";
+      return "휴대폰에 화면 잠금을 먼저 설정하면 쓸 수 있어요.";
     case "none-enrolled":
-      return "휴대폰 설정에서 지문이나 얼굴을 먼저 등록해야 쓸 수 있습니다.";
+      return "휴대폰 설정에서 지문이나 얼굴을 먼저 등록하면 쓸 수 있어요.";
     default:
-      return "이 휴대폰에서는 쓸 수 없습니다. 보안 등급이 높은 생체 인증이 필요합니다.";
+      return "이 휴대폰에서는 쓸 수 없어요. 보안 등급이 높은 생체 인증이 필요해요.";
   }
 }
 
 function gateErrorMessage(err: unknown): string | null {
   const code = err instanceof NativeError ? err.code : "failed";
   if (code === "cancelled") return null;
-  if (code === "lockout") return "생체 인증 시도가 너무 많았습니다. 잠시 뒤에 다시 시도해주세요.";
-  if (code === "insecure-hardware") return "이 휴대폰은 보안 하드웨어에 키를 만들 수 없어 켤 수 없습니다.";
-  if (code === "invalidated") return "생체 정보가 바뀌어 확인할 수 없습니다. 다시 설정해주세요.";
-  return "생체 인증을 확인하지 못했습니다. 다시 시도해주세요.";
+  if (code === "lockout") return "생체 인증을 여러 번 실패했어요. 잠시 뒤에 다시 해 주세요.";
+  if (code === "insecure-hardware") return "이 휴대폰은 보안 하드웨어에 키를 만들 수 없어서 켤 수 없어요.";
+  if (code === "invalidated") return "생체 정보가 바뀌어서 확인할 수 없어요. 다시 설정해 주세요.";
+  return "생체 인증을 확인하지 못했어요. 다시 시도해 주세요.";
 }
 
 /**
@@ -87,7 +87,7 @@ export function BiometricGateRow() {
     await refresh();
     setReauthing(false);
     setPassword("");
-    setMessage("생체 인증을 초기화했습니다. 다시 켤 수 있습니다.");
+    setMessage("생체 인증을 초기화했어요. 다시 켤 수 있어요.");
   }
 
   async function handleReauthPassword(event: FormEvent<HTMLFormElement>) {
@@ -101,8 +101,8 @@ export function BiometricGateRow() {
       const code = authErrorCode(err);
       setError(
         code === "auth/invalid-credential" || code === "auth/wrong-password"
-          ? "로그인 비밀번호가 올바르지 않습니다."
-          : "본인 확인에 실패했습니다. 다시 시도해주세요."
+          ? "로그인 비밀번호를 다시 확인해 주세요."
+          : "본인을 확인하지 못했어요. 다시 시도해 주세요."
       );
     } finally {
       setBusy(false);
@@ -116,7 +116,7 @@ export function BiometricGateRow() {
       await reauthenticateWithGoogle(signedInUser);
       await afterReauth();
     } catch (err) {
-      if (!isUserCancelledPopup(err)) setError("본인 확인에 실패했습니다. 다시 시도해주세요.");
+      if (!isUserCancelledPopup(err)) setError("본인을 확인하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setBusy(false);
     }
@@ -129,12 +129,12 @@ export function BiometricGateRow() {
       label="생체 인증"
       description={
         <>
-          <span className={status.invalidated ? "text-red-700 dark:text-red-500" : ""}>
-            {status.invalidated ? "다시 설정 필요" : status.enabled ? "사용 중" : "사용 안 함"}
+          <span className={status.invalidated ? "text-danger" : ""}>
+            {status.invalidated ? "다시 설정해야 해요" : status.enabled ? "켜짐" : "꺼짐"}
           </span>
           {" · "}
           {describe(status)}
-          {message && <span className="mt-1 block text-foreground">{message}</span>}
+          {message && <span className="mt-1 block text-ink">{message}</span>}
         </>
       }
       control={
@@ -155,8 +155,8 @@ export function BiometricGateRow() {
                     await enableBiometricGate(signedInUser.uid);
                     // Turning it on passed one check already.
                     markPassed();
-                  }, "켰습니다.")
-                : run(() => disableBiometricGate(signedInUser.uid), "껐습니다."))
+                  }, "켰어요")
+                : run(() => disableBiometricGate(signedInUser.uid), "껐어요"))
             }
           />
         )
@@ -164,7 +164,7 @@ export function BiometricGateRow() {
     >
       {reauthing ? (
         <ReauthPanel
-          reason="생체 인증을 다시 설정하려면 로그인한 계정으로 본인을 확인해야 합니다."
+          reason="생체 인증을 다시 설정하려면 로그인한 계정으로 본인을 확인해 주세요."
           isGoogleAccount={isGoogleAccount}
           password={password}
           onPasswordChange={setPassword}

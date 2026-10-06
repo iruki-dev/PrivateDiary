@@ -66,24 +66,24 @@ export function SecretCard({
   }
 
   return (
-    <div className="space-y-3 card">
-      <p className="text-sm font-medium">{label}</p>
+    <div className="card space-y-3">
+      <p className="text-sm font-semibold text-ink-3">{label}</p>
       {qrDataUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- generated data: URL, not a static/remote asset next/image can optimize
         <img src={qrDataUrl} alt={`${label} QR 코드`} className="mx-auto h-44 w-44" />
       )}
-      <p className="break-all rounded bg-zinc-100 p-2 font-mono text-xs dark:bg-zinc-800">{text}</p>
+      <p className="break-all rounded-xl bg-fill px-3 py-2.5 font-mono text-[0.9375rem] tracking-[0.04em]">{text}</p>
       <div className="flex gap-2">
-        <button type="button" onClick={() => void handleCopy()} className="btn-secondary btn-sm flex-1">
-          {copied ? "복사됨" : "복사"}
+        <button type="button" onClick={() => void handleCopy()} className="btn-secondary min-h-11 flex-1">
+          {copied ? "복사했어요" : "복사"}
         </button>
-        <button type="button" onClick={handleDownload} className="btn-secondary btn-sm flex-1">
-          파일로 다운로드
+        <button type="button" onClick={handleDownload} className="btn-secondary min-h-11 flex-1">
+          파일로 저장
         </button>
       </div>
       {copied && (
-        <p className="faint text-xs">
-          복사한 내용은 30초 후 클립보드에서 자동으로 지워집니다.
+        <p className="faint text-[0.8125rem]">
+          복사한 코드는 30초 뒤에 클립보드에서 지워져요.
         </p>
       )}
     </div>

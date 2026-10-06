@@ -12,6 +12,7 @@ import {
   signInErrorMessage,
 } from "@/lib/firebase/authErrors";
 import { AuthShell, OrDivider } from "@/components/AuthShell";
+import { Icon } from "@/components/Icon";
 import { PasswordField, TextField } from "@/components/PasswordField";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
@@ -111,14 +112,15 @@ function LoginForm() {
 
   if (mode === "reset") {
     return (
-      <AuthShell title="비밀번호 재설정" lead="가입한 이메일로 로그인 비밀번호 재설정 링크를 보내드립니다.">
-        <p className="muted card">
-          로그인 비밀번호만 재설정됩니다. 일기 암호는 서버에 저장되지 않으므로 재설정할 수
-          없습니다. 일기 암호를 잊었다면 로그인한 뒤 백업 코드로 새 암호를 설정할 수 있습니다.
+      <AuthShell title="로그인 비밀번호 재설정" lead="가입한 이메일로 재설정 링크를 보내 드려요.">
+        <p className="rounded-2xl bg-fill px-4 py-3 text-sm leading-relaxed text-ink-2">
+          로그인 비밀번호만 바꿀 수 있어요. 일기 암호는 어디에도 저장하지 않아서 재설정할 수 없어요. 일기
+          암호를 잊었다면 로그인한 뒤 백업 코드로 새 암호를 정해 주세요.
         </p>
         {resetSent ? (
-          <p role="status" className="success-text">
-            가입된 이메일이라면 재설정 링크가 발송되었습니다. 메일함을 확인해주세요.
+          <p role="status" className="flex gap-2 text-[0.9375rem] text-ink">
+            <Icon name="check-circle" size={20} className="mt-px shrink-0" />
+            가입한 이메일이라면 재설정 링크를 보냈어요. 메일함을 확인해 주세요.
           </p>
         ) : (
           <form onSubmit={handleReset} className="space-y-4">
@@ -129,19 +131,19 @@ function LoginForm() {
               autoFocus
               value={email}
               onChange={setEmail}
-              placeholder="you@example.com"
+              placeholder="name@example.com"
             />
             {error && (
               <p role="alert" className="error-text">
                 {error}
               </p>
             )}
-            <button type="submit" disabled={submitting} className="btn-primary w-full">
-              {submitting ? "발송 중..." : "재설정 링크 받기"}
+            <button type="submit" disabled={submitting} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+              {submitting ? "보내는 중…" : "재설정 링크 받기"}
             </button>
           </form>
         )}
-        <button type="button" onClick={() => switchMode("sign-in")} className="block w-full text-center text-sm link">
+        <button type="button" onClick={() => switchMode("sign-in")} className="btn-text w-full">
           로그인으로 돌아가기
         </button>
       </AuthShell>
@@ -157,7 +159,7 @@ function LoginForm() {
           autoComplete="email"
           value={email}
           onChange={setEmail}
-          placeholder="you@example.com"
+          placeholder="name@example.com"
         />
         <PasswordField
           label="로그인 비밀번호"
@@ -170,17 +172,18 @@ function LoginForm() {
             {error}
           </p>
         )}
-        <button type="submit" disabled={submitting} className="btn-primary w-full">
-          {submitting ? "로그인 중..." : "로그인"}
+        <button type="submit" disabled={submitting} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+          {submitting ? "로그인하는 중…" : "로그인"}
         </button>
       </form>
 
-      <div className="flex flex-col items-center gap-2 text-sm">
-        <Link href="/signup" className="link">
-          계정이 없으신가요? 회원가입
+      <div className="flex flex-wrap items-center justify-center gap-x-2">
+        <Link href="/signup" className="btn-text">
+          계정 만들기
         </Link>
-        <button type="button" onClick={() => switchMode("reset")} className="faint link text-xs">
-          로그인 비밀번호를 잊으셨나요?
+        <span aria-hidden className="h-3 w-px bg-line" />
+        <button type="button" onClick={() => switchMode("reset")} className="btn-text">
+          비밀번호를 잊었어요
         </button>
       </div>
 

@@ -2,13 +2,15 @@
 
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { EntryCard } from "./EntryCard";
+import { EntryReader, type ReaderEntry } from "./EntryReader";
+import { Icon } from "./Icon";
 import { EntryCalendar } from "./EntryCalendar";
 import { EntryStats } from "./EntryStats";
 import { ExportEntriesCard } from "./ExportEntriesCard";
 import { useDecryptedEntries } from "@/hooks/useDecryptedEntries";
 import type { HybridPrivateKeys } from "@/lib/crypto";
 import type { EntrySequenceIntegrity, StoredEntry } from "@/lib/firebase/entries";
-import { groupByDay, matchEntry, parseQuery, type MatchRange } from "@/lib/entries/search";
+import { matchEntry, parseQuery, splitLead, type MatchRange } from "@/lib/entries/search";
 import {
   anniversaryKey,
   anniversaryYears,
@@ -92,6 +94,8 @@ export function EntryBrowser({
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
   const [exportOpen, setExportOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
+  // The entry open in the reading view (components/EntryReader), if any.
+  const [readerId, setReaderId] = useState<string | null>(null);
   const [visibleMonth, setVisibleMonth] = useState(() => ({
     year: today.getFullYear(),
     month: today.getMonth(),
@@ -103,7 +107,7 @@ export function EntryBrowser({
   // lets React drop intermediate filter passes the user already typed past.
   const deferredQuery = useDeferredValue(query);
 
-  const { plaintexts, errors, decryptedCount, total, done } = useDecryptedEntries(
+  const { plaintexts, errors, total, done } = useDecryptedEntries(
     privateKeys,
     entries
   );
@@ -158,7 +162,71 @@ export function EntryBrowser({
     return sortOrder === "oldest" ? result.reverse() : result;
   }, [entries, dates, plaintexts, errors, searching, terms, dateFilter, sortOrder, today]);
 
-  const groups = useMemo(() => groupByDay(prepared, today.getFullYear()), [prepared, today]);
+  // The list as rendered: a month heading whenever the month changes, then
+  // one card per entry, with the date block on the first card of each day.
+  const rows = useMemo(() => {
+    type MonthRow = { kind: "month"; key: string; label: string; days: number; count: number };
+    type EntryRow = { kind: "entry"; entry: PreparedEntry; showDate: boolean };
+    const result: (MonthRow | EntryRow)[] = [];
+    let month: MonthRow | null = null;
+    let lastDay = "";
+    const daysSeen = new Set<string>();
+    for (const entry of prepared) {
+      const date = entry.createdAt;
+      const monthKey = date ? `${date.getFullYear()}-${date.getMonth()}` : "pending";
+      if (!month || month.key !== monthKey) {
+        month = {
+          kind: "month",
+          key: monthKey,
+          label: date
+            ? `${date.getFullYear() === today.getFullYear() ? "" : `${date.getFullYear()}년 `}${date.getMonth() + 1}월`
+            : "저장하는 중",
+          days: 0,
+          count: 0,
+        };
+        result.push(month);
+      }
+      const day = date ? dayKey(date) : "pending";
+      if (!daysSeen.has(day)) {
+        daysSeen.add(day);
+        month.days += 1;
+      }
+      month.count += 1;
+      result.push({ kind: "entry", entry, showDate: day !== lastDay });
+      lastDay = day;
+    }
+    return result;
+  }, [prepared, today]);
+
+  // Reading view: the open entry and its chronological neighbours in the
+  // list as currently filtered (the list itself may be newest- or oldest-first).
+  const reader = useMemo(() => {
+    if (!readerId) return null;
+    const index = prepared.findIndex((entry) => entry.id === readerId);
+    const toReader = (entry: PreparedEntry | undefined): ReaderEntry | null =>
+      entry && entry.text !== null
+        ? { id: entry.id, createdAt: entry.createdAt, text: entry.text, ranges: entry.ranges }
+        : null;
+    const current = toReader(prepared[index]);
+    if (!current) return null;
+    const older = toReader(prepared[sortOrder === "newest" ? index + 1 : index - 1]);
+    const newer = toReader(prepared[sortOrder === "newest" ? index - 1 : index + 1]);
+    return { entry: current, previous: older, next: newer };
+  }, [readerId, prepared, sortOrder]);
+
+  // "1년 전 오늘": quote the most recent earlier-year entry from this day,
+  // once it has been opened; until then the card just says it exists.
+  let anniversaryQuote: { year: number; lead: string } | null = null;
+  if (anniversaries.length > 0) {
+    const target = anniversaryKey(today);
+    for (const [index, entry] of entries.entries()) {
+      const date = dates[index];
+      const text = plaintexts[entry.id];
+      if (!date || !text || anniversaryKey(date) !== target || date.getFullYear() >= today.getFullYear()) continue;
+      anniversaryQuote = { year: date.getFullYear(), lead: splitLead(text).lead ?? `${text.slice(0, 60)}…` };
+      break;
+    }
+  }
 
   const exportable = useMemo<ExportableEntry[]>(
     () =>
@@ -186,7 +254,13 @@ export function EntryBrowser({
     setDateFilter({ kind: "all" });
   }
 
-  // "/" to search and Escape to clear — the two shortcuts a reading list
+  // Read by the keydown listener below, which is registered once.
+  const readerOpenRef = useRef(false);
+  useEffect(() => {
+    readerOpenRef.current = readerId !== null;
+  }, [readerId]);
+
+  // "/" to search, Escape to close the open entry or clear the filters — the two shortcuts a reading list
   // earns. Both are checked against the focused element so they never
   // swallow a keystroke meant for an input.
   useEffect(() => {
@@ -204,6 +278,10 @@ export function EntryBrowser({
         return;
       }
       if (event.key === "Escape") {
+        if (readerOpenRef.current) {
+          setReaderId(null);
+          return;
+        }
         setQuery("");
         setDateFilter({ kind: "all" });
         if (typing) target?.blur();
@@ -225,29 +303,29 @@ export function EntryBrowser({
     />
   );
 
-  return (
-    <div className="lg:grid lg:grid-cols-[17rem_minmax(0,1fr)] lg:items-start lg:gap-8">
-      {/* Desktop: calendar and stats stay in view while the list scrolls. */}
-      <aside className="hidden space-y-4 lg:sticky lg:top-20 lg:block">
-        {calendar}
-        <EntryStats stats={stats} />
-      </aside>
+  if (reader) {
+    return (
+      <div className="mx-auto w-full max-w-2xl">
+        <EntryReader
+          entry={reader.entry}
+          previous={reader.previous}
+          next={reader.next}
+          onSelect={setReaderId}
+          onClose={() => setReaderId(null)}
+        />
+      </div>
+    );
+  }
 
-      <div className="min-w-0 space-y-5">
+  const chipClass =
+    "inline-flex min-h-9 items-center gap-1 rounded-full bg-primary pl-3.5 pr-2 text-sm font-semibold text-on-primary transition-opacity hover:opacity-90 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink";
+
+  return (
+    <div className="lg:grid lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start lg:gap-8">
+      <div className="min-w-0 space-y-3.5">
         <div className="flex items-center gap-2">
           <div className="relative min-w-0 flex-1">
-            <svg
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth={1.8}
-              strokeLinecap="round"
-              className="faint pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2"
-              aria-hidden
-            >
-              <circle cx="11" cy="11" r="6.5" />
-              <path d="m20 20-4.2-4.2" />
-            </svg>
+            <Icon name="search" size={20} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-3" />
             <input
               ref={searchRef}
               type="search"
@@ -255,171 +333,196 @@ export function EntryBrowser({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="일기 검색"
               aria-label="일기 검색"
-              className="field pl-9"
+              className="block h-11 w-full rounded-full border-0 bg-surface pl-11 pr-4 text-[1.0625rem] text-ink placeholder:text-ink-3 focus:outline-none focus:ring-2 focus:ring-ink"
             />
           </div>
-          {/* Phones/tablets: the same calendar the sidebar shows on wide
-              screens — a permanently-open month grid would push the diary
-              itself below the fold. */}
-          <button
-            type="button"
-            onClick={() => setCalendarOpen((open) => !open)}
-            aria-expanded={calendarOpen}
-            className={`btn-secondary min-h-11 lg:hidden ${calendarOpen ? "bg-zinc-100 dark:bg-zinc-900" : ""}`}
-          >
-            달력
-          </button>
+          {filtering ? (
+            <button type="button" onClick={clearFilters} className="btn-text shrink-0 text-ink">
+              닫기
+            </button>
+          ) : (
+            // Phones/tablets: the same calendar the side column shows on wide
+            // screens — a permanently-open month grid would push the diary
+            // itself below the fold.
+            <button
+              type="button"
+              onClick={() => setCalendarOpen((open) => !open)}
+              aria-expanded={calendarOpen}
+              aria-label="달력"
+              className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-ink lg:hidden ${
+                calendarOpen ? "bg-primary text-on-primary" : "bg-surface text-ink hover:bg-fill"
+              }`}
+            >
+              <Icon name="calendar" size={20} />
+            </button>
+          )}
         </div>
 
         {calendarOpen && (
-          <div className="space-y-4 lg:hidden">
+          <div className="space-y-3 lg:hidden">
             {calendar}
             <EntryStats stats={stats} />
           </div>
         )}
 
-        {/* "이날의 기록" — the reason to keep a diary for years. Offered
+        {/* "1년 전 오늘" — the reason to keep a diary for years. Offered
             only when there is actually something to look back at. */}
-        {anniversaries.length > 0 && dateFilter.kind !== "anniversary" && (
+        {anniversaries.length > 0 && !filtering && (
           <button
             type="button"
             onClick={() => setDateFilter({ kind: "anniversary", key: anniversaryKey(today) })}
-            className="card w-full text-left transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-900"
+            className="block w-full space-y-2 rounded-2xl bg-surface px-5 py-4 text-left transition-shadow hover:shadow-[0_0_0_1px_var(--line)] focus:outline-none focus-visible:outline-2 focus-visible:outline-ink"
           >
-            <span className="text-sm font-medium">이날의 기록</span>
-            <span className="muted mt-1 block text-xs">
-              {anniversaries.map((year) => `${today.getFullYear() - year}년 전`).join(", ")} 오늘에도
-              일기를 썼습니다.
+            <span className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-[0.8125rem] font-bold">
+                <Icon name="history" size={16} strokeWidth={2} />
+                {anniversaries.map((year) => `${today.getFullYear() - year}년 전`).join(", ")} 오늘
+              </span>
+              {anniversaryQuote && <span className="text-[0.8125rem] text-ink-3">{anniversaryQuote.year}년</span>}
+            </span>
+            <span className="block text-lg leading-7 font-semibold tracking-[-0.015em]">
+              {anniversaryQuote ? `“${anniversaryQuote.lead}”` : "그날에도 일기를 썼어요."}
             </span>
           </button>
         )}
 
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex min-h-9 flex-wrap items-center gap-2">
+        <div className="flex min-h-11 flex-wrap items-center justify-between gap-2 pl-1">
+          <div className="flex flex-wrap items-center gap-2">
             {dateFilter.kind === "day" && (
               <button
                 type="button"
                 onClick={() => setDateFilter({ kind: "all" })}
-                className="btn-secondary btn-sm"
-                aria-label={`${formatDayLabel(dateFilter.key)} 선택 해제`}
+                className={chipClass}
+                aria-label={`${formatDayLabel(dateFilter.key)} 선택 풀기`}
               >
                 {formatDayLabel(dateFilter.key)}
-                <span aria-hidden>✕</span>
+                <Icon name="close" size={16} strokeWidth={2.25} />
               </button>
             )}
             {dateFilter.kind === "anniversary" && (
               <button
                 type="button"
                 onClick={() => setDateFilter({ kind: "all" })}
-                className="btn-secondary btn-sm"
-                aria-label="이날의 기록 선택 해제"
+                className={chipClass}
+                aria-label="지난해 오늘 선택 풀기"
               >
-                이날의 기록
-                <span aria-hidden>✕</span>
+                지난해 오늘
+                <Icon name="close" size={16} strokeWidth={2.25} />
               </button>
             )}
-            <p className="muted text-xs" aria-live="polite">
-              {filtering ? `${prepared.length}편 / 전체 ${total}편` : `${total}편`}
-              {!done && ` · 여는 중 ${decryptedCount}/${total}`}
+            <p className="text-sm text-ink-3 tabular-nums" aria-live="polite">
+              {filtering
+                ? `${searching ? `‘${deferredQuery.trim()}’ ` : ""}일기 ${prepared.length.toLocaleString("ko-KR")}개`
+                : `일기 ${total.toLocaleString("ko-KR")}개`}
             </p>
           </div>
           <button
             type="button"
             onClick={() => setSortOrder((order) => (order === "newest" ? "oldest" : "newest"))}
-            className="btn-sm inline-flex items-center gap-1 rounded text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400"
+            className="btn-text -mr-2 text-sm"
             aria-label={`정렬: ${sortOrder === "newest" ? "최신순" : "오래된순"} (눌러서 바꾸기)`}
           >
+            <Icon name="sort" size={16} />
             {sortOrder === "newest" ? "최신순" : "오래된순"}
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
-              <path d="M8 4v16M4 16l4 4 4-4M16 20V4M12 8l4-4 4 4" />
-            </svg>
           </button>
         </div>
 
+        {/* Decryption usually finishes in well under the 10 seconds after
+            which a progress indicator earns its place; until then the
+            cards themselves show what is still opening. */}
         {searching && !done && (
-          <p className="muted text-xs">아직 여는 중인 일기는 검색되지 않습니다. 모두 열리면 결과가 더 나올 수 있습니다.</p>
+          <p className="text-sm text-ink-3">아직 여는 중인 일기는 검색되지 않아요. 다 열리면 결과가 더 나올 수 있어요.</p>
         )}
 
         {integrity && !integrity.ok && (
-          <div role="alert" className="card space-y-1 border-amber-500/50">
-            <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">
-              일기 목록이 온전하지 않습니다
-            </p>
-            {integrity.missingTailCount > 0 && (
-              <p className="muted text-xs">
-                저장된 기록보다 {integrity.missingTailCount}편이 적게 불러와졌습니다.
+          <div role="alert" className="note-warn">
+            <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-bold">
+                {integrity.missingTailCount > 0 || integrity.missingSeqs.length > 0
+                  ? "불러오지 못한 일기가 있어요"
+                  : "같은 일기가 두 번 불러와졌어요"}
               </p>
-            )}
-            {integrity.missingSeqs.length > 0 && (
-              <p className="muted text-xs">빠진 순번: {integrity.missingSeqs.join(", ")}</p>
-            )}
-            {integrity.duplicateSeqs.length > 0 && (
-              <p className="muted text-xs">중복된 순번: {integrity.duplicateSeqs.join(", ")}</p>
-            )}
-            <p className="muted text-xs">
-              불러온 일기의 내용은 모두 변조 검증을 통과했습니다. 서버에서 일기가 빠졌거나 중복되었을 수
-              있습니다.
-            </p>
+              {integrity.missingTailCount > 0 && (
+                <p>저장된 것보다 {integrity.missingTailCount}개 적게 불러왔어요.</p>
+              )}
+              {integrity.missingSeqs.length > 0 && <p>빠진 순번: {integrity.missingSeqs.join(", ")}</p>}
+              {integrity.duplicateSeqs.length > 0 && <p>겹친 순번: {integrity.duplicateSeqs.join(", ")}</p>}
+              <p>불러온 일기는 모두 처음 저장한 그대로예요. 서버에서 일기가 빠졌거나 겹쳤을 수 있어요.</p>
+            </div>
           </div>
         )}
 
         {done && failedCount > 0 && (
-          <p role="alert" className="error-text text-xs">
-            {failedCount}편을 열지 못했습니다. 해당 일기에 표시됩니다.
+          <p role="alert" className="flex gap-2 text-sm text-danger">
+            <Icon name="alert" size={18} className="mt-px shrink-0" />
+            일기 {failedCount}개를 열지 못했어요. 해당 일기에 표시해 두었어요.
           </p>
         )}
 
         {filtering && prepared.length === 0 && (
-          <div className="card space-y-3 py-8 text-center">
-            <p className="muted">
-              {done ? "찾는 일기가 없습니다." : "아직 결과가 없습니다. 모두 열리면 더 나올 수 있습니다."}
+          <div className="space-y-1.5 rounded-2xl bg-surface px-5 py-9 text-center">
+            <p className="text-base font-semibold">
+              {!done
+                ? "아직 찾는 중이에요"
+                : searching
+                  ? `‘${deferredQuery.trim()}’가 들어간 일기가 없어요`
+                  : "이날 쓴 일기가 없어요"}
             </p>
-            <button type="button" onClick={clearFilters} className="btn-secondary btn-sm">
-              검색 지우기
-            </button>
+            <p className="text-sm text-ink-3">
+              {!done ? "일기가 다 열리면 결과가 더 나올 수 있어요." : "다른 낱말로 찾아보세요."}
+            </p>
           </div>
         )}
 
-        {groups.map((group) => (
-          <section key={group.key} aria-labelledby={`day-${group.key}`} className="space-y-2">
-            <h2
-              id={`day-${group.key}`}
-              className="sticky top-14 z-10 -mx-1 bg-background/90 px-1 py-1.5 text-sm font-semibold backdrop-blur"
-            >
-              {group.label}
-            </h2>
-            <ul className="divide-y divide-zinc-200 rounded border border-zinc-300 dark:divide-zinc-800 dark:border-zinc-700">
-              {group.entries.map((entry) => (
-                <EntryCard
-                  key={entry.id}
-                  createdAt={entry.createdAt}
-                  text={entry.text}
-                  error={entry.error}
-                  ranges={entry.ranges}
-                  searching={searching}
-                />
-              ))}
-            </ul>
-          </section>
-        ))}
+        <ol className="space-y-2">
+          {rows.map((row) =>
+            row.kind === "month" ? (
+              <li key={`m-${row.key}`} className="flex items-baseline justify-between px-1 pb-1 pt-4 first:pt-1">
+                <h2 className="text-[1.375rem] font-extrabold tracking-[-0.02em]">{row.label}</h2>
+                <span className="text-[0.8125rem] font-medium text-ink-3">
+                  {filtering ? `${row.count}개` : `${row.days}일 썼어요`}
+                </span>
+              </li>
+            ) : (
+              <EntryCard
+                key={row.entry.id}
+                createdAt={row.entry.createdAt}
+                text={row.entry.text}
+                error={row.entry.error}
+                ranges={row.entry.ranges}
+                searching={searching}
+                showDate={row.showDate}
+                onOpen={() => setReaderId(row.entry.id)}
+              />
+            )
+          )}
+        </ol>
 
         {/* Export is occasional, so it sits after the diary rather than in
             the toolbar above it. */}
-        <div className="border-t border-zinc-200 pt-6 dark:border-zinc-800">
+        <div className="pt-6">
           {exportOpen ? (
             <ExportEntriesCard
               entries={exportable}
               disabled={!done}
-              disabledReason="아직 일기를 여는 중입니다. 모두 열린 뒤에 내보내면 빠진 일기 없이 저장됩니다."
+              disabledReason="아직 일기를 여는 중이에요. 다 열린 뒤에 내보내야 빠짐없이 저장돼요."
               onClose={() => setExportOpen(false)}
             />
           ) : (
-            <button type="button" onClick={() => setExportOpen(true)} className="btn-secondary btn-sm">
-              모든 일기 내보내기
+            <button type="button" onClick={() => setExportOpen(true)} className="btn-text">
+              <Icon name="download" size={18} />
+              일기 모두 내보내기
             </button>
           )}
         </div>
       </div>
+
+      {/* Wide screens: calendar and totals stay in view while the list scrolls. */}
+      <aside className="hidden space-y-3 lg:sticky lg:top-20 lg:block">
+        {calendar}
+        <EntryStats stats={stats} />
+      </aside>
     </div>
   );
 }

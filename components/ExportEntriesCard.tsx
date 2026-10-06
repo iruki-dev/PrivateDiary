@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { buildExportFile, type ExportFormat, type ExportableEntry } from "@/lib/entries/export";
 import { saveTextFile } from "@/lib/saveFile";
+import { Icon } from "@/components/Icon";
 
 /**
  * "Download my diary", available once the session is unlocked.
@@ -36,20 +37,22 @@ export function ExportEntriesCard({
       await saveTextFile(file.filename, file.mimeType, file.content);
     } catch (err) {
       console.error("export failed", err);
-      setError("내보내기에 실패했습니다. 다시 시도해주세요.");
+      setError("파일을 만들지 못했어요. 다시 시도해 주세요.");
     }
   }
 
   return (
-    <div className="card space-y-3">
-      <h2 className="text-sm font-semibold">일기 {entries.length}편 내보내기</h2>
-      <p className="muted text-xs leading-relaxed">
-        받은 파일은 <strong className="text-foreground">암호화되지 않은 일반 텍스트</strong>입니다. 파일을
-        가진 사람은 누구나 읽을 수 있으니 안전한 곳에 보관하세요.
+    <div className="card space-y-4">
+      <h2 className="title-2">일기 {entries.length.toLocaleString("ko-KR")}개 내보내기</h2>
+      <p className="note-warn">
+        <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+        <span>
+          받은 파일은 잠겨 있지 않아요. 파일을 가진 사람은 누구나 읽을 수 있으니 안전한 곳에 두세요.
+        </span>
       </p>
-      {disabled && disabledReason && <p className="muted text-xs">{disabledReason}</p>}
+      {disabled && disabledReason && <p className="muted text-sm">{disabledReason}</p>}
       {error && (
-        <p role="alert" className="error-text text-xs">
+        <p role="alert" className="error-text">
           {error}
         </p>
       )}
@@ -58,19 +61,21 @@ export function ExportEntriesCard({
           type="button"
           onClick={() => void download("markdown")}
           disabled={disabled}
-          className="btn-secondary btn-sm"
+          className="btn-secondary"
         >
+          <Icon name="download" size={18} />
           Markdown (.md)
         </button>
         <button
           type="button"
           onClick={() => void download("json")}
           disabled={disabled}
-          className="btn-secondary btn-sm"
+          className="btn-secondary"
         >
+          <Icon name="download" size={18} />
           JSON (.json)
         </button>
-        <button type="button" onClick={onClose} className="btn-secondary btn-sm">
+        <button type="button" onClick={onClose} className="btn-text">
           닫기
         </button>
       </div>

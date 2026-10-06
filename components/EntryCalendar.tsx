@@ -1,6 +1,7 @@
 "use client";
 
 import { buildMonthGrid, dayKey, shiftMonth } from "@/lib/entries/calendar";
+import { Icon } from "@/components/Icon";
 
 /**
  * Month grid showing which days have entries.
@@ -16,23 +17,6 @@ import { buildMonthGrid, dayKey, shiftMonth } from "@/lib/entries/calendar";
  */
 
 const WEEKDAYS = ["일", "월", "화", "수", "목", "금", "토"];
-
-function ChevronIcon({ direction }: { direction: "left" | "right" }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className="h-4 w-4"
-      aria-hidden
-    >
-      <path d={direction === "left" ? "M15 18l-6-6 6-6" : "M9 18l6-6-6-6"} />
-    </svg>
-  );
-}
 
 export function EntryCalendar({
   year,
@@ -60,8 +44,13 @@ export function EntryCalendar({
     onMonthChange(today.getFullYear(), today.getMonth());
   }
 
+  const navButton =
+    "flex h-11 w-11 items-center justify-center rounded-full text-ink transition-colors hover:bg-fill focus:outline-none focus-visible:outline-2 focus-visible:outline-ink";
+  const footButton =
+    "flex min-h-10 items-center rounded-full px-3 text-[0.8125rem] font-semibold text-ink-2 transition-colors hover:bg-fill hover:text-ink focus:outline-none focus-visible:outline-2 focus-visible:outline-ink";
+
   return (
-    <div className="card space-y-3">
+    <div className="space-y-2 rounded-2xl bg-surface px-3 pb-3 pt-2">
       <div className="flex items-center justify-between gap-2">
         <button
           type="button"
@@ -70,12 +59,12 @@ export function EntryCalendar({
             const previous = shiftMonth(year, month, -1);
             onMonthChange(previous.year, previous.month);
           }}
-          className="flex h-9 w-9 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-800"
+          className={navButton}
         >
-          <ChevronIcon direction="left" />
+          <Icon name="chevron-left" size={20} strokeWidth={2} />
         </button>
 
-        <h2 aria-live="polite" className="text-sm font-medium">
+        <h2 aria-live="polite" className="text-[1.0625rem] font-bold">
           {label}
         </h2>
 
@@ -86,31 +75,34 @@ export function EntryCalendar({
             const next = shiftMonth(year, month, 1);
             onMonthChange(next.year, next.month);
           }}
-          className="flex h-9 w-9 items-center justify-center rounded text-zinc-500 transition-colors hover:bg-zinc-100 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-800"
+          className={navButton}
         >
-          <ChevronIcon direction="right" />
+          <Icon name="chevron-right" size={20} strokeWidth={2} />
         </button>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center text-[0.65rem] text-zinc-400">
+      <div className="grid grid-cols-7 text-center text-xs font-semibold text-ink-3">
         {WEEKDAYS.map((weekday) => (
           <div key={weekday}>{weekday}</div>
         ))}
       </div>
 
-      <div className="grid grid-cols-7 gap-1">
+      {/* Filled: a day with entries. Ink: the selected day. Ring: today.
+          Three different shapes of cue, so none of them rests on colour. */}
+      <div className="grid grid-cols-7 justify-items-center gap-y-1">
         {weeks.flat().map((cell) => {
           const selected = cell.key === selectedDay;
           const hasEntries = cell.count > 0;
+          const todayRing = cell.isToday && !selected ? "ring-2 ring-inset ring-ink" : "";
 
           if (!hasEntries) {
             return (
               <div
                 key={cell.key}
                 aria-hidden={!cell.inMonth}
-                className={`flex aspect-square items-center justify-center rounded text-xs ${
-                  cell.inMonth ? "text-zinc-400 dark:text-zinc-600" : "text-transparent"
-                } ${cell.isToday ? "ring-1 ring-zinc-300 dark:ring-zinc-700" : ""}`}
+                className={`flex h-10 w-10 items-center justify-center rounded-full text-[0.9375rem] tabular-nums ${
+                  cell.inMonth ? "text-ink-3" : "text-transparent"
+                } ${todayRing}`}
               >
                 {cell.day}
               </div>
@@ -122,43 +114,35 @@ export function EntryCalendar({
               key={cell.key}
               type="button"
               aria-pressed={selected}
-              aria-label={`${cell.date.getFullYear()}년 ${cell.date.getMonth() + 1}월 ${cell.day}일, 일기 ${cell.count}편${cell.isToday ? " (오늘)" : ""}`}
+              aria-label={`${cell.date.getFullYear()}년 ${cell.date.getMonth() + 1}월 ${cell.day}일, 일기 ${cell.count}개${cell.isToday ? ", 오늘" : ""}`}
               // Clicking the selected day again clears the filter — the
               // same affordance as the chip above the list, so there is no
               // state you can get into without an obvious way back out.
               onClick={() => onSelectDay(selected ? null : cell.key)}
-              className={`relative flex aspect-square flex-col items-center justify-center rounded text-xs transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 ${
+              className={`flex h-10 w-10 items-center justify-center rounded-full text-[0.9375rem] font-bold tabular-nums transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink ${
                 selected
-                  ? "bg-foreground font-medium text-background"
-                  : `font-medium hover:bg-zinc-100 dark:hover:bg-zinc-800 ${
-                      cell.inMonth ? "" : "text-zinc-400 dark:text-zinc-500"
-                    }`
-              } ${cell.isToday && !selected ? "ring-1 ring-zinc-400 dark:ring-zinc-500" : ""}`}
+                  ? "bg-primary text-on-primary"
+                  : `${cell.inMonth ? "bg-pill text-ink" : "bg-fill text-ink-3"} hover:bg-off`
+              } ${todayRing}`}
             >
               {cell.day}
-              <span
-                aria-hidden
-                className={`absolute bottom-1 h-1 w-1 rounded-full ${
-                  selected ? "bg-background" : "bg-zinc-400 dark:bg-zinc-500"
-                }`}
-              />
             </button>
           );
         })}
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <button type="button" onClick={goToToday} className="rounded px-1 py-0.5 text-xs text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400">
-          오늘
+      <div className="flex items-center justify-between gap-2">
+        <button type="button" onClick={goToToday} className={footButton}>
+          이번 달
         </button>
         {selectedDay && (
-          <button type="button" onClick={() => onSelectDay(null)} className="rounded px-1 py-0.5 text-xs text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400">
-            날짜 선택 해제
+          <button type="button" onClick={() => onSelectDay(null)} className={footButton}>
+            날짜 선택 풀기
           </button>
         )}
         {!selectedDay && counts.has(todayKey) && (
-          <button type="button" onClick={() => onSelectDay(todayKey)} className="rounded px-1 py-0.5 text-xs text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400">
-            오늘 쓴 일기 보기
+          <button type="button" onClick={() => onSelectDay(todayKey)} className={footButton}>
+            오늘 쓴 일기
           </button>
         )}
       </div>

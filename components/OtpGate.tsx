@@ -4,6 +4,7 @@ import { useState, type FormEvent, type ReactNode } from "react";
 import { useOtp } from "@/contexts/OtpContext";
 import { IncorrectOtpCodeError, OtpLockedOutError } from "@/lib/firebase/otp";
 import { LoadingState } from "@/components/LoadingState";
+import { Icon } from "@/components/Icon";
 
 /**
  * Renders `children` only once OTP (if enabled on this account) has been
@@ -39,10 +40,10 @@ export function OtpGate({ children, footer }: { children: ReactNode; footer?: Re
     } catch (err) {
       setError(
         err instanceof IncorrectOtpCodeError
-          ? "코드가 올바르지 않습니다."
+          ? "인증 앱의 숫자를 다시 확인해 주세요."
           : err instanceof OtpLockedOutError
-            ? "시도 횟수를 초과했습니다. 1분 뒤 다시 시도해주세요."
-            : "확인하지 못했습니다. 다시 시도해주세요."
+            ? "여러 번 틀려서 잠시 막아 두었어요. 1분 뒤에 다시 시도해 주세요."
+            : "확인하지 못했어요. 다시 시도해 주세요."
       );
     } finally {
       setVerifying(false);
@@ -50,15 +51,20 @@ export function OtpGate({ children, footer }: { children: ReactNode; footer?: Re
   }
 
   return (
-    <div className="w-full max-w-sm space-y-3">
-      <form onSubmit={handleSubmit} className="card space-y-4">
-        <div className="space-y-1">
-          <h2 className="font-semibold">OTP 인증</h2>
-          <p className="muted">계속하려면 인증 앱에 표시된 코드를 입력하세요.</p>
+    <div className="w-full space-y-2">
+      <form onSubmit={handleSubmit} className="card space-y-5">
+        <div className="flex gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-on-primary">
+            <Icon name="shield" size={22} />
+          </span>
+          <div className="space-y-0.5">
+            <h2 className="text-[1.0625rem] font-bold">2단계 인증</h2>
+            <p className="muted text-sm">인증 앱에 보이는 숫자를 넣어 주세요.</p>
+          </div>
         </div>
         <div>
           <label htmlFor="otp-gate-code" className="field-label">
-            6자리 코드
+            6자리 숫자
           </label>
           <input
             id="otp-gate-code"
@@ -70,7 +76,7 @@ export function OtpGate({ children, footer }: { children: ReactNode; footer?: Re
             pattern="[0-9]{6,8}"
             value={code}
             onChange={(e) => setCode(e.target.value)}
-            placeholder="123456"
+            placeholder="000000"
             className="field-code"
           />
         </div>
@@ -79,8 +85,8 @@ export function OtpGate({ children, footer }: { children: ReactNode; footer?: Re
             {error}
           </p>
         )}
-        <button type="submit" disabled={verifying} className="btn-primary w-full">
-          {verifying ? "확인 중..." : "확인"}
+        <button type="submit" disabled={verifying} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+          {verifying ? "확인하는 중…" : "확인"}
         </button>
       </form>
       {footer}

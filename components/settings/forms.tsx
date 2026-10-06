@@ -42,7 +42,7 @@ export function CredentialProof({
         <div
           role="radiogroup"
           aria-label="본인 확인 방법"
-          className="grid grid-cols-2 rounded border border-zinc-300 p-0.5 text-sm dark:border-zinc-700"
+          className="grid grid-cols-2 gap-1 rounded-xl bg-fill p-1 text-[0.9375rem]"
         >
           {(
             [
@@ -56,10 +56,8 @@ export function CredentialProof({
               role="radio"
               aria-checked={mode === value}
               onClick={() => onModeChange(value)}
-              className={`min-h-9 rounded-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 ${
-                mode === value
-                  ? "bg-foreground font-medium text-background"
-                  : "text-zinc-600 hover:text-foreground dark:text-zinc-400"
+              className={`min-h-10 rounded-lg transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-ink ${
+                mode === value ? "bg-surface font-semibold text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-2 hover:text-ink"
               }`}
             >
               {label}
@@ -104,7 +102,7 @@ export function CredentialProof({
 /** Submit + cancel, side by side. */
 export function PanelActions({
   submitLabel,
-  busyLabel = "확인 중...",
+  busyLabel = "확인하는 중…",
   busy,
   onCancel,
   tone = "primary",
@@ -116,12 +114,14 @@ export function PanelActions({
   tone?: "primary" | "danger";
 }) {
   return (
-    <div className="flex gap-2 pt-1">
-      <button type="submit" disabled={busy} className={`${tone === "danger" ? "btn-danger" : "btn-primary"} flex-1`}>
-        {busy ? busyLabel : submitLabel}
-      </button>
+    // "닫기" on the leading side, the action on the trailing side. Not
+    // "취소": that reads as undoing what was already done.
+    <div className="grid grid-cols-2 gap-2 pt-1">
       <button type="button" onClick={onCancel} className="btn-secondary">
-        취소
+        닫기
+      </button>
+      <button type="submit" disabled={busy} className={tone === "danger" ? "btn-danger" : "btn-primary"}>
+        {busy ? busyLabel : submitLabel}
       </button>
     </div>
   );
@@ -169,17 +169,17 @@ export function ReauthPanel({
       <p className="muted">{reason}</p>
       <FormError>{error}</FormError>
       {isGoogleAccount ? (
-        <div className="flex gap-2">
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={onCancel} className="btn-secondary">
+            닫기
+          </button>
           <button
             type="button"
             disabled={busy}
             onClick={onGoogle}
-            className={`${tone === "danger" ? "btn-danger" : "btn-primary"} flex-1`}
+            className={tone === "danger" ? "btn-danger" : "btn-primary"}
           >
-            {busy ? "확인 중..." : "Google로 다시 로그인"}
-          </button>
-          <button type="button" onClick={onCancel} className="btn-secondary">
-            취소
+            {busy ? "확인하는 중…" : "Google로 다시 로그인"}
           </button>
         </div>
       ) : (
@@ -200,7 +200,7 @@ export function ReauthPanel({
 
 /** Shared copy for credential-proof failures. */
 export const CREDENTIAL_ERRORS = {
-  wrongPassphrase: "일기 암호가 올바르지 않습니다.",
-  wrongShares: "백업 코드가 올바르지 않습니다. 코드를 다시 확인해주세요.",
-  recentLogin: "보안 설정을 바꾸려면 최근에 로그인한 상태여야 합니다. 로그아웃 후 다시 로그인해주세요.",
+  wrongPassphrase: "일기 암호를 다시 확인해 주세요.",
+  wrongShares: "백업 코드를 다시 확인해 주세요.",
+  recentLogin: "보안 설정을 바꾸려면 다시 로그인해야 해요. 로그아웃한 뒤 다시 로그인해 주세요.",
 } as const;

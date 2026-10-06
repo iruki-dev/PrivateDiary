@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 
 export const metadata: Metadata = {
-  title: "무료로 시작하기",
+  title: "계정 만들기",
   robots: { index: false, follow: true },
 };
 

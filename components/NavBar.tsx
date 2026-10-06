@@ -9,7 +9,7 @@ import { docHref } from "@/lib/site";
 /** The three places a signed-in person moves between every day. */
 export const APP_LINKS = [
   { href: "/write", label: "쓰기" },
-  { href: "/entries", label: "지난 일기" },
+  { href: "/entries", label: "일기장" },
   { href: "/settings", label: "설정" },
 ] as const;
 
@@ -25,10 +25,11 @@ export function useHasAccount(): boolean {
 }
 
 /**
- * Top bar. Signed in: the wordmark plus, on wide screens, the three app
- * destinations (phones get components/TabBar.tsx instead — a daily-use app
- * shouldn't hide its only three places behind a menu button). Signed out:
- * the help docs and login.
+ * Top bar. Signed in: only on wide screens — the wordmark plus the three
+ * app destinations. Phones get components/TabBar.tsx and a large title on
+ * each screen instead; a wordmark bar above that title would spend 56px
+ * of a phone screen saying the app's name on every page. Signed out: the
+ * help docs and login, on every width.
  *
  * Sign-out and help deliberately aren't here for signed-in users: they're
  * occasional, and sign-out one tap away from "설정" in a row of identical
@@ -40,17 +41,19 @@ export function NavBar() {
   const pathname = usePathname();
 
   return (
-    <header className="sticky top-0 z-40 border-b border-zinc-200 bg-background/90 backdrop-blur dark:border-zinc-800">
-      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-4 sm:px-6">
+    <header
+      className={`sticky top-0 z-40 bg-background/90 backdrop-blur ${hasAccount ? "hidden sm:block" : ""}`}
+    >
+      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between px-5 sm:px-6">
         <Link
           href="/"
-          className="shrink-0 rounded-sm text-base font-semibold focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50"
+          className="shrink-0 rounded-md text-[1.0625rem] font-extrabold tracking-[-0.02em] focus:outline-none focus-visible:outline-2 focus-visible:outline-ink"
         >
           PrivateDiary
         </Link>
 
         {hasAccount && (
-          <nav className="hidden items-center gap-1 sm:flex" aria-label="주 메뉴">
+          <nav className="flex items-center gap-1" aria-label="주 메뉴">
             {APP_LINKS.map(({ href, label }) => {
               const current = isCurrent(pathname, href);
               return (
@@ -58,10 +61,8 @@ export function NavBar() {
                   key={href}
                   href={href}
                   aria-current={current ? "page" : undefined}
-                  className={`rounded px-3 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 ${
-                    current
-                      ? "bg-zinc-100 font-medium text-foreground dark:bg-zinc-900"
-                      : "text-zinc-600 hover:text-foreground dark:text-zinc-400"
+                  className={`flex h-10 items-center rounded-full px-4 text-[0.9375rem] transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-ink ${
+                    current ? "bg-pill font-bold text-ink" : "font-semibold text-ink-2 hover:bg-fill hover:text-ink"
                   }`}
                 >
                   {label}
@@ -76,15 +77,12 @@ export function NavBar() {
             <Link
               href={docHref("/docs")}
               aria-current={isCurrent(pathname, "/docs") ? "page" : undefined}
-              className="rounded px-3 py-1.5 text-sm text-zinc-600 transition-colors hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400"
+              className="btn-text"
             >
               도움말
             </Link>
             {pathname !== "/login" && (
-              <Link
-                href="/login"
-                className="rounded px-3 py-1.5 text-sm font-medium transition-colors hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-900"
-              >
+              <Link href="/login" className="btn-primary btn-sm">
                 로그인
               </Link>
             )}

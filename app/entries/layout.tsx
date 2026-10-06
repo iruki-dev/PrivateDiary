@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 
 // Account-only page: keep it out of search results (see app/layout.tsx).
 export const metadata: Metadata = {
-  title: "지난 일기",
+  title: "일기장",
   robots: { index: false, follow: false },
 };
 

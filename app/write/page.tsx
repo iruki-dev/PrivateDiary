@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSeed } from "@/contexts/SeedContext";
@@ -13,28 +13,10 @@ import { clearDraft, loadDraft, saveDraft } from "@/lib/drafts";
 import { TodayLabel } from "@/components/TodayLabel";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
 import { haptic } from "@/lib/native/app";
+import { Icon } from "@/components/Icon";
+import { Toast } from "@/components/Toast";
 
-const timeFormatter = new Intl.DateTimeFormat("ko-KR", { timeStyle: "short" });
 const draftFormatter = new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" });
-
-/** Minimal outline eye glyph — no icon library in this codebase, and this is the only icon needed. */
-function EyeIcon({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={1.75}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <path d="M2.5 12s3.5-7 9.5-7 9.5 7 9.5 7-3.5 7-9.5 7-9.5-7-9.5-7Z" />
-      <circle cx="12" cy="12" r="3" />
-    </svg>
-  );
-}
 
 /**
  * Phase 5 write path (ARCHITECTURE.md §3.2 rule 5): works from any
@@ -52,11 +34,15 @@ export default function WritePage() {
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  // Time of the last successful save, shown as "오전 11:22에 저장했습니다".
+  // Set by a successful save; shows the "일기를 저장했어요" toast until it times out.
   const [savedAt, setSavedAt] = useState<Date | null>(null);
   // One-shot message from signup ("첫 일기가 저장되었습니다"), shown once.
   const { notice, setNotice, hasPendingEntry, takePendingEntry } = usePendingEntry();
-  const [initialNotice] = useState(notice);
+  const [initialNotice, setInitialNotice] = useState(notice);
+  const dismissToast = useCallback(() => {
+    setSavedAt(null);
+    setInitialNotice(null);
+  }, []);
   useEffect(() => {
     if (notice) setNotice(null);
   }, [notice, setNotice]);
@@ -156,7 +142,7 @@ export default function WritePage() {
     } catch (err) {
       console.error("writeEntry failed", err);
       haptic("reject");
-      setError("저장하지 못했습니다. 다시 시도해주세요.");
+      setError("저장하지 못했어요. 쓴 글은 그대로 있어요. 인터넷 연결을 확인하고 다시 저장해 주세요.");
     } finally {
       setSubmitting(false);
     }
@@ -194,64 +180,49 @@ export default function WritePage() {
   }
 
   const missingBackupCodes = decryptionMethods !== null && !decryptionMethods.shamir;
-  const status = error
-    ? null
-    : savedAt
-      ? `${timeFormatter.format(savedAt)}에 저장했습니다.`
-      : initialNotice;
+  const toastMessage = error ? null : savedAt ? "일기를 저장했어요" : initialNotice;
 
   return (
-    <main className="flex flex-1 flex-col items-center px-4 pb-10 sm:px-6 sm:pb-16">
-      <form onSubmit={handleSubmit} className="w-full max-w-xl">
+    <main className="flex flex-1 flex-col items-center bg-surface px-5 pb-8 sm:px-6 sm:pb-16">
+      <form onSubmit={handleSubmit} className="flex w-full max-w-xl flex-1 flex-col">
         {/* Stays in view however long the entry grows, so 저장 is always one tap away. */}
-        <div className="sticky top-14 z-30 -mx-4 flex items-center justify-between gap-3 bg-background/95 px-4 pb-3 pt-6 backdrop-blur sm:-mx-6 sm:px-6 sm:pt-10">
-          <h1 className="text-xl font-semibold">
-            <TodayLabel />
-          </h1>
-          <div className="flex items-center gap-3">
-            {text.length > 0 && (
-              <span className="faint text-xs tabular-nums">{text.length.toLocaleString("ko-KR")}자</span>
-            )}
-            <button
-              type="submit"
-              disabled={submitting || !text.trim()}
-              className="btn-primary min-h-10 px-5"
-              title="⌘/Ctrl + Enter"
-            >
-              {submitting ? "저장 중..." : "저장"}
-            </button>
-          </div>
+        <div className="sticky top-0 z-30 -mx-5 flex h-16 items-center justify-between gap-3 bg-surface/95 px-5 backdrop-blur sm:top-14 sm:-mx-6 sm:px-6">
+          <span className="faint text-sm font-medium tabular-nums">
+            {text.length > 0 ? `${text.length.toLocaleString("ko-KR")}자` : ""}
+          </span>
+          <button
+            type="submit"
+            disabled={submitting || !text.trim()}
+            className="btn-primary min-h-11 rounded-full px-6 text-[0.9375rem]"
+            title="⌘/Ctrl + Enter"
+          >
+            {submitting ? "저장 중…" : "저장"}
+          </button>
         </div>
 
-        <div className="space-y-3">
+        <h1 className="title-display pt-1">
+          <TodayLabel weekdayClassName="text-ink-4" />
+        </h1>
+
+        <div className="mt-4 flex flex-1 flex-col gap-4">
           {error && (
-            <p role="alert" className="error-text">
+            <p role="alert" className="flex gap-2 rounded-2xl bg-danger-fill px-4 py-3 text-sm leading-relaxed text-danger">
+              <Icon name="alert-circle" size={18} className="mt-0.5 shrink-0" />
               {error}
             </p>
           )}
-          {status && (
-            <p role="status" className="muted flex flex-wrap items-center gap-x-2">
-              <span>{status}</span>
-              <Link href="/entries" className="link">
-                지난 일기에서 보기
-              </Link>
-            </p>
-          )}
           {restoredDraftAt && (
-            <div
-              role="status"
-              className="flex flex-wrap items-center justify-between gap-2 rounded border border-zinc-300 px-3 py-2 dark:border-zinc-700"
-            >
-              <p className="muted text-xs">
-                저장하지 않은 글을 불러왔습니다 ({draftFormatter.format(restoredDraftAt)})
+            <div role="status" className="flex items-center justify-between gap-3 rounded-2xl bg-fill py-2 pl-4 pr-2">
+              <p className="text-sm text-ink-2">
+                저장하지 않은 글을 불러왔어요 · {draftFormatter.format(restoredDraftAt)}
               </p>
-              <button type="button" onClick={discardDraft} className="btn-secondary btn-sm">
+              <button type="button" onClick={discardDraft} className="btn-text min-h-10 shrink-0">
                 버리기
               </button>
             </div>
           )}
 
-          <div className="relative">
+          <div className="relative flex-1">
             <textarea
               ref={textareaRef}
               required
@@ -260,46 +231,71 @@ export default function WritePage() {
               onChange={(e) => setText(e.target.value)}
               onKeyDown={handleKeyDown}
               rows={8}
-              placeholder="오늘 하루는 어땠나요?"
-              aria-label="오늘의 일기 내용"
-              className={`field-editor transition-[filter] duration-300 ${obscured ? "blur-[4px]" : ""}`}
+              placeholder="오늘 하루는 어땠어요?"
+              aria-label="오늘의 일기"
+              className={`field-editor transition-[filter] duration-300 ${obscured ? "blur-[5px]" : ""}`}
               style={obscured ? { caretColor: "transparent" } : undefined}
             />
-            {privateMode && peekAllowed && (
-              <button
-                type="button"
-                aria-label="누르고 있는 동안 잠시 보기"
-                aria-pressed={revealing}
-                onPointerDown={() => setRevealing(true)}
-                onPointerUp={() => setRevealing(false)}
-                onPointerLeave={() => setRevealing(false)}
-                onPointerCancel={() => setRevealing(false)}
-                onKeyDown={(e) => {
-                  if (e.key === " " || e.key === "Enter") {
-                    e.preventDefault();
-                    setRevealing(true);
-                  }
-                }}
-                onKeyUp={(e) => {
-                  if (e.key === " " || e.key === "Enter") setRevealing(false);
-                }}
-                className="absolute right-2 top-2 rounded p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-800 dark:hover:text-zinc-300"
-              >
-                <EyeIcon className="h-4 w-4" />
-              </button>
+            {privateMode && peekAllowed && text.length > 0 && (
+              // Hold-to-reveal, pinned near the bottom of the screen where a
+              // thumb rests, rather than up in the corner of a long entry.
+              <div className="pointer-events-none sticky bottom-24 flex justify-end pt-3 sm:bottom-6">
+                <button
+                  type="button"
+                  aria-label="누르고 있는 동안 글 보이기"
+                  aria-pressed={revealing}
+                  onPointerDown={() => setRevealing(true)}
+                  onPointerUp={() => setRevealing(false)}
+                  onPointerLeave={() => setRevealing(false)}
+                  onPointerCancel={() => setRevealing(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === " " || e.key === "Enter") {
+                      e.preventDefault();
+                      setRevealing(true);
+                    }
+                  }}
+                  onKeyUp={(e) => {
+                    if (e.key === " " || e.key === "Enter") setRevealing(false);
+                  }}
+                  className="btn-secondary btn-sm pointer-events-auto min-h-11 shadow-float"
+                >
+                  <Icon name="eye" size={18} />
+                  누르고 있으면 보여요
+                </button>
+              </div>
             )}
           </div>
 
           {missingBackupCodes && (
-            <p className="faint pt-2 text-xs leading-relaxed">
-              백업 코드가 없습니다. 일기 암호를 잊으면 일기를 열 수 없습니다.{" "}
-              <Link href="/settings#security" className="link font-medium text-foreground">
-                백업 코드 만들기
-              </Link>
+            <p className="note-warn">
+              <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+              <span>
+                백업 코드가 없어요. 일기 암호를 잊으면 일기장을 열 수 없어요.{" "}
+                <Link href="/settings#security" className="link whitespace-nowrap">
+                  백업 코드 만들기
+                </Link>
+              </span>
             </p>
           )}
+
+          <p className="flex items-center gap-1.5 border-t border-line pt-3 text-[0.8125rem] font-medium text-ink-3">
+            <Icon name="lock" size={16} strokeWidth={2} />
+            저장하면 나만 읽을 수 있어요
+          </p>
         </div>
       </form>
+
+      {toastMessage && (
+        <Toast
+          message={toastMessage}
+          onDismiss={dismissToast}
+          action={
+            <Link href="/entries" className="btn-text min-h-11 px-3.5 text-on-primary hover:text-on-primary">
+              보기
+            </Link>
+          }
+        />
+      )}
     </main>
   );
 }

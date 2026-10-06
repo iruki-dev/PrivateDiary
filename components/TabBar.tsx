@@ -6,29 +6,13 @@ import { usePathname } from "next/navigation";
 import { APP_LINKS, useHasAccount } from "@/components/NavBar";
 import { useNative } from "@/contexts/NativeContext";
 import { IS_ANDROID_APP } from "@/lib/platform";
+import { Icon, type IconName } from "@/components/Icon";
 
-function PenIcon() {
-  return (
-    <path d="M4 20h4L19 9a2.83 2.83 0 0 0-4-4L4 16v4ZM13.5 6.5l4 4" />
-  );
-}
-
-function BookIcon() {
-  return (
-    <path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5v-15ZM5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3M9 7.5h6" />
-  );
-}
-
-function GearIcon() {
-  return (
-    <>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2.75v2.5M12 18.75v2.5M4.22 4.22l1.77 1.77M18.01 18.01l1.77 1.77M2.75 12h2.5M18.75 12h2.5M4.22 19.78l1.77-1.77M18.01 5.99l1.77-1.77" />
-    </>
-  );
-}
-
-const ICONS = { "/write": PenIcon, "/entries": BookIcon, "/settings": GearIcon } as const;
+const ICONS = {
+  "/write": { idle: "pen", current: "pen-fill" },
+  "/entries": { idle: "book", current: "book-fill" },
+  "/settings": { idle: "gear", current: "gear-fill" },
+} as const satisfies Record<string, { idle: IconName; current: IconName }>;
 
 /**
  * True while an on-screen keyboard is covering a large part of the screen,
@@ -67,38 +51,35 @@ export function TabBar() {
   return (
     <>
       {/* Reserves the bar's height at the end of the page so it never covers the last content. */}
-      <div aria-hidden className="tabbar h-16 sm:hidden" />
+      <div aria-hidden className="tabbar h-[4.5rem] sm:hidden" />
       <nav
         aria-label="주 메뉴"
         hidden={keyboardOpen}
-        className="tabbar fixed inset-x-0 bottom-0 z-40 border-t border-zinc-200 bg-background/95 backdrop-blur sm:hidden dark:border-zinc-800"
+        className="tabbar fixed inset-x-0 bottom-0 z-40 border-t border-line bg-surface/95 backdrop-blur sm:hidden"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
-        <ul className="mx-auto grid h-16 max-w-md grid-cols-3">
+        <ul className="mx-auto grid h-[4.5rem] max-w-md grid-cols-3 pb-1.5">
           {APP_LINKS.map(({ href, label }) => {
             const current = pathname === href || pathname.startsWith(`${href}/`);
-            const Icon = ICONS[href];
+            const icons = ICONS[href];
             return (
               <li key={href}>
                 <Link
                   href={href}
                   aria-current={current ? "page" : undefined}
-                  className={`flex h-full flex-col items-center justify-center gap-1 text-[0.6875rem] transition-colors focus:outline-none focus-visible:bg-zinc-100 dark:focus-visible:bg-zinc-900 ${
-                    current ? "font-semibold text-foreground" : "text-zinc-500 dark:text-zinc-400"
+                  className={`group flex h-full flex-col items-center justify-center gap-1 text-xs transition-colors focus:outline-none ${
+                    current ? "font-bold text-ink" : "font-semibold text-ink-3"
                   }`}
                 >
-                  <svg
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth={current ? 2 : 1.6}
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    className="h-6 w-6"
-                    aria-hidden
+                  {/* Three cues, none of them colour: a pill (M3), a filled
+                      icon (HIG) and a bolder label. */}
+                  <span
+                    className={`flex h-8 w-14 items-center justify-center rounded-full transition-colors group-focus-visible:outline-2 group-focus-visible:outline-ink ${
+                      current ? "bg-pill" : ""
+                    }`}
                   >
-                    <Icon />
-                  </svg>
+                    <Icon name={current ? icons.current : icons.idle} />
+                  </span>
                   {label}
                 </Link>
               </li>

@@ -227,3 +227,17 @@ export function groupByDay<T extends { createdAt: Date | null }>(
   }
   return groups;
 }
+
+/**
+ * The first sentence (or first line) of an entry as its heading in the
+ * list, and the rest as body. Diaries have no titles; the opening sentence
+ * is what people recognise an entry by. A first sentence too long to read
+ * as a heading (over 60 characters) leaves the whole text as body.
+ */
+export function splitLead(text: string): { lead: string | null; rest: string } {
+  const trimmed = text.trim();
+  const firstLine = trimmed.split("\n", 1)[0];
+  const lead = /^.+?[.!?。…](?=\s|$)/u.exec(firstLine)?.[0] ?? firstLine;
+  if (lead.length > 60) return { lead: null, rest: trimmed };
+  return { lead, rest: trimmed.slice(lead.length).trim() };
+}

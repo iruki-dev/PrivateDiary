@@ -6,9 +6,9 @@ import { toHighlightSegments, type MatchRange } from "@/lib/entries/search";
  * that is what it means — a screen reader announces it as highlighted,
  * which a styled <span> would not.
  *
- * Styling stays inside the app's monochrome palette rather than the
- * browser's default yellow <mark>, which would be the single loudest
- * colour anywhere in this UI.
+ * Styled globally (app/globals.css): a highlighter yellow, the one colour
+ * in the app that isn't a warning — "where did I write this word" is the
+ * one question a search screen exists to answer at a glance.
  */
 export function HighlightedText({ text, ranges }: { text: string; ranges: MatchRange[] }) {
   const segments = toHighlightSegments(text, ranges);
@@ -17,9 +17,7 @@ export function HighlightedText({ text, ranges }: { text: string; ranges: MatchR
       {segments.map((segment, index) => (
         <Fragment key={index}>
           {segment.matched ? (
-            <mark className="rounded-sm bg-zinc-200 text-foreground dark:bg-zinc-700">
-              {segment.text}
-            </mark>
+            <mark>{segment.text}</mark>
           ) : (
             segment.text
           )}

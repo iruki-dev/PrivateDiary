@@ -20,7 +20,7 @@ import {
 import { checkPassphraseStrength } from "@/lib/passphraseStrength";
 import { PassphraseStrengthMeter } from "@/components/PassphraseStrengthMeter";
 import { PasswordField, TextField } from "@/components/PasswordField";
-import { AuthShell, OrDivider } from "@/components/AuthShell";
+import { AuthShell, OrDivider, StepProgress } from "@/components/AuthShell";
 import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
 import { LoadingScreen } from "@/components/LoadingState";
@@ -34,9 +34,6 @@ const ONBOARDING_SHARES = { n: 3, k: 2 };
 
 type Step = "passphrase" | "backup-intro" | "backup-reveal";
 
-function StepLabel({ step }: { step: 1 | 2 | 3 }) {
-  return <p className="faint text-xs font-medium">{step} / 3단계</p>;
-}
 
 /**
  * Onboarding (ARCHITECTURE.md §3.1 step 1-5), in three steps:
@@ -152,16 +149,16 @@ export default function SignupPage() {
 
     if (!user) return;
     if (passphrase !== passphraseConfirm) {
-      setPassphraseError("일기 암호 확인이 일치하지 않습니다.");
+      setPassphraseError("두 칸에 같은 일기 암호를 넣어 주세요.");
       return;
     }
     const userInputs = [email, user.email ?? ""].filter(Boolean);
     if (!checkPassphraseStrength(passphrase, userInputs).isStrongEnough) {
-      setPassphraseError("일기 암호가 너무 약합니다. 서로 관련 없는 단어를 더 이어 붙여 보세요.");
+      setPassphraseError("일기 암호가 너무 짧아요. 서로 상관없는 단어를 더 이어 붙여 보세요.");
       return;
     }
     if (loginPasswordRef.current && passphrase === loginPasswordRef.current) {
-      setPassphraseError("로그인 비밀번호와 다른 값이어야 합니다.");
+      setPassphraseError("로그인 비밀번호와 다르게 정해 주세요.");
       return;
     }
 
@@ -183,7 +180,7 @@ export default function SignupPage() {
       if (pendingText) {
         try {
           await writeEntry(user.uid, publicKeys, pendingText);
-          setNotice("첫 일기가 저장되었습니다.");
+          setNotice("첫 일기를 저장했어요");
         } catch (err) {
           console.error("saving the pre-signup entry failed", err);
           // Hand it back so /write can offer it again instead of losing it.
@@ -201,7 +198,7 @@ export default function SignupPage() {
       console.error("handleSetPassphrase failed", err);
       if (!keysCreated) {
         setOnboarding(false);
-        setPassphraseError("키를 저장하지 못했습니다. 다시 시도해주세요.");
+        setPassphraseError("일기장을 만들지 못했어요. 다시 시도해 주세요.");
         loginPasswordRef.current = "";
         setPassphrase("");
         setPassphraseConfirm("");
@@ -223,7 +220,7 @@ export default function SignupPage() {
       setStep("backup-reveal");
     } catch (err) {
       console.error("prepareShamir failed", err);
-      setBackupError("백업 코드를 만들지 못했습니다. 설정에서 다시 만들 수 있습니다.");
+      setBackupError("백업 코드를 만들지 못했어요. 설정에서 다시 만들 수 있어요.");
     } finally {
       setBackupBusy(false);
     }
@@ -239,7 +236,7 @@ export default function SignupPage() {
     } catch (err) {
       console.error("confirmPendingShamir failed", err);
       setBackupError(
-        "백업 코드를 저장하지 못했습니다. 방금 표시된 코드는 사용할 수 없습니다. 설정에서 다시 만들어 주세요."
+        "백업 코드를 저장하지 못했어요. 방금 보인 코드는 쓸 수 없으니 설정에서 다시 만들어 주세요."
       );
     } finally {
       setBackupBusy(false);
@@ -257,11 +254,9 @@ export default function SignupPage() {
     return (
       <AuthShell
         title="계정 만들기"
-        lead={
-          hasPendingEntry ? "작성한 일기는 가입을 마치면 첫 일기로 저장됩니다." : undefined
-        }
+        step={1}
+        lead={hasPendingEntry ? "쓴 일기는 가입을 마치면 첫 일기로 저장돼요." : undefined}
       >
-        <StepLabel step={1} />
         <form onSubmit={handleCreateAccount} className="space-y-4">
           <TextField
             label="이메일"
@@ -269,22 +264,22 @@ export default function SignupPage() {
             autoComplete="email"
             value={email}
             onChange={setEmail}
-            placeholder="you@example.com"
+            placeholder="name@example.com"
           />
           <PasswordField
             label="로그인 비밀번호"
             autoComplete="new-password"
             value={accountPassword}
             onChange={setAccountPassword}
-            hint="6자 이상. 일기 암호는 다음 단계에서 따로 정합니다."
+            hint="6자 이상이면 돼요. 일기 암호는 다음 단계에서 따로 정해요."
           />
           {accountError && (
             <p role="alert" className="error-text">
               {accountError}
             </p>
           )}
-          <button type="submit" disabled={accountSubmitting} className="btn-primary w-full">
-            {accountSubmitting ? "처리 중..." : "가입하기"}
+          <button type="submit" disabled={accountSubmitting} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+            {accountSubmitting ? "만드는 중…" : "계정 만들기"}
           </button>
         </form>
         {googleAvailable && (
@@ -300,13 +295,13 @@ export default function SignupPage() {
             </button>
           </>
         )}
-        <p className="faint text-xs">
+        <p className="faint text-[0.8125rem] leading-relaxed">
           가입하면 <Link href={docHref("/terms")} className="link">이용약관</Link>과{" "}
-          <Link href={docHref("/privacy")} className="link">개인정보처리방침</Link>에 동의하는 것으로 봅니다.
+          <Link href={docHref("/privacy")} className="link">개인정보처리방침</Link>에 동의하게 돼요.
         </p>
-        <p className="text-center text-sm">
-          <Link href="/login" className="link">
-            이미 계정이 있으신가요? 로그인
+        <p className="text-center">
+          <Link href="/login" className="btn-text">
+            이미 계정이 있어요
           </Link>
         </p>
       </AuthShell>
@@ -315,13 +310,13 @@ export default function SignupPage() {
 
   if (step === "backup-reveal" && shares.length > 0) {
     return (
-      <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
-        <div className="w-full max-w-lg space-y-3">
-          <StepLabel step={3} />
+      <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-6 sm:px-6 sm:py-16">
+        <div className="w-full max-w-md space-y-3">
+          <StepProgress step={3} />
           <SecretReveal
-            title="백업 코드"
-            description={`${ONBOARDING_SHARES.n}개 중 아무 ${ONBOARDING_SHARES.k}개를 모으면 일기 암호 없이 새 암호를 정할 수 있습니다. 서로 다른 곳에 나누어 보관하세요. 이 화면은 다시 표시되지 않습니다.`}
-            confirmLabel={backupBusy ? "저장 중..." : "완료"}
+            title="백업 코드를 적어 두세요"
+            description={`일기 암호를 잊어도 ${ONBOARDING_SHARES.n}개 중 ${ONBOARDING_SHARES.k}개만 있으면 일기장을 열 수 있어요. 서로 다른 곳에 나눠 두면 하나를 잃어도 괜찮아요. 이 화면을 닫으면 다시 볼 수 없어요.`}
+            confirmLabel={backupBusy ? "저장하는 중…" : "첫 일기 쓰러 가기"}
             confirming={backupBusy}
             onConfirm={() => void handleConfirmBackupCodes()}
           >
@@ -329,7 +324,7 @@ export default function SignupPage() {
               {shares.map((share, i) => (
                 <SecretCard
                   key={i}
-                  label={`코드 ${i + 1} / ${shares.length}`}
+                  label={`코드 ${i + 1}`}
                   text={recoverySecretToText(share)}
                   filename={`privatediary-backup-code-${i + 1}-of-${shares.length}.txt`}
                 />
@@ -350,16 +345,16 @@ export default function SignupPage() {
     return (
       <AuthShell
         title="백업 코드 만들기"
+        step={3}
         lead={
           <>
-            일기 암호를 잊으면 백업 코드로만 새 암호를 정할 수 있습니다. 지금 만들어 두는 것을 권장합니다.{" "}
+            백업 코드가 있으면 일기 암호를 잊어도 일기장을 열 수 있어요. 지금 만들어 두면 안심이에요.{" "}
             <Link href={docHref("/docs/backup-codes")} className="link whitespace-nowrap">
               자세히
             </Link>
           </>
         }
       >
-        <StepLabel step={3} />
         {backupError && (
           <p role="alert" className="error-text">
             {backupError}
@@ -370,11 +365,11 @@ export default function SignupPage() {
             type="button"
             onClick={() => void handleCreateBackupCodes()}
             disabled={backupBusy}
-            className="btn-primary w-full"
+            className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]"
           >
-            {backupBusy ? "만드는 중..." : "백업 코드 만들기"}
+            {backupBusy ? "만드는 중…" : "백업 코드 만들기"}
           </button>
-          <button type="button" onClick={finish} className="block w-full text-center text-sm link">
+          <button type="button" onClick={finish} className="btn-text w-full">
             나중에 설정에서 만들기
           </button>
         </div>
@@ -384,30 +379,33 @@ export default function SignupPage() {
 
   return (
     <AuthShell
-      title="일기 암호 정하기"
+      title="일기 암호를 정해 주세요"
+      step={2}
       lead={
         <>
-          일기를 여는 열쇠입니다. 서버로 전송되지 않으므로 잊으면 찾아 드릴 수 없습니다.{" "}
+          일기장을 여는 열쇠예요. 어디에도 저장하지 않아서, 잊으면 누구도 대신 찾아 줄 수 없어요.{" "}
           <Link href={docHref("/docs/passphrase")} className="link whitespace-nowrap">
             자세히
           </Link>
         </>
       }
     >
-      <StepLabel step={2} />
-      <form onSubmit={handleSetPassphrase} className="space-y-4">
+      <form onSubmit={handleSetPassphrase} className="space-y-5">
         <div className="space-y-2">
           <PasswordField
             label="일기 암호"
             autoComplete="passphrase"
             value={passphrase}
             onChange={setPassphrase}
-            hint="로그인 비밀번호와 다른 값. 서로 관련 없는 단어 여러 개를 이어 쓰면 좋습니다."
           />
           <PassphraseStrengthMeter
             passphrase={passphrase}
             userInputs={[email, user?.email ?? ""].filter(Boolean)}
           />
+          <p className="text-[0.8125rem] leading-relaxed text-ink-3">
+            로그인 비밀번호와 다르게, 서로 상관없는 단어 4개 정도를 띄어 쓰면 기억하기 쉽고 안전해요. 비밀번호
+            관리 앱도 이 암호는 기억하지 않아요.
+          </p>
         </div>
         <PasswordField
           label="일기 암호 확인"
@@ -420,8 +418,8 @@ export default function SignupPage() {
             {passphraseError}
           </p>
         )}
-        <button type="submit" disabled={deriving} className="btn-primary w-full">
-          {deriving ? "열쇠 만드는 중..." : "다음"}
+        <button type="submit" disabled={deriving} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+          {deriving ? "일기장을 만드는 중…" : "다음"}
         </button>
       </form>
     </AuthShell>

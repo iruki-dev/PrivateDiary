@@ -77,12 +77,12 @@ function reauthErrorMessage(err: unknown): string {
   switch (authErrorCode(err)) {
     case "auth/invalid-credential":
     case "auth/wrong-password":
-      return "로그인 비밀번호가 올바르지 않습니다.";
+      return "로그인 비밀번호를 다시 확인해 주세요.";
     case "auth/popup-closed-by-user":
     case "auth/cancelled-popup-request":
-      return "다시 로그인을 취소했습니다.";
+      return "다시 로그인하지 않고 닫았어요.";
     default:
-      return "다시 로그인하지 못했습니다. 다시 시도해주세요.";
+      return "다시 로그인하지 못했어요. 다시 시도해 주세요.";
   }
 }
 
@@ -133,15 +133,15 @@ export default function SettingsPage() {
   const shamirConfig = decryptionMethods?.shamir ?? null;
 
   return (
-    <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
-      <div className="w-full max-w-xl space-y-8">
-        <h1 className="text-xl font-semibold">설정</h1>
+    <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-4 sm:px-6 sm:py-12">
+      <div className="w-full max-w-xl space-y-7">
+        <h1 className="title-display pt-11 sm:pt-0">설정</h1>
 
         <OtpGate
           footer={
             shamirConfig && (
-              <Link href="/entries" className="block w-full text-center text-xs link">
-                인증 앱이 없다면: 백업 코드로 일기를 연 뒤 다시 오기
+              <Link href="/entries" className="btn-text w-full text-center text-sm">
+                인증 앱이 없다면 백업 코드로 일기장을 연 뒤 다시 오세요
               </Link>
             )
           }
@@ -151,14 +151,14 @@ export default function SettingsPage() {
           <BiometricGate
             footer={
               shamirConfig && (
-                <Link href="/entries" className="block w-full text-center text-xs link">
-                  생체 인증을 할 수 없다면: 백업 코드로 일기를 연 뒤 다시 오기
+                <Link href="/entries" className="btn-text w-full text-center text-sm">
+                  생체 인증을 할 수 없다면 백업 코드로 일기장을 연 뒤 다시 오세요
                 </Link>
               )
             }
           >
             <div className="space-y-8">
-              <SettingsGroup id="security" title="일기 보호">
+              <SettingsGroup id="security" title="일기장 지키기">
                 <ShamirRow
                   config={shamirConfig}
                   stageSeedFromPassphrase={stageSeedFromPassphrase}
@@ -199,7 +199,7 @@ export default function SettingsPage() {
                 <SettingsLinkRow
                   href="/entries"
                   label="일기 내보내기"
-                  description="지난 일기 화면 맨 아래에서 Markdown 또는 JSON으로 받을 수 있습니다."
+                  description="일기장 맨 아래에서 Markdown이나 JSON 파일로 받을 수 있어요"
                 />
                 <DeleteAccountRow
                   stageSeedFromPassphrase={stageSeedFromPassphrase}
@@ -238,11 +238,11 @@ function PrivateWritingRows() {
   return (
     <>
       <SettingsRow
-        label="프라이빗 작성 모드"
-        description="쓰는 동안 글자를 흐리게 가립니다. 모든 기기에 적용됩니다."
+        label="쓰는 글 가리기"
+        description="옆 사람이 보지 못하게 쓰는 동안 글자를 흐리게 보여줘요. 모든 기기에 적용돼요."
         control={
           <Switch
-            label="프라이빗 작성 모드"
+            label="쓰는 글 가리기"
             checked={privateWritingMode}
             onChange={(next) => void setPrivateWritingMode(next)}
           />
@@ -250,11 +250,11 @@ function PrivateWritingRows() {
       />
       {privateWritingMode && (
         <SettingsRow
-          label="누르고 있으면 보기"
-          description="끄면 쓰는 동안에는 본인도 내용을 볼 수 없습니다."
+          label="누르고 있으면 보이기"
+          description="끄면 쓰는 동안에는 나도 글을 볼 수 없어요."
           control={
             <Switch
-              label="누르고 있으면 보기"
+              label="누르고 있으면 보이기"
               checked={privateWritingPeekAllowed}
               onChange={(next) => void setPrivateWritingPeekAllowed(next)}
             />
@@ -284,7 +284,7 @@ function AutoLockRow() {
     try {
       await setAutoLockMinutes(minutes);
     } catch (err) {
-      setError(credentialErrorMessage(err, "자동 잠금 시간을 저장하지 못했습니다."));
+      setError(credentialErrorMessage(err, "자동 잠금 시간을 바꾸지 못했어요."));
     }
   }
 
@@ -294,8 +294,8 @@ function AutoLockRow() {
       htmlFor="auto-lock-minutes"
       description={
         IS_ANDROID_APP
-          ? "사용하지 않으면 지난 일기를 다시 잠급니다. 앱을 벗어나면 시간과 상관없이 바로 잠깁니다."
-          : "사용하지 않으면 지난 일기를 다시 잠급니다."
+          ? "쓰지 않는 동안 일기장을 잠가요. 앱을 나가면 시간과 상관없이 바로 잠가요."
+          : "쓰지 않는 동안 일기장을 잠가요."
       }
       control={
         <select
@@ -334,7 +334,7 @@ function DraftAutosaveRow() {
       // the setting change never actually took effect for.
       if (!next) clearAllDrafts();
     } catch (err) {
-      setError(credentialErrorMessage(err, "임시 저장 설정을 저장하지 못했습니다."));
+      setError(credentialErrorMessage(err, "임시 저장을 바꾸지 못했어요."));
     }
   }
 
@@ -343,7 +343,7 @@ function DraftAutosaveRow() {
       label="임시 저장"
       description={
         <>
-          쓰던 글을 이 기기에 남겨 둡니다. 암호화되지 않은 채 저장됩니다.{" "}
+          쓰던 글을 이 기기에 남겨 둬요. 저장하기 전까지는 잠기지 않은 채로 남아요.{" "}
           <MoreLink href={docHref("/docs/writing#draft")} />
         </>
       }
@@ -428,9 +428,9 @@ function DailyEntryLimitRow({
       setPassphrase("");
       await setDailyEntryLimit(newLimit);
       setOpen(false);
-      setMessage("변경했습니다.");
+      setMessage("바꿨어요");
     } catch (err) {
-      setError(credentialErrorMessage(err, "하루 저장 개수를 저장하지 못했습니다."));
+      setError(credentialErrorMessage(err, "하루에 쓸 수 있는 일기 수를 바꾸지 못했어요."));
     } finally {
       setSubmitting(false);
     }
@@ -438,11 +438,11 @@ function DailyEntryLimitRow({
 
   return (
     <SettingsRow
-      label="하루 저장 개수"
+      label="하루에 쓸 수 있는 일기"
       description={
         <>
           {currentLabel}
-          {message && <span className="text-foreground"> · {message}</span>}{" "}
+          {message && <span className="text-ink"> · {message}</span>}{" "}
           <MoreLink href={docHref("/docs/writing#daily-limit")} />
         </>
       }
@@ -473,7 +473,7 @@ function DailyEntryLimitRow({
               ))}
             </select>
           </div>
-          <p className="muted">바꾸려면 본인 확인이 필요합니다.</p>
+          <p className="muted">바꾸려면 본인 확인이 필요해요.</p>
           <CredentialProof
             mode={proveMode}
             onModeChange={setProveMode}
@@ -485,7 +485,7 @@ function DailyEntryLimitRow({
             autoFocus={false}
           />
           <FormError>{error}</FormError>
-          <PanelActions submitLabel="변경" busy={submitting} onCancel={cancel} />
+          <PanelActions submitLabel="바꾸기" busy={submitting} onCancel={cancel} />
         </form>
       )}
     </SettingsRow>
@@ -519,11 +519,11 @@ function ChangePassphraseRow({
     setSuccess(false);
 
     if (newPassphrase !== confirmPassphrase) {
-      setError("새 일기 암호 확인이 일치하지 않습니다.");
+      setError("새 일기 암호를 두 칸에 똑같이 넣어 주세요.");
       return;
     }
     if (!checkPassphraseStrength(newPassphrase).isStrongEnough) {
-      setError("새 일기 암호가 너무 약합니다. 서로 관련 없는 단어를 더 이어 붙여 보세요.");
+      setError("새 일기 암호가 너무 짧아요. 서로 상관없는 단어를 더 이어 붙여 보세요.");
       return;
     }
 
@@ -534,7 +534,7 @@ function ChangePassphraseRow({
       cancel();
     } catch (err) {
       setError(
-        err instanceof WrongPassphraseError ? "기존 일기 암호가 올바르지 않습니다." : "일기 암호를 바꾸지 못했습니다."
+        err instanceof WrongPassphraseError ? "지금 일기 암호를 다시 확인해 주세요." : "일기 암호를 바꾸지 못했어요."
       );
     } finally {
       setSubmitting(false);
@@ -544,7 +544,7 @@ function ChangePassphraseRow({
   return (
     <SettingsRow
       label="일기 암호"
-      description={success ? <span className="text-foreground">변경했습니다.</span> : "일기를 여는 암호를 바꿉니다."}
+      description={success ? <span className="text-ink">일기 암호를 바꿨어요</span> : "일기장을 여는 암호를 바꿔요"}
       control={
         !open && (
           <button
@@ -563,7 +563,7 @@ function ChangePassphraseRow({
       {open && (
         <form onSubmit={handleSubmit} className="space-y-4">
           <PasswordField
-            label="기존 일기 암호"
+            label="지금 일기 암호"
             autoComplete="passphrase"
             autoFocus
             value={oldPassphrase}
@@ -585,7 +585,7 @@ function ChangePassphraseRow({
             onChange={setConfirmPassphrase}
           />
           <FormError>{error}</FormError>
-          <PanelActions submitLabel="변경" busyLabel="변경 중..." busy={submitting} onCancel={cancel} />
+          <PanelActions submitLabel="바꾸기" busyLabel="바꾸는 중…" busy={submitting} onCancel={cancel} />
         </form>
       )}
     </SettingsRow>
@@ -627,11 +627,11 @@ function ResetPassphraseRow({
     setSuccess(false);
 
     if (newPassphrase !== confirmPassphrase) {
-      setError("새 일기 암호 확인이 일치하지 않습니다.");
+      setError("새 일기 암호를 두 칸에 똑같이 넣어 주세요.");
       return;
     }
     if (!checkPassphraseStrength(newPassphrase).isStrongEnough) {
-      setError("새 일기 암호가 너무 약합니다. 서로 관련 없는 단어를 더 이어 붙여 보세요.");
+      setError("새 일기 암호가 너무 짧아요. 서로 상관없는 단어를 더 이어 붙여 보세요.");
       return;
     }
 
@@ -645,7 +645,7 @@ function ResetPassphraseRow({
       cancel();
     } catch (err) {
       if (!(err instanceof InvalidShamirSharesError)) console.error("resetPassphraseWithShamirShares failed", err);
-      setError(err instanceof InvalidShamirSharesError ? CREDENTIAL_ERRORS.wrongShares : "새 암호를 정하지 못했습니다.");
+      setError(err instanceof InvalidShamirSharesError ? CREDENTIAL_ERRORS.wrongShares : "새 일기 암호를 정하지 못했어요.");
     } finally {
       setSubmitting(false);
     }
@@ -656,9 +656,9 @@ function ResetPassphraseRow({
       label="일기 암호를 잊었다면"
       description={
         success ? (
-          <span className="text-foreground">새 일기 암호를 정했습니다.</span>
+          <span className="text-ink">새 일기 암호를 정했어요</span>
         ) : (
-          `백업 코드 ${config.k}개로 새 암호를 정합니다. 일기는 그대로 남습니다.`
+          `백업 코드 ${config.k}개로 새 일기 암호를 정해요. 일기는 그대로 남아요.`
         )
       }
       control={
@@ -703,7 +703,7 @@ function ResetPassphraseRow({
             onChange={setConfirmPassphrase}
           />
           <FormError>{error}</FormError>
-          <PanelActions submitLabel="새 암호 정하기" busyLabel="처리 중..." busy={submitting} onCancel={cancel} />
+          <PanelActions submitLabel="새 암호 정하기" busyLabel="정하는 중…" busy={submitting} onCancel={cancel} />
         </form>
       )}
     </SettingsRow>
@@ -746,8 +746,8 @@ function OtpRow({
   const [submitting, setSubmitting] = useState(false);
 
   function otpErrorMessage(err: unknown, fallback: string): string {
-    if (err instanceof IncorrectOtpCodeError) return "코드가 올바르지 않습니다.";
-    if (err instanceof OtpLockedOutError) return "시도 횟수를 초과했습니다. 1분 뒤 다시 시도해주세요.";
+    if (err instanceof IncorrectOtpCodeError) return "인증 앱의 숫자를 다시 확인해 주세요.";
+    if (err instanceof OtpLockedOutError) return "여러 번 틀려서 잠시 막아 두었어요. 1분 뒤에 다시 시도해 주세요.";
     return fallback;
   }
 
@@ -781,7 +781,7 @@ function OtpRow({
       await beginOtpSetup();
     } catch (err) {
       setError(
-        err instanceof WrongPassphraseError ? CREDENTIAL_ERRORS.wrongPassphrase : "OTP 설정을 시작하지 못했습니다."
+        err instanceof WrongPassphraseError ? CREDENTIAL_ERRORS.wrongPassphrase : "2단계 인증을 설정하지 못했어요."
       );
     } finally {
       setSubmitting(false);
@@ -827,9 +827,9 @@ function OtpRow({
       setCode("");
       setSetupMaterial(null);
       setPhase("status");
-      setMessage("켰습니다.");
+      setMessage("켰어요");
     } catch (err) {
-      setError(otpErrorMessage(err, "확인하지 못했습니다."));
+      setError(otpErrorMessage(err, "확인하지 못했어요."));
     } finally {
       setSubmitting(false);
     }
@@ -843,9 +843,9 @@ function OtpRow({
       await disable(code);
       setCode("");
       setPhase("status");
-      setMessage("껐습니다.");
+      setMessage("껐어요");
     } catch (err) {
-      setError(otpErrorMessage(err, "끄지 못했습니다."));
+      setError(otpErrorMessage(err, "끄지 못했어요."));
     } finally {
       setSubmitting(false);
     }
@@ -865,7 +865,7 @@ function OtpRow({
 
   const codeField = (
     <TextField
-      label="인증 앱의 6자리 코드"
+      label="인증 앱의 6자리 숫자"
       inputMode="numeric"
       autoComplete="one-time-code"
       autoFocus
@@ -877,11 +877,11 @@ function OtpRow({
 
   return (
     <SettingsRow
-      label="OTP 인증"
+      label="2단계 인증"
       description={
         <>
-          {otpEnabled ? "사용 중" : "사용 안 함"} · 일기를 열 때 인증 앱 코드도 확인합니다
-          {message && <span className="text-foreground"> · {message}</span>}{" "}
+          {otpEnabled ? "켜짐" : "꺼짐"} · 일기장을 열기 전에 인증 앱의 숫자를 한 번 더 확인해요
+          {message && <span className="text-ink"> · {message}</span>}{" "}
           <MoreLink href={docHref("/docs/otp")} />
         </>
       }
@@ -909,7 +909,7 @@ function OtpRow({
             autoFocus
             value={passphrase}
             onChange={setPassphrase}
-            hint="본인 확인을 위해 입력합니다."
+            hint="본인인지 확인할게요."
           />
           <FormError>{error}</FormError>
           <PanelActions submitLabel="다음" busy={submitting} onCancel={cancel} />
@@ -917,7 +917,7 @@ function OtpRow({
       )}
       {phase === "reauth" && (
         <ReauthPanel
-          reason="OTP를 등록하려면 로그인을 한 번 더 확인해야 합니다."
+          reason="2단계 인증을 켜려면 다시 로그인해 주세요."
           isGoogleAccount={isGoogleAccount}
           password={reauthPassword}
           onPasswordChange={setReauthPassword}
@@ -1021,7 +1021,7 @@ function ShamirRow({
     event.preventDefault();
     setError(null);
     if (newK < 2 || newN < newK || newN > 10) {
-      setError("전체는 2~10개, 필요한 개수는 2개 이상이면서 전체 이하여야 합니다.");
+      setError("만들 코드는 2~10개, 열 때 필요한 코드는 2개 이상이면서 만들 코드 수보다 많을 수 없어요.");
       return;
     }
     setSubmitting(true);
@@ -1031,7 +1031,7 @@ function ShamirRow({
       setRevealedShares(shares);
       setPhase("reveal");
     } catch (err) {
-      setError(credentialErrorMessage(err, "본인 확인에 실패했습니다."));
+      setError(credentialErrorMessage(err, "본인을 확인하지 못했어요."));
     } finally {
       setSubmitting(false);
     }
@@ -1046,7 +1046,7 @@ function ShamirRow({
       await confirmPendingShamir();
       setRevealedShares([]);
       setPhase("status");
-      setMessage(config ? "재발급했습니다." : "만들었습니다.");
+      setMessage(config ? "새로 만들었어요" : "만들었어요");
     } catch (err) {
       console.error("confirmPendingShamir failed", err);
       // The likeliest cause is auto-lock firing while the codes were on
@@ -1054,7 +1054,7 @@ function ShamirRow({
       // (contexts/SeedContext.tsx). Nothing was written to Firestore, so the
       // previous codes — if any — still work and the flow can be repeated.
       setError(
-        "저장하지 못했습니다. 자동 잠금이 걸렸을 수 있으니 처음부터 다시 해주세요. 방금 표시된 코드는 쓸 수 없고, 이전 백업 코드가 있었다면 그대로 유효합니다."
+        "저장하지 못했어요. 자동 잠금이 걸렸을 수 있으니 처음부터 다시 해 주세요. 방금 보인 코드는 쓸 수 없고, 전에 만든 백업 코드는 그대로 쓸 수 있어요."
       );
     } finally {
       setSubmitting(false);
@@ -1069,9 +1069,9 @@ function ShamirRow({
       await stage();
       await disableShamir();
       setPhase("status");
-      setMessage("해제했습니다.");
+      setMessage("껐어요");
     } catch (err) {
-      setError(credentialErrorMessage(err, "본인 확인에 실패했습니다."));
+      setError(credentialErrorMessage(err, "본인을 확인하지 못했어요."));
     } finally {
       setSubmitting(false);
     }
@@ -1095,15 +1095,15 @@ function ShamirRow({
       description={
         config ? (
           <>
-            {config.n}개 중 {config.k}개로 사용 중
-            {message && <span className="text-foreground"> · {message}</span>}{" "}
+            {config.n}개 중 {config.k}개로 열 수 있어요
+            {message && <span className="text-ink"> · {message}</span>}{" "}
             <MoreLink href={docHref("/docs/backup-codes")} />
           </>
         ) : (
           <>
-            <span className="font-medium text-red-700 dark:text-red-400">만들지 않음</span> · 일기 암호를 잊으면
-            복구할 수 없습니다
-            {message && <span className="text-foreground"> · {message}</span>}{" "}
+            <span className="font-medium text-danger">아직 없어요</span> · 일기 암호를 잊으면 일기장을 열 수
+            없어요
+            {message && <span className="text-ink"> · {message}</span>}{" "}
             <MoreLink href={docHref("/docs/backup-codes")} />
           </>
         )
@@ -1125,7 +1125,7 @@ function ShamirRow({
         <button
           type="button"
           onClick={() => startProve("disable")}
-          className="text-xs text-zinc-500 underline underline-offset-2 hover:text-foreground dark:text-zinc-400"
+          className="btn-text min-h-10 px-0 text-sm text-ink-3"
         >
           백업 코드 해제
         </button>
@@ -1133,7 +1133,7 @@ function ShamirRow({
 
       {phase === "prove" && (
         <form onSubmit={handleProveForSetup} className="space-y-4">
-          {config && <p className="muted">재발급하면 지금 가진 코드는 더 이상 쓸 수 없습니다.</p>}
+          {config && <p className="muted">새로 만들면 지금 가진 코드는 더 이상 쓸 수 없어요.</p>}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label htmlFor="shamir-n" className="field-label">
@@ -1175,8 +1175,8 @@ function ShamirRow({
           <SecretReveal
             title="새 백업 코드"
             headingLevel={3}
-            description={`${revealedShares.length}개 중 아무 ${newK}개를 모으면 새 일기 암호를 정할 수 있습니다. 서로 다른 곳에 나누어 보관하세요. 이 화면은 다시 표시되지 않습니다.`}
-            confirmLabel={submitting ? "저장 중..." : "완료"}
+            description={`${revealedShares.length}개 중 아무 ${newK}개만 있으면 일기 암호를 잊어도 일기장을 열 수 있어요. 서로 다른 곳에 나눠 두세요. 이 화면을 닫으면 다시 볼 수 없어요.`}
+            confirmLabel={submitting ? "저장하는 중…" : "다 적었어요"}
             confirming={submitting}
             onConfirm={() => void handleConfirmReveal()}
           >
@@ -1193,17 +1193,17 @@ function ShamirRow({
           </SecretReveal>
           <FormError>{error}</FormError>
           <button type="button" onClick={cancel} className="btn-secondary w-full">
-            취소 (저장하지 않음)
+            저장하지 않고 닫기
           </button>
         </div>
       )}
 
       {phase === "disable" && config && (
         <form onSubmit={handleProveForDisable} className="space-y-4">
-          <p className="muted">해제하면 일기 암호를 잊었을 때 복구할 방법이 없어집니다.</p>
+          <p className="muted">끄면 일기 암호를 잊었을 때 일기장을 열 방법이 없어져요.</p>
           {proof}
           <FormError>{error}</FormError>
-          <PanelActions submitLabel="해제" busy={submitting} onCancel={cancel} tone="danger" />
+          <PanelActions submitLabel="끄기" busy={submitting} onCancel={cancel} tone="danger" />
         </form>
       )}
     </SettingsRow>
@@ -1282,7 +1282,7 @@ function DeleteAccountRow({
       setPassphrase("");
       setPhase("confirm");
     } catch (err) {
-      setError(credentialErrorMessage(err, "본인 확인에 실패했습니다."));
+      setError(credentialErrorMessage(err, "본인을 확인하지 못했어요."));
     } finally {
       setSubmitting(false);
     }
@@ -1304,12 +1304,12 @@ function DeleteAccountRow({
         return;
       }
       if (err instanceof IncorrectOtpCodeError) {
-        setError("OTP 코드가 올바르지 않습니다.");
+        setError("인증 앱의 숫자를 다시 확인해 주세요.");
       } else if (err instanceof OtpLockedOutError) {
-        setError("시도 횟수를 초과했습니다. 1분 뒤 다시 시도해주세요.");
+        setError("여러 번 틀려서 잠시 막아 두었어요. 1분 뒤에 다시 시도해 주세요.");
       } else {
         console.error("deleteAccount failed", err);
-        setError("계정을 삭제하지 못했습니다. 다시 시도해주세요.");
+        setError("계정을 삭제하지 못했어요. 다시 시도해 주세요.");
       }
       setSubmitting(false);
     }
@@ -1319,7 +1319,7 @@ function DeleteAccountRow({
     event.preventDefault();
     setError(null);
     if (confirmPhrase !== DELETE_CONFIRM_PHRASE) {
-      setError(`"${DELETE_CONFIRM_PHRASE}"를 정확히 입력해주세요.`);
+      setError(`“${DELETE_CONFIRM_PHRASE}”를 똑같이 입력해 주세요.`);
       return;
     }
     setSubmitting(true);
@@ -1371,7 +1371,7 @@ function DeleteAccountRow({
     <SettingsRow
       label="계정 삭제"
       tone="danger"
-      description="모든 일기와 계정을 영구히 삭제합니다. 되돌릴 수 없습니다."
+      description="모든 일기와 계정이 지워지고 되돌릴 수 없어요"
       control={
         phase === "status" && (
           <button type="button" onClick={() => setPhase("credential")} className="btn-danger-outline btn-sm">
@@ -1385,9 +1385,9 @@ function DeleteAccountRow({
           <p className="muted">
             남기고 싶은 일기는 먼저{" "}
             <Link href="/entries" className="link">
-              지난 일기
+              일기장
             </Link>
-            에서 내보내 두세요. 계속하려면 본인 확인이 필요합니다.
+            에서 내보내 두세요. 계속하려면 본인인지 확인할게요.
           </p>
           <CredentialProof
             mode={credentialMode}
@@ -1405,7 +1405,7 @@ function DeleteAccountRow({
 
       {phase === "reauth" && (
         <ReauthPanel
-          reason="계정을 삭제하려면 로그인을 한 번 더 확인해야 합니다."
+          reason="계정을 삭제하려면 다시 로그인해 주세요."
           isGoogleAccount={isGoogleAccount}
           password={reauthPassword}
           onPasswordChange={setReauthPassword}
@@ -1423,7 +1423,7 @@ function DeleteAccountRow({
       {phase === "confirm" && (
         <form onSubmit={handleSubmit} className="space-y-4">
           <TextField
-            label={`확인을 위해 "${DELETE_CONFIRM_PHRASE}"를 입력하세요`}
+            label={`확인을 위해 “${DELETE_CONFIRM_PHRASE}”를 입력해 주세요`}
             autoFocus
             autoComplete="off"
             value={confirmPhrase}
@@ -1432,7 +1432,7 @@ function DeleteAccountRow({
           />
           {otpEnabled && (
             <TextField
-              label="인증 앱의 6자리 코드"
+              label="인증 앱의 6자리 숫자"
               inputMode="numeric"
               autoComplete="one-time-code"
               value={code}
@@ -1442,8 +1442,8 @@ function DeleteAccountRow({
           )}
           <FormError>{error}</FormError>
           <PanelActions
-            submitLabel="영구 삭제"
-            busyLabel="삭제 중..."
+            submitLabel="삭제하기"
+            busyLabel="삭제하는 중…"
             busy={submitting}
             onCancel={cancel}
             tone="danger"
