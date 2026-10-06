@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Children, type ReactNode } from "react";
+import { Icon } from "@/components/Icon";
 
 /**
  * Building blocks for /settings: titled groups of rows, each row a label,
@@ -21,10 +22,10 @@ export function SettingsGroup({
 }) {
   return (
     <section id={id} aria-labelledby={id ? `${id}-title` : undefined} className="scroll-mt-20 space-y-2">
-      <h2 id={id ? `${id}-title` : undefined} className="faint px-1 text-xs font-medium">
+      <h2 id={id ? `${id}-title` : undefined} className="px-1 text-[0.8125rem] font-semibold text-ink-3">
         {title}
       </h2>
-      <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-background dark:divide-zinc-800 dark:border-zinc-800">
+      <div className="divide-y divide-line overflow-hidden rounded-2xl bg-surface">
         {children}
       </div>
     </section>
@@ -54,15 +55,15 @@ export function SettingsRow({
   const hasPanel = Children.toArray(children).length > 0;
   return (
     <div className="px-4 py-3.5">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex min-h-7 items-center justify-between gap-4">
         <div className="min-w-0 space-y-0.5">
           <LabelTag
             {...(htmlFor ? { htmlFor } : {})}
-            className={`block text-sm font-medium ${tone === "danger" ? "text-red-700 dark:text-red-500" : ""}`}
+            className={`block text-base font-medium ${tone === "danger" ? "text-danger" : ""}`}
           >
             {label}
           </LabelTag>
-          {description && <div className="faint text-xs leading-relaxed">{description}</div>}
+          {description && <div className="text-[0.8125rem] leading-relaxed text-ink-3">{description}</div>}
         </div>
         {control && <div className="shrink-0">{control}</div>}
       </div>
@@ -76,15 +77,13 @@ export function SettingsLinkRow({ href, label, description }: { href: string; la
   return (
     <Link
       href={href}
-      className="flex items-center justify-between gap-4 px-4 py-3.5 transition-colors hover:bg-zinc-50 focus:outline-none focus-visible:bg-zinc-100 dark:hover:bg-zinc-900/60 dark:focus-visible:bg-zinc-900"
+      className="flex min-h-14 items-center justify-between gap-4 px-4 py-3 transition-colors hover:bg-fill focus:outline-none focus-visible:bg-fill"
     >
       <div className="space-y-0.5">
-        <p className="text-sm font-medium">{label}</p>
-        {description && <p className="faint text-xs">{description}</p>}
+        <p className="text-base font-medium">{label}</p>
+        {description && <p className="text-[0.8125rem] text-ink-3">{description}</p>}
       </div>
-      <span aria-hidden className="faint">
-        ›
-      </span>
+      <Icon name="chevron-right" size={18} strokeWidth={2} className="shrink-0 text-ink-4" />
     </Link>
   );
 }
@@ -109,14 +108,16 @@ export function Switch({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-7 w-12 shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950 ${
-        checked ? "bg-foreground" : "bg-zinc-300 dark:bg-zinc-700"
+      // Off is a neutral grey that doesn't draw the eye; on is ink. The
+      // knob moves too, so the state never rests on colour alone.
+      className={`relative inline-flex h-8 w-[3.25rem] shrink-0 items-center rounded-full transition-colors duration-200 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:opacity-40 ${
+        checked ? "bg-primary" : "bg-off"
       }`}
     >
       <span
         aria-hidden
-        className={`inline-block h-5 w-5 rounded-full bg-background shadow transition-transform ${
-          checked ? "translate-x-6" : "translate-x-1"
+        className={`inline-block h-[1.625rem] w-[1.625rem] rounded-full bg-white shadow-[0_2px_4px_rgb(0_0_0/0.2)] transition-transform duration-200 ${
+          checked ? "translate-x-[1.4375rem]" : "translate-x-[0.1875rem]"
         }`}
       />
     </button>
@@ -126,7 +127,7 @@ export function Switch({
 /** Small inline "자세히" link into the help docs. */
 export function MoreLink({ href }: { href: string }) {
   return (
-    <Link href={href} className="whitespace-nowrap underline underline-offset-2 hover:opacity-70">
+    <Link href={href} className="whitespace-nowrap font-medium text-ink-2 underline underline-offset-4 hover:opacity-70">
       자세히
     </Link>
   );

@@ -18,7 +18,7 @@ import type { MetadataRoute } from "next";
  * shell without an offline cache gets the container benefits with none of
  * that.
  *
- * The colours mirror app/globals.css's light-mode --background/--foreground
+ * The colours mirror app/globals.css's light-mode --bg
  * so the splash screen doesn't flash a different colour than the app.
  */
 // Built once; nothing here varies per request (and the Android static
@@ -38,8 +38,8 @@ export default function manifest(): MetadataRoute.Manifest {
     scope: "/",
     display: "standalone",
     orientation: "portrait",
-    background_color: "#ffffff",
-    theme_color: "#ffffff",
+    background_color: "#f4f4f4",
+    theme_color: "#f4f4f4",
     icons: [
       // Served from public/ rather than the app/icon convention: those get
       // a build-hashed URL that can't be referenced from here by a stable

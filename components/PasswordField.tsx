@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { blockAutofill } from "@/lib/native/autofill";
+import { Icon } from "@/components/Icon";
 
 /**
  * Attributes that tell password managers to leave a field alone. The diary
@@ -99,7 +100,7 @@ export function PasswordField({
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}
           aria-describedby={hint ? hintId : undefined}
-          className="field pr-16"
+          className="field pr-14"
         />
         <button
           type="button"
@@ -115,14 +116,17 @@ export function PasswordField({
           }}
           aria-pressed={visible}
           aria-controls={id}
-          aria-label={visible ? `${label} 숨기기` : `${label} 보기`}
-          className="absolute inset-y-0 right-0 flex min-w-14 items-center justify-center rounded-r px-3 text-xs font-medium text-zinc-600 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:text-zinc-400"
+          aria-label={visible ? `${label} 가리기` : `${label} 보기`}
+          className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-[0.625rem] text-ink-2 transition-colors hover:text-ink focus:outline-none focus-visible:outline-2 focus-visible:outline-ink"
         >
-          {visible ? "숨기기" : "보기"}
+          <Icon name={visible ? "eye-off" : "eye"} size={22} />
         </button>
       </div>
+      {isPassphrase && visible && (
+        <p className="mt-2 text-[0.8125rem] text-ink-3">확인용으로만 보여요. 칸을 누르면 다시 가려져요.</p>
+      )}
       {hint && (
-        <p id={hintId} className="faint mt-1.5 text-xs">
+        <p id={hintId} className="mt-2 text-[0.8125rem] leading-relaxed text-ink-3">
           {hint}
         </p>
       )}

@@ -7,6 +7,7 @@ import {
   mergeRanges,
   parseQuery,
   toHighlightSegments,
+  splitLead,
 } from "../search";
 
 describe("parseQuery", () => {
@@ -149,5 +150,31 @@ describe("groupByDay", () => {
   it("puts entries with an unresolved server timestamp in their own bucket", () => {
     const groups = groupByDay([{ createdAt: null }, { createdAt: new Date(2026, 9, 5) }], 2026);
     expect(groups.map((g) => g.key)).toEqual(["pending", "2026-10-05"]);
+  });
+});
+
+describe("splitLead", () => {
+  it("takes the first sentence as the lead", () => {
+    expect(splitLead("퇴근길에 비가 그쳤다. 우산을 접고 걸었다.")).toEqual({
+      lead: "퇴근길에 비가 그쳤다.",
+      rest: "우산을 접고 걸었다.",
+    });
+  });
+
+  it("stops at the end of the first line when there is no sentence end", () => {
+    expect(splitLead("오늘의 기분\n괜찮았다")).toEqual({ lead: "오늘의 기분", rest: "괜찮았다" });
+  });
+
+  it("does not split inside a number", () => {
+    expect(splitLead("3.5km를 걸었다. 좋았다.").lead).toBe("3.5km를 걸었다.");
+  });
+
+  it("keeps a short entry whole as its lead", () => {
+    expect(splitLead("  짧은 글  ")).toEqual({ lead: "짧은 글", rest: "" });
+  });
+
+  it("gives no lead when the first sentence is too long to be a heading", () => {
+    const long = "가".repeat(70) + ".";
+    expect(splitLead(long)).toEqual({ lead: null, rest: long });
   });
 });

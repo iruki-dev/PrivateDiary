@@ -30,13 +30,13 @@ export function OtpQrCard({ uri, secret }: { uri: string; secret: string }) {
 
   return (
     <div className="space-y-3 card">
-      <p className="text-sm font-medium">인증 앱으로 QR 스캔</p>
+      <p className="text-[0.9375rem] font-semibold">인증 앱으로 QR 코드를 찍어 주세요</p>
       {qrDataUrl && (
         // eslint-disable-next-line @next/next/no-img-element -- generated data: URL, not a static/remote asset next/image can optimize
-        <img src={qrDataUrl} alt="OTP 설정 QR 코드" className="mx-auto h-44 w-44" />
+        <img src={qrDataUrl} alt="2단계 인증 설정 QR 코드" className="mx-auto h-44 w-44" />
       )}
-      <p className="faint text-xs">QR을 스캔할 수 없다면 아래 코드를 수동으로 입력하세요.</p>
-      <p className="break-all rounded bg-zinc-100 p-2 font-mono text-xs dark:bg-zinc-800">{secret}</p>
+      <p className="faint text-[0.8125rem]">QR 코드를 찍을 수 없다면 아래 코드를 인증 앱에 직접 넣어 주세요.</p>
+      <p className="break-all rounded-xl bg-fill px-3 py-2.5 font-mono text-[0.9375rem] tracking-[0.04em]">{secret}</p>
     </div>
   );
 }

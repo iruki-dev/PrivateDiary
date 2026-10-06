@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "일기 쓰기",
-  description: "PrivateDiary에서 일기를 저장하는 방법과 임시 저장, 프라이빗 작성 모드, 하루 저장 개수 제한.",
+  description: "PrivateDiary에서 일기를 저장하는 방법과 임시 저장, 쓰는 글 가리기, 하루에 쓸 수 있는 일기 수.",
 };
 
 export default function WritingPage() {
@@ -30,7 +30,7 @@ export default function WritingPage() {
       </p>
       <p>임시 저장을 꺼 두어도, 저장하지 않은 글이 있는 채로 창을 닫으려 하면 한 번 확인합니다.</p>
 
-      <h2 id="private-mode">프라이빗 작성 모드</h2>
+      <h2 id="private-mode">쓰는 글 가리기</h2>
       <p>
         켜면 쓰는 동안 글자가 흐리게 가려져, 옆에서 화면을 보더라도 내용을 읽기 어렵습니다. 입력란 오른쪽
         위의 눈 아이콘을 <strong>누르고 있는 동안만</strong> 잠깐 볼 수 있습니다. 이 아이콘을 숨기도록
@@ -38,7 +38,7 @@ export default function WritingPage() {
       </p>
       <p>화면을 흐리게 할 뿐 암호화와는 관계가 없습니다. 저장되는 내용은 똑같이 암호화됩니다.</p>
 
-      <h2 id="daily-limit">하루 저장 개수</h2>
+      <h2 id="daily-limit">하루에 쓸 수 있는 일기</h2>
       <p>
         하루에 저장할 수 있는 일기 수에는 제한이 있습니다(기본 하루 100편). 로그인을 가로챈 누군가가 지울
         수 없는 일기를 대량으로 넣는 것을 막기 위한 장치로, 평소 사용에는 영향이 없습니다. 설정에서

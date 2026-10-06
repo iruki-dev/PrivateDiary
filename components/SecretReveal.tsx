@@ -16,8 +16,8 @@ export function SecretReveal({
   description,
   children,
   onConfirm,
-  confirmLabel = "저장했습니다",
-  acknowledgeText = "안전한 곳에 보관했습니다. 이 화면은 다시 표시되지 않는다는 것을 이해했습니다.",
+  confirmLabel = "다 적었어요",
+  acknowledgeText = "백업 코드를 안전한 곳에 적어 두었어요",
   confirming = false,
   headingLevel = 1,
 }: {
@@ -46,18 +46,18 @@ export function SecretReveal({
   return (
     <div className="w-full max-w-lg space-y-6">
       <div>
-        <Heading className={headingLevel === 1 ? "text-xl font-semibold" : "text-base font-semibold"}>{title}</Heading>
-        <p className="mt-2 muted">{description}</p>
+        <Heading className={headingLevel === 1 ? "title-1" : "text-[1.0625rem] font-bold"}>{title}</Heading>
+        <p className={`mt-2 muted ${headingLevel === 1 ? "text-base" : ""}`}>{description}</p>
       </div>
 
       {children}
 
-      <label className="flex items-start gap-2 text-sm">
+      <label className="flex min-h-11 cursor-pointer items-center gap-3 text-[0.9375rem] font-semibold">
         <input
           type="checkbox"
           checked={acknowledged}
           onChange={(e) => setAcknowledged(e.target.checked)}
-          className="mt-0.5 h-5 w-5 shrink-0 accent-foreground"
+          className="h-6 w-6 shrink-0 accent-[var(--primary)]"
         />
         <span>{acknowledgeText}</span>
       </label>
@@ -66,7 +66,7 @@ export function SecretReveal({
         type="button"
         disabled={!acknowledged || confirming}
         onClick={onConfirm}
-        className="btn-primary w-full"
+        className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]"
       >
         {confirmLabel}
       </button>

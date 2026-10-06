@@ -50,14 +50,14 @@ export function VisitorComposer() {
   // A signed-in visitor is on their way to /write (SignedInRedirect); don't
   // hand them an editor whose 저장 would send them through signup.
   if (authStatus === "signed-in") {
-    return <LoadingState label="오늘의 일기로 이동 중..." />;
+    return <LoadingState label="" />;
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div className="space-y-1">
-        <label htmlFor="visitor-entry" className="block">
-          <TodayLabel className="text-sm font-medium" />
+    <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-3 rounded-3xl bg-surface px-5 pb-4 pt-5 sm:px-6">
+        <label htmlFor="visitor-entry" className="block title-2">
+          <TodayLabel weekdayClassName="text-ink-4" />
         </label>
         <textarea
           id="visitor-entry"
@@ -65,21 +65,21 @@ export function VisitorComposer() {
           value={text}
           onChange={(e) => setText(e.target.value)}
           rows={8}
-          placeholder="오늘 하루는 어땠나요?"
+          placeholder="오늘 하루는 어땠어요?"
           className="field-editor"
         />
-        <p className="faint text-right text-xs" aria-live="polite">
+        <p className="faint border-t border-line pt-3 text-right text-[0.8125rem] font-medium tabular-nums">
           {text.length.toLocaleString("ko-KR")}자
         </p>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <button type="submit" disabled={!text.trim()} className="btn-primary">
-          저장
+      <div className="space-y-3">
+        <button type="submit" disabled={!text.trim()} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+          저장하고 가입하기
         </button>
-        <p className="faint text-xs">저장하려면 계정이 필요합니다. 쓴 글은 가입 후 첫 일기로 저장됩니다.</p>
+        <p className="faint text-center text-sm">쓴 글은 가입을 마치면 첫 일기로 저장돼요.</p>
       </div>
-      <p className="text-sm">
-        <Link href="/signup" className="link">
+      <p className="text-center">
+        <Link href="/signup" className="btn-text">
           글 없이 가입하기
         </Link>
       </p>

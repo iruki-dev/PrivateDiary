@@ -30,8 +30,8 @@ export function AccountGroup() {
   return (
     <SettingsGroup id="account" title="계정">
       <SettingsRow
-        label={user?.email ?? "로그인됨"}
-        description={usesGoogle ? "Google 계정으로 로그인" : "이메일로 로그인"}
+        label={user?.email ?? "로그인했어요"}
+        description={usesGoogle ? "Google 계정으로 로그인했어요" : "이메일로 로그인했어요"}
       />
       <SettingsLinkRow href={docHref("/docs")} label="도움말" />
       {hello && (
@@ -46,7 +46,7 @@ export function AccountGroup() {
       )}
       <SettingsRow
         label="로그아웃"
-        description="이 기기의 임시 저장본도 함께 지워집니다."
+        description="이 기기에 임시 저장한 글도 함께 지워요"
         control={
           <button
             type="button"
@@ -54,7 +54,7 @@ export function AccountGroup() {
             disabled={signingOut}
             className="btn-secondary btn-sm"
           >
-            {signingOut ? "로그아웃 중..." : "로그아웃"}
+            {signingOut ? "로그아웃하는 중…" : "로그아웃"}
           </button>
         }
       />

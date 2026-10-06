@@ -19,11 +19,21 @@ function subscribe(onChange: () => void) {
  * on the server — the server's clock and zone aren't the reader's, and
  * rendering one date there and another after hydration would mismatch.
  */
-export function TodayLabel({ className }: { className?: string }) {
+export function TodayLabel({ className, weekdayClassName }: { className?: string; weekdayClassName?: string }) {
   const label = useSyncExternalStore(
     subscribe,
     () => formatter.format(new Date()),
     () => ""
   );
-  return <span className={className}>{label || " "}</span>;
+  // "10월 6일 화요일": the date is the headline, the weekday can step back.
+  const split = weekdayClassName ? label.lastIndexOf(" ") : -1;
+  if (split > 0) {
+    return (
+      <span className={className}>
+        {label.slice(0, split)} <span className={weekdayClassName}>{label.slice(split + 1)}</span>
+      </span>
+    );
+  }
+  // A non-breaking space keeps the line's height before the date is known.
+  return <span className={className}>{label || "\u00a0"}</span>;
 }

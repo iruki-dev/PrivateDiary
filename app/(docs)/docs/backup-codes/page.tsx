@@ -25,7 +25,7 @@ export default function BackupCodesPage() {
         <li>백업 코드 재발급하기</li>
       </ul>
       <p>
-        OTP 인증을 켜 두었더라도 백업 코드로 일기를 열 때는 OTP 코드가 필요하지 않습니다. OTP 기기를
+        2단계 인증(OTP)을 켜 두었더라도 백업 코드로 일기를 열 때는 OTP 코드가 필요하지 않습니다. OTP 기기를
         잃어버린 경우에도 일기에 접근할 수 있도록 하기 위해서입니다.
       </p>
 
@@ -64,7 +64,7 @@ export default function BackupCodesPage() {
       <h2 id="use">사용하기</h2>
       <ul>
         <li>
-          일기 열기: 지난 일기 화면에서 <strong>백업 코드로 잠금 해제</strong>를 누르고 코드를 입력합니다.
+          일기 열기: 일기장 탭에서 <strong>백업 코드로 열기</strong>를 누르고 코드를 입력합니다.
         </li>
         <li>
           새 일기 암호 정하기: 설정의 <strong>암호를 잊으셨나요?</strong>에서 코드를 입력합니다.{" "}

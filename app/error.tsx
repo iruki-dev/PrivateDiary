@@ -20,11 +20,11 @@ export default function GlobalError({ error, retry }: { error: Error; retry: () 
     <main className="page-center">
       <div className="w-full max-w-sm space-y-6">
         <div className="space-y-2">
-          <h1 className="text-xl font-semibold">화면을 표시하지 못했습니다</h1>
-          <p className="muted">일시적인 문제일 수 있습니다. 저장한 일기는 안전합니다.</p>
+          <h1 className="title-1">화면을 보여 드리지 못했어요</h1>
+          <p className="muted text-base">잠깐 생긴 문제일 수 있어요. 저장한 일기는 안전해요.</p>
         </div>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => retry()} className="btn-primary flex-1">
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={() => retry()} className="btn-primary">
             다시 시도
           </button>
           <Link href="/" className="btn-secondary">

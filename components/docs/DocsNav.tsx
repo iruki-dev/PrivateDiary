@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { Icon } from "@/components/Icon";
 import { usePathname } from "next/navigation";
 import { DOC_GROUPS, docNeighbours } from "@/lib/docs";
 
@@ -19,10 +20,10 @@ function NavList() {
                   <Link
                     href={page.href}
                     aria-current={current ? "page" : undefined}
-                    className={`-mx-2 block rounded px-2 py-1.5 text-sm transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 ${
+                    className={`-mx-2 block rounded px-2 py-1.5 text-sm transition-colors focus:outline-none focus-visible:outline-2 focus-visible:outline-ink ${
                       current
-                        ? "bg-zinc-100 font-medium dark:bg-zinc-900"
-                        : "text-zinc-600 hover:text-foreground dark:text-zinc-400"
+                        ? "bg-pill font-semibold"
+                        : "text-ink-2 hover:text-ink"
                     }`}
                   >
                     {page.title}
@@ -53,12 +54,12 @@ export function DocsMobileToc() {
   const pathname = usePathname();
   return (
     // Keyed on the path so it closes again after navigating to a page.
-    <details key={pathname} className="mb-8 rounded border border-zinc-300 lg:hidden dark:border-zinc-700">
-      <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between px-3 text-sm font-medium focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 [&::-webkit-details-marker]:hidden">
+    <details key={pathname} className="mb-8 rounded-2xl bg-surface lg:hidden">
+      <summary className="group flex min-h-12 cursor-pointer list-none items-center justify-between px-4 text-[0.9375rem] font-semibold focus:outline-none focus-visible:outline-2 focus-visible:outline-ink [&::-webkit-details-marker]:hidden">
         도움말 목차
-        <span aria-hidden className="faint">▾</span>
+        <Icon name="chevron-right" size={18} strokeWidth={2} className="rotate-90 text-ink-3 transition-transform group-open:-rotate-90" />
       </summary>
-      <div className="border-t border-zinc-300 px-3 py-4 dark:border-zinc-700">
+      <div className="border-t border-line px-4 py-4">
         <NavList />
       </div>
     </details>
@@ -70,9 +71,9 @@ export function DocsPager() {
   const { prev, next } = docNeighbours(pathname);
   if (!prev && !next) return null;
   return (
-    <nav aria-label="이전·다음 문서" className="mt-16 grid grid-cols-2 gap-3 border-t border-zinc-200 pt-6 dark:border-zinc-800">
+    <nav aria-label="이전·다음 문서" className="mt-16 grid grid-cols-2 gap-3 border-t border-line pt-6">
       {prev ? (
-        <Link href={prev.href} className="rounded p-2 -m-2 text-sm hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-900">
+        <Link href={prev.href} className="rounded p-2 -m-2 text-sm hover:bg-fill focus:outline-none focus-visible:outline-2 focus-visible:outline-ink">
           <span className="faint block text-xs">이전</span>
           {prev.title}
         </Link>
@@ -80,7 +81,7 @@ export function DocsPager() {
         <span />
       )}
       {next && (
-        <Link href={next.href} className="rounded p-2 -m-2 text-right text-sm hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-500/50 dark:hover:bg-zinc-900">
+        <Link href={next.href} className="rounded p-2 -m-2 text-right text-sm hover:bg-fill focus:outline-none focus-visible:outline-2 focus-visible:outline-ink">
           <span className="faint block text-xs">다음</span>
           {next.title}
         </Link>

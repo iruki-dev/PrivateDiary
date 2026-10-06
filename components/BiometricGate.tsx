@@ -8,15 +8,16 @@ import { reauthenticateWithGoogle, reauthenticateWithPassword } from "@/lib/fire
 import { authErrorCode, isUserCancelledPopup } from "@/lib/firebase/authErrors";
 import { LoadingState } from "@/components/LoadingState";
 import { ReauthPanel } from "@/components/settings/forms";
+import { Icon } from "@/components/Icon";
 
 function gateMessage(code: string): string | null {
   switch (code) {
     case "cancelled":
       return null;
     case "lockout":
-      return "생체 인증 시도가 너무 많았습니다. 잠시 뒤에 다시 시도해주세요.";
+      return "생체 인증을 여러 번 실패했어요. 잠시 뒤에 다시 해 주세요.";
     default:
-      return "생체 인증을 확인하지 못했습니다. 다시 시도해주세요.";
+      return "생체 인증을 확인하지 못했어요. 다시 시도해 주세요.";
   }
 }
 
@@ -98,8 +99,8 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
       const code = authErrorCode(err);
       setError(
         code === "auth/invalid-credential" || code === "auth/wrong-password"
-          ? "로그인 비밀번호가 올바르지 않습니다."
-          : "본인 확인에 실패했습니다. 다시 시도해주세요."
+          ? "로그인 비밀번호를 다시 확인해 주세요."
+          : "본인을 확인하지 못했어요. 다시 시도해 주세요."
       );
     } finally {
       setChecking(false);
@@ -114,7 +115,7 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
       await reauthenticateWithGoogle(user);
       await afterReauth();
     } catch (err) {
-      if (!isUserCancelledPopup(err)) setError("본인 확인에 실패했습니다. 다시 시도해주세요.");
+      if (!isUserCancelledPopup(err)) setError("본인을 확인하지 못했어요. 다시 시도해 주세요.");
     } finally {
       setChecking(false);
     }
@@ -134,23 +135,28 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
   return (
     <>
       {content}
-      <div className="w-full max-w-sm space-y-3">
-        <div className="card space-y-4">
-          <div className="space-y-1">
-            <h2 className="font-semibold">생체 인증</h2>
-            <p className="muted">
-              {invalidated
-                ? "휴대폰에 새 지문이나 얼굴이 등록되어 생체 인증을 통과할 수 없습니다. 로그인 비밀번호로 본인을 확인한 뒤 다시 설정하세요."
-                : unknown
-                  ? "생체 인증 상태를 확인하지 못했습니다. 다시 시도해주세요."
-                  : "계속하려면 지문이나 얼굴로 본인을 확인하세요."}
-            </p>
+      <div className="w-full space-y-2">
+        <div className="card space-y-5">
+          <div className="flex gap-3">
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-on-primary">
+              <Icon name="fingerprint" size={22} />
+            </span>
+            <div className="space-y-0.5">
+              <h2 className="text-[1.0625rem] font-bold">{invalidated ? "생체 정보가 바뀌었어요" : "생체 인증"}</h2>
+              <p className="muted text-sm">
+                {invalidated
+                  ? "휴대폰에 새 지문이나 얼굴이 등록됐어요. 로그인 비밀번호로 본인을 확인하면 다시 설정할 수 있어요."
+                  : unknown
+                    ? "생체 인증 상태를 확인하지 못했어요. 다시 시도해 주세요."
+                    : "일기 암호를 넣기 전에 지문이나 얼굴로 먼저 확인해요."}
+              </p>
+            </div>
           </div>
 
           {invalidated ? (
             reauthing ? (
               <ReauthPanel
-                reason="생체 인증을 초기화하려면 로그인한 계정으로 본인을 확인해야 합니다."
+                reason="생체 인증을 다시 설정하려면 로그인한 계정으로 본인을 확인해 주세요."
                 isGoogleAccount={isGoogleAccount}
                 password={password}
                 onPasswordChange={setPassword}
@@ -165,8 +171,8 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
                 }}
               />
             ) : (
-              <button type="button" onClick={() => setReauthing(true)} className="btn-primary w-full">
-                로그인 비밀번호로 확인하고 다시 설정
+              <button type="button" onClick={() => setReauthing(true)} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+                로그인 비밀번호로 확인하기
               </button>
             )
           ) : (
@@ -180,9 +186,10 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
                 type="button"
                 onClick={() => void (unknown ? refresh() : check())}
                 disabled={checking}
-                className="btn-primary w-full"
+                className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]"
               >
-                {checking ? "확인 중..." : unknown ? "다시 시도" : "생체 인증"}
+                {!checking && !unknown && <Icon name="fingerprint" size={22} />}
+                {checking ? "확인하는 중…" : unknown ? "다시 시도" : "생체 인증하기"}
               </button>
             </>
           )}

@@ -1,25 +1,25 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "지난 일기",
-  description: "PrivateDiary에서 지난 일기를 열고, 찾고, 내보내는 방법.",
+  title: "일기장",
+  description: "PrivateDiary에서 일기장을 열고, 지난 일기를 찾고, 내보내는 방법.",
 };
 
 export default function ReadingPage() {
   return (
     <>
-      <h1>지난 일기</h1>
-      <p className="doc-lead">지난 일기 화면에서 일기 암호를 입력하면 이 기기에서 일기가 열립니다.</p>
+      <h1>일기장</h1>
+      <p className="doc-lead">일기장 탭에서 일기 암호를 입력하면 이 기기에서 일기장이 열립니다.</p>
 
       <h2 id="unlock">열기와 잠그기</h2>
       <ul>
         <li>일기 암호 또는 백업 코드로 엽니다.</li>
         <li>
           일정 시간 조작이 없으면 자동으로 다시 잠깁니다. 기본값은 15분이며 설정에서 1분, 5분, 15분,
-          30분, 1시간, 사용 안 함 중에서 고를 수 있습니다.
+          30분, 1시간, 잠그지 않기 중에서 고를 수 있습니다.
         </li>
         <li>
-          지난 일기 화면의 <strong>잠그기</strong>로 바로 잠글 수 있습니다. 잠그면 이 기기의 메모리에서
+          일기장 화면의 <strong>잠그기</strong>로 바로 잠글 수 있습니다. 잠그면 이 기기의 메모리에서
           열쇠가 지워집니다.
         </li>
       </ul>

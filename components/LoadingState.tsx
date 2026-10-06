@@ -1,11 +1,15 @@
 import { Spinner } from "./Spinner";
 
-/** Inline spinner + label, for embedding inside already-rendered content (e.g. OtpGate). */
-export function LoadingState({ label = "확인 중..." }: { label?: string }) {
+/**
+ * Inline spinner + label, for embedding inside already-rendered content
+ * (e.g. OtpGate). An empty label shows the spinner alone and still tells
+ * screen readers what is happening.
+ */
+export function LoadingState({ label = "확인하는 중…" }: { label?: string }) {
   return (
     <p role="status" className="muted flex items-center justify-center gap-2">
       <Spinner />
-      {label}
+      {label || <span className="sr-only">불러오는 중</span>}
     </p>
   );
 }

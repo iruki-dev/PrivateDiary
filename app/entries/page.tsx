@@ -19,6 +19,8 @@ import {
 import { ShamirNotConfiguredError } from "@/lib/firebase/otp";
 import { BiometricGateError, haptic } from "@/lib/native/app";
 import { BiometricGate } from "@/components/BiometricGate";
+import { DiaryCover } from "@/components/DiaryCover";
+import { Icon } from "@/components/Icon";
 import {
   bytesToBase64,
   computeShamirOtpBypassProof,
@@ -39,9 +41,9 @@ function biometricGateMessage(code: string): string | null {
     case "cancelled":
       return null;
     case "required":
-      return "생체 인증을 먼저 통과해야 합니다.";
+      return "생체 인증을 먼저 해 주세요.";
     default:
-      return "생체 인증을 확인하지 못했습니다. 다시 시도해주세요.";
+      return "생체 인증을 확인하지 못했어요. 다시 시도해 주세요.";
   }
 }
 
@@ -86,7 +88,7 @@ export default function EntriesPage() {
     decryptionMethods,
   } = useSeed();
   const { loading: otpLoading, otpEnabled, otpVerified, verifyViaShamirBypass } = useOtp();
-  usePageTitle("지난 일기");
+  usePageTitle("일기장");
   const ready = useAccountGate();
   const canReadEntries = !otpLoading && (!otpEnabled || otpVerified);
   const otpBlocking = !otpLoading && otpEnabled && !otpVerified;
@@ -165,8 +167,8 @@ export default function EntriesPage() {
           } catch (err) {
             setOtpBypassError(
               err instanceof ShamirNotConfiguredError
-                ? "백업 코드가 설정되어 있지 않아 OTP를 건너뛸 수 없습니다."
-                : "OTP 우회 인증에 실패했습니다. 아래 OTP 코드를 입력하거나 새로고침 후 다시 시도하세요."
+                ? "백업 코드가 없어서 2단계 인증을 건너뛸 수 없어요."
+                : "2단계 인증을 건너뛰지 못했어요. 아래에 인증 앱의 숫자를 넣거나, 새로고침한 뒤 다시 시도해 주세요."
             );
           }
         }
@@ -179,10 +181,10 @@ export default function EntriesPage() {
       haptic("reject");
       setUnlockError(
         err instanceof WrongPassphraseError
-          ? "일기 암호가 올바르지 않습니다."
+          ? "일기 암호를 다시 확인해 주세요."
           : err instanceof InvalidShamirSharesError
-            ? "백업 코드가 올바르지 않습니다. 코드를 다시 확인해주세요."
-            : "일기를 열지 못했습니다. 다시 시도해주세요."
+            ? "백업 코드를 다시 확인해 주세요."
+            : "일기장을 열지 못했어요. 다시 시도해 주세요."
       );
     } finally {
       setUnlocking(false);
@@ -196,25 +198,32 @@ export default function EntriesPage() {
   const otherModes: { mode: UnlockMode; label: string }[] = [
     { mode: "passphrase" as const, label: "일기 암호로 열기" },
     ...(decryptionMethods?.shamir
-      ? [{ mode: "shamir" as const, label: "백업 코드로 잠금 해제" }]
+      ? [{ mode: "shamir" as const, label: "백업 코드로 열기" }]
       : []),
   ].filter((m) => m.mode !== unlockMode);
 
   const shamirFields = (
     <>
       {shareInputs.map((value, i) => (
-        <input
-          key={i}
-          type="text"
-          required
-          aria-label={`백업 코드 ${i + 1}`}
-          value={value}
-          onChange={(e) =>
-            setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
-          }
-          placeholder={`코드 ${i + 1}`}
-          className="field-mono"
-        />
+        <div key={i}>
+          <label htmlFor={`share-${i}`} className="field-label">
+            백업 코드 {i + 1}
+          </label>
+          <input
+            id={`share-${i}`}
+            type="text"
+            required
+            autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
+            spellCheck={false}
+            value={value}
+            onChange={(e) =>
+              setShareInputs((prev) => prev.map((v, idx) => (idx === i ? e.target.value : v)))
+            }
+            className="field-mono"
+          />
+        </div>
       ))}
     </>
   );
@@ -226,7 +235,7 @@ export default function EntriesPage() {
           key={mode}
           type="button"
           onClick={() => switchMode(mode)}
-          className="w-full text-center text-xs link"
+          className="btn-text w-full"
         >
           {label}
         </button>
@@ -246,19 +255,21 @@ export default function EntriesPage() {
     metadata.length > 0;
 
   const emptyState = (
-    <div className="card space-y-3 text-center">
-      <p className="muted">아직 쓴 일기가 없습니다.</p>
+    <div className="card space-y-4 py-9 text-center">
+      <div className="space-y-1.5">
+        <p className="text-[1.0625rem] font-bold">첫 일기를 써 보세요</p>
+        <p className="muted text-sm">쓴 일기는 나만 열 수 있게 잠겨서 여기에 모여요.</p>
+      </div>
       <Link href="/write" className="btn-primary">
-        첫 일기 쓰기
+        쓰기
       </Link>
     </div>
   );
 
   const unlockForm = (
-    <form onSubmit={handleUnlock} className="space-y-3 card">
+    <form onSubmit={handleUnlock} className="card space-y-4">
       {unlockMode === "passphrase" ? (
         <>
-          <p className="muted">일기 {metadata.length}편이 잠겨 있습니다.</p>
           <PasswordField
             label="일기 암호"
             autoFocus
@@ -270,7 +281,7 @@ export default function EntriesPage() {
       ) : (
         decryptionMethods?.shamir && (
           <>
-            <p className="muted">백업 코드 {decryptionMethods.shamir.k}개를 입력하세요.</p>
+            <p className="muted">백업 코드 {decryptionMethods.shamir.k}개를 넣어 주세요. 일기 암호를 잊었을 때 쓰는 방법이에요.</p>
             {shamirFields}
           </>
         )
@@ -280,38 +291,57 @@ export default function EntriesPage() {
           {unlockError}
         </p>
       )}
-      <button type="submit" disabled={unlocking} className="btn-primary w-full">
-        {unlocking ? "여는 중..." : "잠금 해제"}
+      <button type="submit" disabled={unlocking} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+        {unlocking ? "여는 중…" : "일기장 열기"}
       </button>
       {modeSwitcherLinks}
     </form>
   );
 
+  const lockButton = (
+    <button
+      type="button"
+      onClick={() => lock("manual")}
+      className="btn btn-sm min-h-9 bg-surface text-ink hover:bg-fill"
+    >
+      <Icon name="lock" size={16} strokeWidth={2} />
+      잠그기
+    </button>
+  );
+
+  // The locked diary's cover, from the metadata alone. `metadata` arrives
+  // newest-first (entrySeq desc).
+  const cover = metadata.length > 0 && (
+    <DiaryCover
+      total={metadata.length}
+      first={metadata[metadata.length - 1].createdAt?.toDate?.() ?? null}
+      last={metadata[0].createdAt?.toDate?.() ?? null}
+      compact={unlockMode === "shamir"}
+    />
+  );
+
   return (
-    <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
-      <div className={`w-full space-y-6 ${browsing ? "max-w-xl lg:max-w-5xl" : "max-w-xl"}`}>
-        <div className="flex items-center justify-between gap-3">
-          <h1 className="text-xl font-semibold">지난 일기</h1>
-          {seedStatus === "unlocked" && (
-            <button type="button" onClick={() => lock("manual")} className="btn-secondary btn-sm">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5" aria-hidden>
-                <rect x="5" y="11" width="14" height="9" rx="2" />
-                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-              </svg>
-              잠그기
-            </button>
+    <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-4 sm:px-6 sm:py-12">
+      <div className={`w-full space-y-5 ${browsing ? "max-w-xl lg:max-w-5xl" : "max-w-md"}`}>
+        <div className="space-y-1.5">
+          <div className="flex min-h-11 items-center justify-end sm:hidden">
+            {seedStatus === "unlocked" && lockButton}
+          </div>
+          <div className="flex items-end justify-between gap-3">
+            <h1 className="title-display">일기장</h1>
+            <span className="hidden sm:block">{seedStatus === "unlocked" && lockButton}</span>
+          </div>
+          {/* Explains a session that locked itself out from under the reader
+              (contexts/SeedContext.tsx's inactivity timer) — otherwise the
+              list just vanishes back into a passphrase prompt with no reason
+              given, which reads like a bug. */}
+          {seedStatus === "locked" && (lockReason === "idle" || lockReason === "background") && (
+            <p role="status" className="flex items-center gap-1.5 text-sm text-ink-2">
+              <Icon name="clock" size={16} strokeWidth={2} />
+              {lockReason === "idle" ? "한동안 쓰지 않아서 일기장을 잠갔어요" : "앱을 나가서 일기장을 잠갔어요"}
+            </p>
           )}
         </div>
-
-        {/* Explains a session that locked itself out from under the reader
-            (contexts/SeedContext.tsx's inactivity timer) — otherwise the
-            list just vanishes back into a passphrase prompt with no reason
-            given, which reads like a bug. */}
-        {seedStatus === "locked" && (lockReason === "idle" || lockReason === "background") && (
-          <p role="status" className="muted text-xs">
-            {lockReason === "idle" ? "한동안 사용하지 않아 자동으로 잠겼습니다." : "앱을 벗어나 일기를 잠갔습니다."}
-          </p>
-        )}
 
         {otpLoading && <LoadingState />}
 
@@ -328,7 +358,7 @@ export default function EntriesPage() {
 
         {!otpLoading && seedStatus === "unlocked" && canReadEntries && privateKeys && (
           <>
-            {!metadataLoaded && <LoadingState label="불러오는 중..." />}
+            {!metadataLoaded && <LoadingState label="불러오는 중…" />}
 
             {metadataLoaded && metadata.length === 0 && emptyState}
 
@@ -347,8 +377,7 @@ export default function EntriesPage() {
             {decryptionMethods?.shamir && unlockMode === "shamir" ? (
               <form onSubmit={handleUnlock} className="space-y-3 card">
                 <p className="muted">
-                  백업 코드 {decryptionMethods.shamir.k}개를 입력하세요. OTP 코드 없이 바로 복구할
-                  수 있습니다.
+                  백업 코드 {decryptionMethods.shamir.k}개를 넣어 주세요. 2단계 인증 없이 바로 열 수 있어요.
                 </p>
                 {shamirFields}
                 {unlockError && (
@@ -356,8 +385,8 @@ export default function EntriesPage() {
                     {unlockError}
                   </p>
                 )}
-                <button type="submit" disabled={unlocking} className="btn-primary w-full">
-                  {unlocking ? "여는 중..." : "잠금 해제"}
+                <button type="submit" disabled={unlocking} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+                  {unlocking ? "여는 중…" : "일기장 열기"}
                 </button>
                 {modeSwitcherLinks}
               </form>
@@ -368,9 +397,9 @@ export default function EntriesPage() {
                     <button
                       type="button"
                       onClick={() => switchMode("shamir")}
-                      className="w-full text-center text-xs link"
+                      className="btn-text w-full"
                     >
-                      백업 코드가 있다면 OTP 없이 바로 복구
+                      백업 코드로 바로 열기
                     </button>
                   )
                 }
@@ -383,9 +412,11 @@ export default function EntriesPage() {
 
         {!otpLoading && seedStatus !== "unlocked" && !otpBlocking && (
           <OtpGate>
-            {!metadataLoaded && <LoadingState label="불러오는 중..." />}
+            {!metadataLoaded && <LoadingState label="불러오는 중…" />}
 
             {metadataLoaded && metadata.length === 0 && emptyState}
+
+            {metadataLoaded && cover}
 
             {metadataLoaded && metadata.length > 0 &&
               (unlockMode === "shamir" ? (
@@ -396,8 +427,8 @@ export default function EntriesPage() {
                 <BiometricGate
                   footer={
                     decryptionMethods?.shamir && (
-                      <button type="button" onClick={() => switchMode("shamir")} className="w-full text-center text-xs link">
-                        백업 코드가 있다면 생체 인증 없이 바로 열기
+                      <button type="button" onClick={() => switchMode("shamir")} className="btn-text w-full">
+                        백업 코드로 바로 열기
                       </button>
                     )
                   }

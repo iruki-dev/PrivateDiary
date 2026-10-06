@@ -24,12 +24,12 @@ export default function FrontPage() {
   return (
     <>
       <SignedInRedirect />
-      <main className="flex flex-1 flex-col items-center px-4 py-10 sm:px-6 sm:py-16">
+      <main className="flex flex-1 flex-col items-center px-5 pb-12 pt-6 sm:px-6 sm:py-16">
         <div className="w-full max-w-xl space-y-8">
-          <header className="space-y-2">
-            <h1 className="text-xl font-semibold">{SITE.tagline}</h1>
-            <p className="muted">
-              일기는 이 기기에서 암호화된 뒤 저장되어, 운영자도 읽을 수 없습니다.{" "}
+          <header className="space-y-3">
+            <h1 className="title-display">{SITE.tagline}</h1>
+            <p className="muted text-base">
+              일기는 이 기기에서 잠근 뒤에 저장돼요. PrivateDiary도 읽을 수 없어요.{" "}
               <Link href={docHref("/docs/how-it-works")} className="link whitespace-nowrap">
                 자세히
               </Link>
