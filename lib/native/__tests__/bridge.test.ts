@@ -8,30 +8,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Listener = (event: { data: unknown }) => void;
 
-function installFakeApp(handle: (request: { id: number; method: string; params: Record<string, unknown> }, secret: Uint8Array | null, reply: (data: unknown) => void) => void) {
+function installFakeApp(handle: (request: { id: number; method: string; params: Record<string, unknown> }, reply: (data: unknown) => void) => void) {
   const listeners: Listener[] = [];
-  let pendingSecret: { id: number; bytes: Uint8Array } | null = null;
-  const sentSecrets: Uint8Array[] = [];
+  const sent: unknown[] = [];
   const reply = (data: unknown) => queueMicrotask(() => listeners.forEach((l) => l({ data })));
   (globalThis as unknown as { window: unknown }).window = {
     PrivateDiaryNative: {
       addEventListener: (_: string, l: Listener) => listeners.push(l),
-      postMessage: (message: string | ArrayBuffer) => {
-        if (message instanceof ArrayBuffer) {
-          const bytes = new Uint8Array(message);
-          pendingSecret = { id: new DataView(message).getInt32(1), bytes: bytes.slice(5) };
-          sentSecrets.push(bytes);
-          return;
-        }
-        const request = JSON.parse(message);
-        const pending = pendingSecret as { id: number; bytes: Uint8Array } | null;
-        const secret = pending && pending.id === request.id ? pending.bytes : null;
-        pendingSecret = null;
-        handle(request, secret, reply);
+      postMessage: (message: unknown) => {
+        sent.push(message);
+        handle(JSON.parse(message as string), reply);
       },
     },
   };
-  return { reply, sentSecrets };
+  return { reply, sent };
 }
 
 async function loadBridge() {
@@ -59,47 +49,29 @@ describe("native bridge", () => {
   });
 
   it("matches responses to requests by id", async () => {
-    installFakeApp(({ id, method }, _secret, reply) =>
+    installFakeApp(({ id, method }, reply) =>
       reply(JSON.stringify({ id, ok: true, result: { echo: method } }))
     );
     const bridge = await loadBridge();
-    const [a, b] = await Promise.all([bridge.callNative("app.hello"), bridge.callNative("vault.status")]);
+    const [a, b] = await Promise.all([bridge.callNative("app.hello"), bridge.callNative("gate.status")]);
     expect(a).toEqual({ echo: "app.hello" });
-    expect(b).toEqual({ echo: "vault.status" });
+    expect(b).toEqual({ echo: "gate.status" });
   });
 
   it("turns app errors into NativeError codes", async () => {
-    installFakeApp(({ id }, _s, reply) => reply(JSON.stringify({ id, ok: false, error: "cancelled" })));
+    installFakeApp(({ id }, reply) => reply(JSON.stringify({ id, ok: false, error: "cancelled" })));
     const bridge = await loadBridge();
-    await expect(bridge.callNative("vault.unlock")).rejects.toMatchObject({ name: "NativeError", code: "cancelled" });
+    await expect(bridge.callNative("gate.verify")).rejects.toMatchObject({ name: "NativeError", code: "cancelled" });
   });
 
-  it("sends a secret as a binary frame and wipes the frame it built", async () => {
-    let received: number[] | null = null;
-    const { sentSecrets } = installFakeApp(({ id }, secret, reply) => {
-      received = secret ? Array.from(secret) : null;
-      reply(JSON.stringify({ id, ok: true, result: {} }));
+  it("only ever sends JSON text, and ignores binary replies", async () => {
+    const { sent } = installFakeApp(({ id }, reply) => {
+      reply(new Uint8Array([2, 0, 0, 0, id, 9, 9]).buffer);
+      reply(JSON.stringify({ id, ok: true, result: { done: true } }));
     });
     const bridge = await loadBridge();
-    const seed = new Uint8Array(32).fill(7);
-    await bridge.callNative("vault.enroll", { uid: "u" }, { secret: seed });
-    expect(received).toEqual(Array(32).fill(7));
-    // The page's own copy of the outgoing frame is zeroed after posting.
-    expect(Array.from(sentSecrets[0])).toEqual(Array(37).fill(0));
-  });
-
-  it("returns a secret that arrived as a binary frame, never as JSON", async () => {
-    installFakeApp(({ id }, _s, reply) => {
-      const frame = new Uint8Array(5 + 32);
-      frame[0] = 2;
-      new DataView(frame.buffer).setInt32(1, id);
-      frame.fill(9, 5);
-      reply(frame.buffer);
-      reply(JSON.stringify({ id, ok: true, result: { binary: true } }));
-    });
-    const bridge = await loadBridge();
-    const seed = await bridge.callNativeForSecret("vault.unlock", { uid: "u" });
-    expect(Array.from(seed)).toEqual(Array(32).fill(9));
+    await expect(bridge.callNative("gate.verify", { uid: "u" })).resolves.toEqual({ done: true });
+    expect(sent.every((m) => typeof m === "string")).toBe(true);
   });
 
   it("delivers app events to subscribers", async () => {

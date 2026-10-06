@@ -18,7 +18,7 @@ import { LoadingScreen } from "@/components/LoadingState";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
 import { AccountGroup } from "@/components/settings/AccountGroup";
-import { DeviceUnlockRow } from "@/components/settings/DeviceUnlockRow";
+import { BiometricGateRow } from "@/components/settings/BiometricGateRow";
 import { IS_ANDROID_APP } from "@/lib/platform";
 import {
   MoreLink,
@@ -147,7 +147,6 @@ export default function SettingsPage() {
         >
           <div className="space-y-8">
             <SettingsGroup id="security" title="일기 보호">
-              {IS_ANDROID_APP && <DeviceUnlockRow shamirK={shamirConfig?.k ?? null} />}
               <ShamirRow
                 config={shamirConfig}
                 stageSeedFromPassphrase={stageSeedFromPassphrase}
@@ -169,6 +168,8 @@ export default function SettingsPage() {
                 stageSeedFromPassphrase={stageSeedFromPassphrase}
                 discardStagedSeed={discardStagedSeed}
               />
+              {/* Same footing as OTP: an extra check, never a replacement for the passphrase. */}
+              {IS_ANDROID_APP && <BiometricGateRow />}
             </SettingsGroup>
 
             <SettingsGroup id="writing" title="쓰기">

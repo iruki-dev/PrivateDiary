@@ -68,7 +68,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var container: FrameLayout
     private lateinit var webView: SecureWebView
     private lateinit var bridge: NativeBridge
-    private lateinit var vault: BiometricVault
+    private lateinit var gate: BiometricGate
     private lateinit var clipboard: SecureClipboard
     private lateinit var assetLoader: WebViewAssetLoader
 
@@ -126,7 +126,8 @@ class MainActivity : FragmentActivity() {
         // Remote inspection of the page (chrome://inspect) only in debug builds.
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
-        vault = BiometricVault(this)
+        BiometricGate.removeLegacySeedVault(this)
+        gate = BiometricGate(this)
         clipboard = SecureClipboard(this)
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(AppOrigin.HOST)
@@ -192,7 +193,7 @@ class MainActivity : FragmentActivity() {
         webView.webViewClient = AppWebViewClient()
         webView.webChromeClient = AppChromeClient()
 
-        bridge = NativeBridge(this, webView, vault, clipboard, GoogleSignIn(this))
+        bridge = NativeBridge(this, webView, gate, clipboard, GoogleSignIn(this))
         bridge.install()
     }
 

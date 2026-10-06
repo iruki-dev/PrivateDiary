@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useOtp } from "@/contexts/OtpContext";
@@ -17,10 +17,7 @@ import {
   type StoredEntry,
 } from "@/lib/firebase/entries";
 import { ShamirNotConfiguredError } from "@/lib/firebase/otp";
-import { useDeviceUnlock } from "@/hooks/useDeviceUnlock";
-import { FingerprintIcon } from "@/components/FingerprintIcon";
-import { NativeError } from "@/lib/native/bridge";
-import { haptic } from "@/lib/native/app";
+import { BiometricGateError, haptic } from "@/lib/native/app";
 import {
   bytesToBase64,
   computeShamirOtpBypassProof,
@@ -29,21 +26,23 @@ import {
   WrongPassphraseError,
 } from "@/lib/crypto";
 
-type UnlockMode = "device" | "passphrase" | "shamir";
+type UnlockMode = "passphrase" | "shamir";
 
-/** What to say when biometric unlock doesn't go through (lib/native/app.ts error codes). */
-function deviceUnlockErrorMessage(code: string): string | null {
+/**
+ * The biometric check (Android app, when turned on) runs after the
+ * passphrase or backup codes were accepted. Null: the person dismissed the
+ * prompt themselves — nothing to say.
+ */
+function biometricGateMessage(code: string): string | null {
   switch (code) {
     case "cancelled":
-    case "use-passphrase":
       return null;
     case "lockout":
-      return "인증 시도가 너무 많았습니다. 잠시 뒤에 다시 시도하거나 일기 암호를 입력해주세요.";
+      return "생체 인증 시도가 너무 많았습니다. 잠시 뒤에 다시 시도해주세요.";
     case "invalidated":
-    case "not-enrolled":
-      return "휴대폰에 새 지문이나 얼굴이 등록되어 생체 인증이 꺼졌습니다. 일기 암호로 연 뒤 설정에서 다시 켤 수 있습니다.";
+      return "휴대폰에 새 지문이나 얼굴이 등록되어 생체 인증을 통과할 수 없습니다. 설정 → 생체 인증에서 로그인 비밀번호로 확인한 뒤 다시 설정해주세요.";
     default:
-      return "생체 인증으로 열지 못했습니다. 일기 암호를 입력해주세요.";
+      return "생체 인증을 확인하지 못했습니다. 다시 시도해주세요.";
   }
 }
 
@@ -83,7 +82,6 @@ export default function EntriesPage() {
     privateKeys,
     unlock,
     unlockWithShamirShares,
-    unlockWithDevice,
     lock,
     lockReason,
     decryptionMethods,
@@ -102,13 +100,7 @@ export default function EntriesPage() {
   // binding structurally cannot — entries that are simply missing.
   const [integrity, setIntegrity] = useState<EntrySequenceIntegrity | null>(null);
 
-  const [chosenMode, setUnlockMode] = useState<UnlockMode | null>(null);
-  // Android app: biometric unlock, when this account turned it on for this phone.
-  const { status: deviceUnlock, refresh: refreshDeviceUnlock } = useDeviceUnlock();
-  const deviceUnlockReady = deviceUnlock?.enrolled === true && deviceUnlock.availability === "ready";
-  // Biometric unlock is the default way in on a phone that has it.
-  const unlockMode: UnlockMode = chosenMode ?? (deviceUnlockReady ? "device" : "passphrase");
-  const autoPromptedRef = useRef(false);
+  const [unlockMode, setUnlockMode] = useState<UnlockMode>("passphrase");
   const [passphrase, setPassphrase] = useState("");
   const [shareInputs, setShareInputs] = useState<string[]>([]);
   const [unlockError, setUnlockError] = useState<string | null>(null);
@@ -154,40 +146,6 @@ export default function EntriesPage() {
     }
   }
 
-  async function handleDeviceUnlock() {
-    setUnlockError(null);
-    setUnlocking(true);
-    try {
-      await unlockWithDevice();
-      haptic("confirm");
-    } catch (err) {
-      const code = err instanceof NativeError ? err.code : "failed";
-      const message = deviceUnlockErrorMessage(code);
-      if (message) setUnlockError(message);
-      if (code !== "cancelled") setUnlockMode("passphrase");
-      if (code === "invalidated" || code === "not-enrolled") void refreshDeviceUnlock();
-    } finally {
-      setUnlocking(false);
-    }
-  }
-
-  // The biometric prompt opens by itself, except right after the person
-  // locked the diary on purpose (they likely don't want it straight back
-  // open) or picked another way in.
-  const deviceUnlockShowing =
-    deviceUnlockReady && seedStatus === "locked" && !otpLoading && !otpBlocking && metadataLoaded && metadata.length > 0;
-  useEffect(() => {
-    if (!deviceUnlockShowing || autoPromptedRef.current) return;
-    autoPromptedRef.current = true;
-    if (lockReason === "manual" || chosenMode !== null) return;
-    // Opening the system biometric prompt is the external effect here;
-    // its result arrives asynchronously.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    void handleDeviceUnlock();
-    // handleDeviceUnlock is recreated every render; the ref guards re-runs.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceUnlockShowing, lockReason, chosenMode]);
-
   async function handleUnlock(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setUnlockError(null);
@@ -215,6 +173,10 @@ export default function EntriesPage() {
         }
       }
     } catch (err) {
+      if (err instanceof BiometricGateError) {
+        setUnlockError(biometricGateMessage(err.code));
+        return;
+      }
       haptic("reject");
       setUnlockError(
         err instanceof WrongPassphraseError
@@ -233,7 +195,6 @@ export default function EntriesPage() {
   }
 
   const otherModes: { mode: UnlockMode; label: string }[] = [
-    ...(deviceUnlockReady ? [{ mode: "device" as const, label: "생체 인증으로 열기" }] : []),
     { mode: "passphrase" as const, label: "일기 암호로 열기" },
     ...(decryptionMethods?.shamir
       ? [{ mode: "shamir" as const, label: "백업 코드로 잠금 해제" }]
@@ -394,30 +355,7 @@ export default function EntriesPage() {
 
             {metadataLoaded && metadata.length === 0 && emptyState}
 
-            {metadataLoaded && metadata.length > 0 && unlockMode === "device" && deviceUnlockReady && (
-              <div className="card space-y-5 py-8 text-center">
-                <FingerprintIcon className="mx-auto h-10 w-10 text-zinc-400 dark:text-zinc-500" />
-                <p className="muted">일기 {metadata.length}편이 잠겨 있습니다.</p>
-                {unlockError && (
-                  <p role="alert" className="error-text">
-                    {unlockError}
-                  </p>
-                )}
-                <div className="space-y-3">
-                  <button
-                    type="button"
-                    onClick={() => void handleDeviceUnlock()}
-                    disabled={unlocking}
-                    className="btn-primary w-full"
-                  >
-                    {unlocking ? "확인 중..." : "생체 인증으로 열기"}
-                  </button>
-                  {modeSwitcherLinks}
-                </div>
-              </div>
-            )}
-
-            {metadataLoaded && metadata.length > 0 && unlockMode !== "device" && (
+            {metadataLoaded && metadata.length > 0 && (
               <form onSubmit={handleUnlock} className="space-y-3 card">
                 {unlockMode === "passphrase" ? (
                   <>
