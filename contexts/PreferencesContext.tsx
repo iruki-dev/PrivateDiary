@@ -1,14 +1,15 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { useAuth } from "./AuthContext";
-import { getUserPreferences, setUserPreferences } from "@/lib/firebase/users";
+import { useAccount } from "./AccountContext";
 import { DEFAULT_PREFERENCES, type UserPreferences } from "@/lib/preferences";
 
 /**
  * Account-level preferences (users/{uid}.preferences) — how /write behaves
  * while typing, how long an unlocked session survives, whether drafts are
- * kept on the device. All of them follow the account across devices.
+ * kept on the device. All of them follow the account across devices; a
+ * local diary keeps its own (lib/store/local.ts), and the phone's read-only
+ * copy of an account uses the defaults.
  *
  * Kept as its own context rather than folded into SeedContext because it
  * has nothing to do with the master seed/keys — just like OtpContext, it
@@ -35,49 +36,51 @@ interface PreferencesContextValue extends UserPreferences {
 const PreferencesContext = createContext<PreferencesContextValue | undefined>(undefined);
 
 export function PreferencesProvider({ children }: { children: ReactNode }) {
-  const { user, status: authStatus } = useAuth();
+  const { store, status: accountStatus } = useAccount();
   const [preferences, setPreferences] = useState<UserPreferences>(DEFAULT_PREFERENCES);
   const [loading, setLoading] = useState(true);
   // Guards against a slow fetch for a since-signed-out (or switched)
-  // user overwriting state after the fact — same shape as SeedContext's
+  // account overwriting state after the fact — same shape as SeedContext's
   // stale-async-write guards.
-  const requestUidRef = useRef<string | null>(null);
+  const requestStoreRef = useRef<object | null>(null);
 
   useEffect(() => {
-    if (authStatus === "signed-in" && user) {
-      requestUidRef.current = user.uid;
-      // getUserPreferences reads Firestore (browser-only, async) — this
+    if (accountStatus === "signed-in" && store) {
+      requestStoreRef.current = store;
+      // getPreferences reads the diary's store (browser-only, async) — this
       // can't be reduced to state derived purely from props during render
       // (same shape as SeedContext's refresh()).
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLoading(true);
-      getUserPreferences(user.uid)
+      setPreferences(DEFAULT_PREFERENCES);
+      store
+        .getPreferences()
         .then((prefs) => {
-          if (requestUidRef.current === user.uid) setPreferences(prefs);
+          if (requestStoreRef.current === store) setPreferences(prefs);
         })
         .catch((err) => {
-          console.error("getUserPreferences failed", err);
+          console.error("getPreferences failed", err);
         })
         .finally(() => {
-          if (requestUidRef.current === user.uid) setLoading(false);
+          if (requestStoreRef.current === store) setLoading(false);
         });
-    } else if (authStatus === "signed-out") {
-      requestUidRef.current = null;
+    } else if (accountStatus === "signed-out") {
+      requestStoreRef.current = null;
       setPreferences(DEFAULT_PREFERENCES);
       setLoading(false);
     }
-    // "loading" leaves preferences state as-is until auth resolves.
-  }, [authStatus, user]);
+    // "loading" leaves preferences state as-is until the account resolves.
+  }, [accountStatus, store]);
 
   const update = useCallback(
     async (patch: Partial<UserPreferences>) => {
-      if (!user) return;
+      if (!store) return;
       const previous = preferences;
       setPreferences((prev) => ({ ...prev, ...patch }));
       try {
-        await setUserPreferences(user.uid, patch);
+        await store.setPreferences(patch);
       } catch (err) {
-        console.error("setUserPreferences failed", err);
+        console.error("setPreferences failed", err);
         setPreferences(previous);
         // Rethrown (not just logged) so a caller writing a security-
         // relevant field (lib/preferences.ts's SECURITY_PREFERENCE_KEYS —
@@ -90,7 +93,7 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
         throw err;
       }
     },
-    [user, preferences]
+    [store, preferences]
   );
 
   const value: PreferencesContextValue = {

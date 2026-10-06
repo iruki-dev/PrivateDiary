@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import { AccountProvider } from "./AccountContext";
 import { AuthProvider } from "./AuthContext";
 import { BiometricGateProvider } from "./BiometricGateContext";
 import { NativeProvider } from "./NativeContext";
@@ -18,22 +19,28 @@ import { SeedProvider } from "./SeedContext";
  * module-load-time reference snapshot run as early as this app's own JS
  * can run at all — see that module's doc comment for why that timing
  * matters.
+ *
+ * AccountProvider sits right under AuthProvider: everything below works
+ * with "the diary that is open" (a cloud account, the local diary, or the
+ * phone's copy of an account) rather than with the Firebase user directly.
  */
 export function Providers({ children }: { children: ReactNode }) {
   return (
     <SecurityProvider>
       <AuthProvider>
-        <NativeProvider>
-          <BiometricGateProvider>
-            <PreferencesProvider>
-              <OtpProvider>
-                <SeedProvider>
-                  <PendingEntryProvider>{children}</PendingEntryProvider>
-                </SeedProvider>
-              </OtpProvider>
-            </PreferencesProvider>
-          </BiometricGateProvider>
-        </NativeProvider>
+        <AccountProvider>
+          <NativeProvider>
+            <BiometricGateProvider>
+              <PreferencesProvider>
+                <OtpProvider>
+                  <SeedProvider>
+                    <PendingEntryProvider>{children}</PendingEntryProvider>
+                  </SeedProvider>
+                </OtpProvider>
+              </PreferencesProvider>
+            </BiometricGateProvider>
+          </NativeProvider>
+        </AccountProvider>
       </AuthProvider>
     </SecurityProvider>
   );

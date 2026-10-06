@@ -10,7 +10,7 @@
  * Firebase code (no `firebase/*`, no `fetch`, no `lib/firebase/*`).
  */
 
-export { generateMasterSeed } from "./random";
+export { generateMasterSeed, randomId } from "./random";
 export { deriveSubSeeds } from "./subSeeds";
 export type { SubSeeds } from "./subSeeds";
 
@@ -25,6 +25,9 @@ export { encapsulateContentKey, decapsulateContentKey } from "./hybridKem";
 export type { ContentKeyCapsule } from "./hybridKem";
 
 export { encryptEntry, decryptEntry } from "./entry";
+
+export { lockExport, unlockExport, isLockedExport, LOCKED_EXPORT_FORMAT } from "./archive";
+export type { LockedExportFile } from "./archive";
 
 export {
   publicKeysToStorage,

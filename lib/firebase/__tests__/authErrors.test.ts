@@ -10,8 +10,13 @@ const err = (code: string) => Object.assign(new Error(code), { code });
 
 describe("auth error messages", () => {
   it("separates the two causes the old signup copy lumped together", () => {
-    expect(signUpErrorMessage(err("auth/email-already-in-use"))).toContain("이미 가입한");
+    expect(signUpErrorMessage(err("auth/email-already-in-use"))).toContain("이미 쓰고 있는 아이디");
     expect(signUpErrorMessage(err("auth/weak-password"))).toContain("6자");
+  });
+
+  it("names the id, not an email, when sign-in fails", () => {
+    expect(signInErrorMessage(err("auth/invalid-credential"))).toContain("아이디");
+    expect(passwordResetErrorMessage(err("functions/invalid-argument"))).toContain("아이디");
   });
 
   it("does not reveal whether an email exists on sign-in", () => {

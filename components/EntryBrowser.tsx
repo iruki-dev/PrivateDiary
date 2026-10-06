@@ -7,6 +7,7 @@ import { Icon } from "./Icon";
 import { EntryCalendar } from "./EntryCalendar";
 import { EntryStats } from "./EntryStats";
 import { ExportEntriesCard } from "./ExportEntriesCard";
+import { ImportEntriesCard } from "./ImportEntriesCard";
 import { useDecryptedEntries } from "@/hooks/useDecryptedEntries";
 import type { HybridPrivateKeys } from "@/lib/crypto";
 import type { EntrySequenceIntegrity, StoredEntry } from "@/lib/firebase/entries";
@@ -80,10 +81,16 @@ export function EntryBrowser({
   entries,
   integrity,
   privateKeys,
+  onImported,
+  readOnly = false,
 }: {
   entries: StoredEntry[];
   integrity: EntrySequenceIntegrity | null;
   privateKeys: HybridPrivateKeys;
+  /** After 불러오기 added entries: the page fetches the list again. */
+  onImported: () => void;
+  /** The phone's backup of an account: read and export only. */
+  readOnly?: boolean;
 }) {
   // Pinned at mount so "today", the streak and the anniversary row can't
   // shift under the user mid-session, and so every render agrees on them.
@@ -93,6 +100,7 @@ export function EntryBrowser({
   const [dateFilter, setDateFilter] = useState<DateFilter>({ kind: "all" });
   const [sortOrder, setSortOrder] = useState<SortOrder>("newest");
   const [exportOpen, setExportOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [calendarOpen, setCalendarOpen] = useState(false);
   // The entry open in the reading view (components/EntryReader), if any.
   const [readerId, setReaderId] = useState<string | null>(null);
@@ -121,10 +129,21 @@ export function EntryBrowser({
   const searching = terms.length > 0;
   const filtering = searching || dateFilter.kind !== "all";
 
+  // Newest first by when each entry was written. `entries` arrives in
+  // entrySeq order, which is the same thing for everything written here —
+  // but an entry brought in by 불러오기 keeps its original date while
+  // taking the next entrySeq, so the list sorts by date (entrySeq breaks
+  // ties, and an entry whose time hasn't resolved yet is the newest).
+  const ordered = useMemo(() => {
+    const time = (date: Date | null) => date?.getTime() ?? Infinity;
+    return entries
+      .map((entry, index) => ({ entry, createdAt: dates[index] }))
+      .sort((a, b) => time(b.createdAt) - time(a.createdAt) || b.entry.entrySeq - a.entry.entrySeq);
+  }, [entries, dates]);
+
   const prepared = useMemo<PreparedEntry[]>(() => {
     const result: PreparedEntry[] = [];
-    for (const [index, entry] of entries.entries()) {
-      const createdAt = dates[index];
+    for (const { entry, createdAt } of ordered) {
 
       // Date filters run first: they need no plaintext, so they stay exact
       // even while decryption is still in flight.
@@ -156,11 +175,10 @@ export function EntryBrowser({
         result.push({ id: entry.id, entrySeq: entry.entrySeq, createdAt, text, error, ranges: [] });
       }
     }
-    // `entries` arrives newest-first (entrySeq desc), so oldest-first is
-    // just a reversal — done before grouping so the month headers come out
-    // in the matching order too.
+    // `ordered` is newest-first, so oldest-first is just a reversal — done
+    // before grouping so the month headers come out in the matching order too.
     return sortOrder === "oldest" ? result.reverse() : result;
-  }, [entries, dates, plaintexts, errors, searching, terms, dateFilter, sortOrder, today]);
+  }, [ordered, plaintexts, errors, searching, terms, dateFilter, sortOrder, today]);
 
   // The list as rendered: a month heading whenever the month changes, then
   // one card per entry, with the date block on the first card of each day.
@@ -219,8 +237,7 @@ export function EntryBrowser({
   let anniversaryQuote: { year: number; lead: string } | null = null;
   if (anniversaries.length > 0) {
     const target = anniversaryKey(today);
-    for (const [index, entry] of entries.entries()) {
-      const date = dates[index];
+    for (const { entry, createdAt: date } of ordered) {
       const text = plaintexts[entry.id];
       if (!date || !text || anniversaryKey(date) !== target || date.getFullYear() >= today.getFullYear()) continue;
       anniversaryQuote = { year: date.getFullYear(), lead: splitLead(text).lead ?? `${text.slice(0, 60)}…` };
@@ -499,21 +516,40 @@ export function EntryBrowser({
           )}
         </ol>
 
-        {/* Export is occasional, so it sits after the diary rather than in
-            the toolbar above it. */}
-        <div className="pt-6">
-          {exportOpen ? (
+        {/* Export and import are occasional, so they sit after the diary
+            rather than in the toolbar above it. */}
+        <div className="space-y-3 pt-6">
+          {exportOpen && (
             <ExportEntriesCard
               entries={exportable}
               disabled={!done}
               disabledReason="아직 일기를 여는 중이에요. 다 열린 뒤에 내보내야 빠짐없이 저장돼요."
               onClose={() => setExportOpen(false)}
             />
-          ) : (
-            <button type="button" onClick={() => setExportOpen(true)} className="btn-text">
-              <Icon name="download" size={18} />
-              일기 모두 내보내기
-            </button>
+          )}
+          {importOpen && (
+            <ImportEntriesCard
+              existing={exportable}
+              ready={done}
+              onImported={onImported}
+              onClose={() => setImportOpen(false)}
+            />
+          )}
+          {(!exportOpen || !importOpen) && (
+            <div className="flex flex-wrap gap-x-2">
+              {!exportOpen && (
+                <button type="button" onClick={() => setExportOpen(true)} className="btn-text">
+                  <Icon name="download" size={18} />
+                  일기 모두 내보내기
+                </button>
+              )}
+              {!importOpen && !readOnly && (
+                <button type="button" onClick={() => setImportOpen(true)} className="btn-text">
+                  <Icon name="upload" size={18} />
+                  일기 불러오기
+                </button>
+              )}
+            </div>
           )}
         </div>
       </div>

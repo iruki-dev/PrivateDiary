@@ -145,6 +145,10 @@ export function TextField({
   required = true,
   placeholder,
   inputMode,
+  hint,
+  maxLength,
+  plain = false,
+  invalid = false,
 }: {
   label: string;
   value: string;
@@ -155,8 +159,14 @@ export function TextField({
   required?: boolean;
   placeholder?: string;
   inputMode?: "text" | "email" | "numeric";
+  hint?: ReactNode;
+  maxLength?: number;
+  /** An id: no auto-capitalisation or autocorrect "fixing" what was typed. */
+  plain?: boolean;
+  invalid?: boolean;
 }) {
   const id = useId();
+  const hintId = `${id}-hint`;
   return (
     <div>
       <label htmlFor={id} className="field-label">
@@ -169,12 +179,22 @@ export function TextField({
         autoFocus={autoFocus}
         autoComplete={autoComplete}
         inputMode={inputMode}
-        autoCapitalize={type === "email" ? "none" : undefined}
+        autoCapitalize={type === "email" || plain ? "none" : undefined}
+        autoCorrect={plain ? "off" : undefined}
+        spellCheck={plain ? false : undefined}
+        maxLength={maxLength}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        aria-describedby={hint ? hintId : undefined}
+        aria-invalid={invalid || undefined}
         className="field"
       />
+      {hint && (
+        <p id={hintId} className="mt-2 text-[0.8125rem] leading-relaxed text-ink-3">
+          {hint}
+        </p>
+      )}
     </div>
   );
 }

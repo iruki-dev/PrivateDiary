@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useBiometricGate } from "@/contexts/BiometricGateContext";
 import {
   disableBiometricGate,
@@ -37,7 +37,7 @@ function describe(status: BiometricGateStatus): string {
 
 function gateErrorMessage(err: unknown): string | null {
   const code = err instanceof NativeError ? err.code : "failed";
-  if (code === "cancelled") return null;
+  if (code === "cancelled" || code === "busy") return null;
   if (code === "lockout") return "생체 인증을 여러 번 실패했어요. 잠시 뒤에 다시 해 주세요.";
   if (code === "insecure-hardware") return "이 휴대폰은 보안 하드웨어에 키를 만들 수 없어서 켤 수 없어요.";
   if (code === "invalidated") return "생체 정보가 바뀌어서 확인할 수 없어요. 다시 설정해 주세요.";
@@ -54,7 +54,9 @@ function gateErrorMessage(err: unknown): string | null {
  * (android/.../BiometricGate.kt).
  */
 export function BiometricGateRow() {
-  const { user } = useAuth();
+  const { account } = useAccount();
+  const user = account?.kind === "cloud" ? account.user : null;
+  const gateId = account?.id ?? null;
   const { status, refresh, markPassed } = useBiometricGate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,8 +65,8 @@ export function BiometricGateRow() {
   const [password, setPassword] = useState("");
   const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
 
-  if (!status || !user) return null;
-  const signedInUser = user;
+  if (!status || !gateId || account?.kind === "backup") return null;
+  const id = gateId;
 
   async function run(action: () => Promise<void>, done: string) {
     setBusy(true);
@@ -83,7 +85,7 @@ export function BiometricGateRow() {
   }
 
   async function afterReauth() {
-    await resetBiometricGate(signedInUser.uid);
+    await resetBiometricGate(id);
     await refresh();
     setReauthing(false);
     setPassword("");
@@ -92,10 +94,11 @@ export function BiometricGateRow() {
 
   async function handleReauthPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!user) return;
     setBusy(true);
     setError(null);
     try {
-      await reauthenticateWithPassword(signedInUser, password);
+      await reauthenticateWithPassword(user, password);
       await afterReauth();
     } catch (err) {
       const code = authErrorCode(err);
@@ -110,10 +113,11 @@ export function BiometricGateRow() {
   }
 
   async function handleReauthGoogle() {
+    if (!user) return;
     setBusy(true);
     setError(null);
     try {
-      await reauthenticateWithGoogle(signedInUser);
+      await reauthenticateWithGoogle(user);
       await afterReauth();
     } catch (err) {
       if (!isUserCancelledPopup(err)) setError("본인을 확인하지 못했어요. 다시 시도해 주세요.");
@@ -140,7 +144,13 @@ export function BiometricGateRow() {
       control={
         status.invalidated ? (
           !reauthing && (
-            <button type="button" onClick={() => setReauthing(true)} className="btn-secondary btn-sm">
+            <button
+              type="button"
+              // A local diary has no login to re-prove; its stale check
+              // already steps aside for the passphrase (BiometricGateContext).
+              onClick={() => (user ? setReauthing(true) : void run(afterReauth, "생체 인증을 초기화했어요. 다시 켤 수 있어요."))}
+              className="btn-secondary btn-sm"
+            >
               다시 설정
             </button>
           )
@@ -152,11 +162,11 @@ export function BiometricGateRow() {
             onChange={(next) =>
               void (next
                 ? run(async () => {
-                    await enableBiometricGate(signedInUser.uid);
+                    await enableBiometricGate(id);
                     // Turning it on passed one check already.
                     markPassed();
                   }, "켰어요")
-                : run(() => disableBiometricGate(signedInUser.uid), "껐어요"))
+                : run(() => disableBiometricGate(id), "껐어요"))
             }
           />
         )

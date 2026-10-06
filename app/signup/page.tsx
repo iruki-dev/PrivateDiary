@@ -4,12 +4,21 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
-import { signInWithGoogle, signUpWithEmail } from "@/lib/firebase/auth";
+import { signInWithGoogle, signUpWithLoginId } from "@/lib/firebase/auth";
 import { isUserCancelledPopup, signUpErrorMessage } from "@/lib/firebase/authErrors";
-import { createUserKeyRecord } from "@/lib/firebase/users";
-import { writeEntry } from "@/lib/firebase/entries";
+import { getNickname, setNickname, setRecoveryEmail } from "@/lib/firebase/profile";
+import {
+  isPlausibleEmail,
+  loginIdFromEmail,
+  loginIdProblem,
+  nicknameProblem,
+  normalizeLoginId,
+  normalizeNickname,
+  NICKNAME_MAX_LENGTH,
+} from "@/lib/loginId";
 import {
   deriveHybridKeyPair,
   generateMasterSeed,
@@ -24,6 +33,7 @@ import { AuthShell, OrDivider, StepProgress } from "@/components/AuthShell";
 import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
 import { LoadingScreen } from "@/components/LoadingState";
+import { Icon } from "@/components/Icon";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
 import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
@@ -38,7 +48,9 @@ type Step = "passphrase" | "backup-intro" | "backup-reveal";
 /**
  * Onboarding (ARCHITECTURE.md §3.1 step 1-5), in three steps:
  *
- *  1. Account — email/password or Google (Firebase Auth only).
+ *  1. Account — id + nickname + login password (and, recommended, an
+ *     email for resetting that password), or Google + nickname
+ *     (Firebase Auth only; lib/loginId.ts).
  *  2. Diary passphrase — the master seed is generated here, wrapped with a
  *     passphrase that must differ from the login password and meet a
  *     minimum strength, and the key-issuance document is written.
@@ -57,6 +69,7 @@ type Step = "passphrase" | "backup-intro" | "backup-reveal";
  */
 export default function SignupPage() {
   const { user, status: authStatus } = useAuth();
+  const { account, store } = useAccount();
   const {
     status: seedStatus,
     refresh,
@@ -71,8 +84,16 @@ export default function SignupPage() {
   usePageTitle("가입");
 
   // --- step 1: account ---
-  const [email, setEmail] = useState("");
+  const [loginId, setLoginId] = useState("");
+  const [nickname, setNicknameInput] = useState("");
+  const [recoveryEmail, setRecoveryEmailInput] = useState("");
   const [accountPassword, setAccountPassword] = useState("");
+  // Accounts that came in through Google (or an earlier, unfinished signup)
+  // name themselves before the passphrase step. null: still checking.
+  const [hasNickname, setHasNickname] = useState<boolean | null>(null);
+  const [nicknameSaving, setNicknameSaving] = useState(false);
+  // Set when the reset email couldn't be saved during signup; settings can add it later.
+  const [recoveryEmailFailed, setRecoveryEmailFailed] = useState(false);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [accountSubmitting, setAccountSubmitting] = useState(false);
   const loginPasswordRef = useRef<string>("");
@@ -97,8 +118,31 @@ export default function SignupPage() {
   useEffect(() => {
     if (alreadyOnboarded) {
       router.replace(DEFAULT_SIGNED_IN_PATH);
+    } else if (account?.kind === "local") {
+      // The phone's local diary is set up on its own page, without an account.
+      router.replace("/local");
     }
-  }, [alreadyOnboarded, router]);
+  }, [alreadyOnboarded, account?.kind, router]);
+
+  // Signed in without keys yet: has this account named itself already?
+  useEffect(() => {
+    if (authStatus !== "signed-in" || !user || seedStatus !== "not-issued" || hasNickname !== null || accountSubmitting) {
+      return;
+    }
+    let cancelled = false;
+    getNickname(user.uid)
+      .then((existing) => {
+        if (cancelled) return;
+        if (!existing) setNicknameInput((current) => current || normalizeNickname(user.displayName ?? "").slice(0, NICKNAME_MAX_LENGTH));
+        setHasNickname(existing !== null);
+      })
+      .catch(() => {
+        if (!cancelled) setHasNickname(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authStatus, user, seedStatus, hasNickname, accountSubmitting]);
 
   // Leaving this page drops any seed staged for step 3.
   useEffect(() => () => discardStagedSeed(), [discardStagedSeed]);
@@ -113,13 +157,41 @@ export default function SignupPage() {
   async function handleCreateAccount(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setAccountError(null);
+    const id = normalizeLoginId(loginId);
+    const name = normalizeNickname(nickname);
+    const email = recoveryEmail.trim();
+    const problem =
+      loginIdProblem(id) ??
+      nicknameProblem(name) ??
+      (email && !isPlausibleEmail(email) ? "재설정용 이메일 주소를 다시 확인해 주세요." : null);
+    if (problem) {
+      setAccountError(problem);
+      return;
+    }
     setAccountSubmitting(true);
     try {
-      await signUpWithEmail(email, accountPassword);
+      const created = await signUpWithLoginId(id, accountPassword);
       loginPasswordRef.current = accountPassword;
       setAccountPassword("");
+      // The account exists from here on; naming it and the reset email are
+      // extras that settings can redo, so a failure here doesn't stop signup.
+      try {
+        await setNickname(created.uid, name);
+        setHasNickname(true);
+      } catch (err) {
+        console.error("setNickname failed", err);
+        setHasNickname(false);
+      }
+      if (email) {
+        try {
+          await setRecoveryEmail(email);
+        } catch (err) {
+          console.error("setRecoveryEmail failed", err);
+          setRecoveryEmailFailed(true);
+        }
+      }
     } catch (err) {
-      console.error("signUpWithEmail failed", err);
+      console.error("signUpWithLoginId failed", err);
       setAccountError(signUpErrorMessage(err));
     } finally {
       setAccountSubmitting(false);
@@ -143,6 +215,28 @@ export default function SignupPage() {
     }
   }
 
+  async function handleSaveNickname(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!store) return;
+    const name = normalizeNickname(nickname);
+    const problem = nicknameProblem(name);
+    if (problem) {
+      setAccountError(problem);
+      return;
+    }
+    setAccountError(null);
+    setNicknameSaving(true);
+    try {
+      await store.setNickname(name);
+      setHasNickname(true);
+    } catch (err) {
+      console.error("setNickname failed", err);
+      setAccountError("닉네임을 저장하지 못했어요. 다시 시도해 주세요.");
+    } finally {
+      setNicknameSaving(false);
+    }
+  }
+
   async function handleSetPassphrase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPassphraseError(null);
@@ -152,7 +246,7 @@ export default function SignupPage() {
       setPassphraseError("두 칸에 같은 일기 암호를 넣어 주세요.");
       return;
     }
-    const userInputs = [email, user.email ?? ""].filter(Boolean);
+    const userInputs = [loginIdFromEmail(user.email) ?? user.email ?? "", normalizeNickname(nickname)].filter(Boolean);
     if (!checkPassphraseStrength(passphrase, userInputs).isStrongEnough) {
       setPassphraseError("일기 암호가 너무 짧아요. 서로 상관없는 단어를 더 이어 붙여 보세요.");
       return;
@@ -170,16 +264,17 @@ export default function SignupPage() {
       const wrapped = await wrapSeed(seed, passphrase);
       wipeBytes(seed, privateKeys.x25519SecretKey, privateKeys.mlkem768SecretKey);
 
+      if (!store) throw new Error("No account to create the diary in");
       setOnboarding(true);
       keysCreated = true;
-      await createUserKeyRecord(user.uid, publicKeys, wrapped);
+      await store.createKeyRecord(publicKeys, wrapped);
       loginPasswordRef.current = "";
       await refresh();
 
       const pendingText = takePendingEntry();
       if (pendingText) {
         try {
-          await writeEntry(user.uid, publicKeys, pendingText);
+          await store.writeEntry(publicKeys, pendingText);
           setNotice("첫 일기를 저장했어요");
         } catch (err) {
           console.error("saving the pre-signup entry failed", err);
@@ -259,12 +354,21 @@ export default function SignupPage() {
       >
         <form onSubmit={handleCreateAccount} className="space-y-4">
           <TextField
-            label="이메일"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={setEmail}
-            placeholder="name@example.com"
+            label="아이디"
+            autoComplete="username"
+            plain
+            maxLength={20}
+            value={loginId}
+            onChange={setLoginId}
+            hint="영문 소문자, 숫자, 밑줄(_)로 4–20자. 로그인할 때 써요."
+          />
+          <TextField
+            label="닉네임"
+            autoComplete="nickname"
+            maxLength={NICKNAME_MAX_LENGTH}
+            value={nickname}
+            onChange={setNicknameInput}
+            hint="앱에서 부를 이름이에요. 나중에 바꿀 수 있어요."
           />
           <PasswordField
             label="로그인 비밀번호"
@@ -272,6 +376,17 @@ export default function SignupPage() {
             value={accountPassword}
             onChange={setAccountPassword}
             hint="6자 이상이면 돼요. 일기 암호는 다음 단계에서 따로 정해요."
+          />
+          <TextField
+            label="비밀번호 재설정용 이메일 (선택)"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            required={false}
+            value={recoveryEmail}
+            onChange={setRecoveryEmailInput}
+            placeholder="name@example.com"
+            hint="넣어 두길 권해요. 로그인 비밀번호를 잊었을 때 이 주소로 재설정 링크를 받아요. 다른 데에는 쓰지 않아요."
           />
           {accountError && (
             <p role="alert" className="error-text">
@@ -304,6 +419,35 @@ export default function SignupPage() {
             이미 계정이 있어요
           </Link>
         </p>
+      </AuthShell>
+    );
+  }
+
+  if (!onboarding && hasNickname === null) {
+    return <LoadingScreen />;
+  }
+
+  if (!onboarding && hasNickname === false) {
+    return (
+      <AuthShell title="닉네임을 정해 주세요" step={1} lead="앱에서 부를 이름이에요. 나중에 설정에서 바꿀 수 있어요.">
+        <form onSubmit={(event) => void handleSaveNickname(event)} className="space-y-4">
+          <TextField
+            label="닉네임"
+            autoComplete="nickname"
+            autoFocus
+            maxLength={NICKNAME_MAX_LENGTH}
+            value={nickname}
+            onChange={setNicknameInput}
+          />
+          {accountError && (
+            <p role="alert" className="error-text">
+              {accountError}
+            </p>
+          )}
+          <button type="submit" disabled={nicknameSaving} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+            {nicknameSaving ? "저장하는 중…" : "다음"}
+          </button>
+        </form>
       </AuthShell>
     );
   }
@@ -390,6 +534,12 @@ export default function SignupPage() {
         </>
       }
     >
+      {recoveryEmailFailed && (
+        <p className="note-warn">
+          <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+          <span>재설정용 이메일은 저장하지 못했어요. 가입을 마친 뒤 설정에서 다시 넣어 주세요.</span>
+        </p>
+      )}
       <form onSubmit={handleSetPassphrase} className="space-y-5">
         <div className="space-y-2">
           <PasswordField
@@ -400,7 +550,7 @@ export default function SignupPage() {
           />
           <PassphraseStrengthMeter
             passphrase={passphrase}
-            userInputs={[email, user?.email ?? ""].filter(Boolean)}
+            userInputs={[loginIdFromEmail(user?.email) ?? user?.email ?? "", normalizeNickname(nickname)].filter(Boolean)}
           />
           <p className="text-[0.8125rem] leading-relaxed text-ink-3">
             로그인 비밀번호와 다르게, 서로 상관없는 단어 4개 정도를 띄어 쓰면 기억하기 쉽고 안전해요. 비밀번호

@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
 
 /**
@@ -12,7 +12,7 @@ import { DEFAULT_SIGNED_IN_PATH } from "@/lib/navigation";
  * browser, so this can only ever act after hydration.
  */
 export function SignedInRedirect() {
-  const { status } = useAuth();
+  const { status } = useAccount();
   const router = useRouter();
 
   useEffect(() => {

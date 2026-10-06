@@ -3,8 +3,8 @@
 import { Suspense, useEffect, useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
-import { sendLoginPasswordReset, signInWithEmail, signInWithGoogle } from "@/lib/firebase/auth";
+import { useAccount } from "@/contexts/AccountContext";
+import { sendLoginPasswordReset, signInWithLoginId, signInWithGoogle } from "@/lib/firebase/auth";
 import {
   authErrorCode,
   isUserCancelledPopup,
@@ -18,6 +18,9 @@ import { usePageTitle } from "@/hooks/usePageTitle";
 import { useGoogleSignInAvailable } from "@/hooks/useGoogleSignInAvailable";
 import { LoadingScreen } from "@/components/LoadingState";
 import { safeNextPath } from "@/lib/navigation";
+import { isEmailLike, loginIdProblem, normalizeLoginId } from "@/lib/loginId";
+import { IS_ANDROID_APP } from "@/lib/platform";
+import { DeviceOptions } from "@/components/DeviceOptions";
 
 type Mode = "sign-in" | "reset";
 
@@ -34,24 +37,26 @@ export default function LoginPage() {
 }
 
 function LoginForm() {
-  const { status } = useAuth();
+  const { status, account } = useAccount();
   const router = useRouter();
   // Where the visitor was headed before useAccountGate sent them here.
   const next = safeNextPath(useSearchParams().get("next"));
   const [mode, setMode] = useState<Mode>("sign-in");
   const googleAvailable = useGoogleSignInAvailable();
   usePageTitle(mode === "reset" ? "비밀번호 재설정" : "로그인");
-  const [email, setEmail] = useState("");
+  const [identifier, setIdentifier] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [resetSent, setResetSent] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // The phone's backup (DeviceOptions) can only be read, so it opens on the diary.
+  const openedBackup = account?.kind === "backup";
   useEffect(() => {
     if (status === "signed-in") {
-      router.replace(next);
+      router.replace(openedBackup ? "/entries" : next);
     }
-  }, [status, router, next]);
+  }, [status, router, next, openedBackup]);
 
   function switchMode(nextMode: Mode) {
     setMode(nextMode);
@@ -59,12 +64,22 @@ function LoginForm() {
     setResetSent(false);
   }
 
+  /** An id that can't exist is said so before asking the server. Emails go through as typed. */
+  function identifierProblem(): string | null {
+    return isEmailLike(identifier) ? null : loginIdProblem(normalizeLoginId(identifier));
+  }
+
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    const problem = identifierProblem();
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setSubmitting(true);
     try {
-      await signInWithEmail(email, password);
+      await signInWithLoginId(identifier, password);
       router.replace(next);
     } catch (err) {
       setError(signInErrorMessage(err));
@@ -92,9 +107,14 @@ function LoginForm() {
   async function handleReset(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
+    const problem = identifierProblem();
+    if (problem) {
+      setError(problem);
+      return;
+    }
     setSubmitting(true);
     try {
-      await sendLoginPasswordReset(email);
+      await sendLoginPasswordReset(identifier);
       setResetSent(true);
     } catch (err) {
       // Projects without email enumeration protection (and the local Auth
@@ -111,8 +131,12 @@ function LoginForm() {
   }
 
   if (mode === "reset") {
+    const sentToEmail = isEmailLike(identifier);
     return (
-      <AuthShell title="로그인 비밀번호 재설정" lead="가입한 이메일로 재설정 링크를 보내 드려요.">
+      <AuthShell
+        title="로그인 비밀번호 재설정"
+        lead="아이디에 등록한 재설정용 이메일로 링크를 보내 드려요."
+      >
         <p className="rounded-2xl bg-fill px-4 py-3 text-sm leading-relaxed text-ink-2">
           로그인 비밀번호만 바꿀 수 있어요. 일기 암호는 어디에도 저장하지 않아서 재설정할 수 없어요. 일기
           암호를 잊었다면 로그인한 뒤 백업 코드로 새 암호를 정해 주세요.
@@ -120,18 +144,20 @@ function LoginForm() {
         {resetSent ? (
           <p role="status" className="flex gap-2 text-[0.9375rem] text-ink">
             <Icon name="check-circle" size={20} className="mt-px shrink-0" />
-            가입한 이메일이라면 재설정 링크를 보냈어요. 메일함을 확인해 주세요.
+            {sentToEmail
+              ? "가입한 이메일이라면 재설정 링크를 보냈어요. 메일함을 확인해 주세요."
+              : "재설정용 이메일을 등록한 아이디라면 그 주소로 링크를 보냈어요. 메일함을 확인해 주세요."}
           </p>
         ) : (
           <form onSubmit={handleReset} className="space-y-4">
             <TextField
-              label="이메일"
-              type="email"
-              autoComplete="email"
+              label="아이디"
+              autoComplete="username"
               autoFocus
-              value={email}
-              onChange={setEmail}
-              placeholder="name@example.com"
+              plain
+              value={identifier}
+              onChange={setIdentifier}
+              hint="이메일로 가입했다면 그 이메일을 넣어 주세요."
             />
             {error && (
               <p role="alert" className="error-text">
@@ -143,6 +169,11 @@ function LoginForm() {
             </button>
           </form>
         )}
+        {!resetSent && (
+          <p className="text-[0.8125rem] leading-relaxed text-ink-3">
+            재설정용 이메일을 등록하지 않았다면 링크를 받을 수 없어요. 로그인할 수 있을 때 설정에서 등록해 두세요.
+          </p>
+        )}
         <button type="button" onClick={() => switchMode("sign-in")} className="btn-text w-full">
           로그인으로 돌아가기
         </button>
@@ -151,15 +182,15 @@ function LoginForm() {
   }
 
   return (
-    <AuthShell title="로그인">
+    <AuthShell title="로그인" after={IS_ANDROID_APP && <DeviceOptions />}>
       <form onSubmit={handleSubmit} className="space-y-4">
         <TextField
-          label="이메일"
-          type="email"
-          autoComplete="email"
-          value={email}
-          onChange={setEmail}
-          placeholder="name@example.com"
+          label="아이디"
+          autoComplete="username"
+          plain
+          value={identifier}
+          onChange={setIdentifier}
+          hint="이메일로 가입했다면 그 이메일을 넣어 주세요."
         />
         <PasswordField
           label="로그인 비밀번호"

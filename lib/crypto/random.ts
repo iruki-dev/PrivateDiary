@@ -8,3 +8,12 @@ import { MASTER_SEED_LENGTH } from "./constants";
 export function generateMasterSeed(): Uint8Array {
   return randomBytes(MASTER_SEED_LENGTH);
 }
+
+/**
+ * A random identifier (not a secret): local diary ids, entry ids on the
+ * phone. Kept here so nothing outside lib/crypto reaches for
+ * crypto.getRandomValues itself (rule 3).
+ */
+export function randomId(byteLength = 15): string {
+  return Array.from(randomBytes(byteLength), (b) => b.toString(16).padStart(2, "0")).join("");
+}

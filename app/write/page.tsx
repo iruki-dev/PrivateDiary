@@ -2,10 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useSeed } from "@/contexts/SeedContext";
-import { writeEntry } from "@/lib/firebase/entries";
 import { LoadingScreen } from "@/components/LoadingState";
+import { AccountGateFallback } from "@/components/AccountGateFallback";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
 import { usePreferences } from "@/contexts/PreferencesContext";
@@ -26,7 +26,9 @@ const draftFormatter = new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", ti
  * architecture's "쓰기는 시드/개인키 없이 가능" requirement.
  */
 export default function WritePage() {
-  const { user } = useAuth();
+  const { account, store, closeBackup } = useAccount();
+  // Drafts are kept per diary (lib/drafts.ts): the account's uid or the local diary's id.
+  const draftOwner = store && !store.readOnly ? store.ownerId : null;
   const { publicKeys, decryptionMethods } = useSeed();
   usePageTitle("오늘의 일기");
   const ready = useAccountGate();
@@ -72,16 +74,16 @@ export default function WritePage() {
   // mount: after this, `text` is whatever the user is currently typing, and
   // re-running would clobber it with a stale copy.
   useEffect(() => {
-    if (!user || !draftAutosave || draftLoadAttemptedRef.current) return;
+    if (!draftOwner || !draftAutosave || draftLoadAttemptedRef.current) return;
     draftLoadAttemptedRef.current = true;
-    const draft = loadDraft(user.uid);
+    const draft = loadDraft(draftOwner);
     if (!draft) return;
     // Reading localStorage is a browser-only side effect keyed to the
     // signed-in uid, so it can't be derived during render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setText(draft.text);
     setRestoredDraftAt(draft.savedAt);
-  }, [user, draftAutosave]);
+  }, [draftOwner, draftAutosave]);
 
   // An entry written on "/" before signing up that signup couldn't save
   // (see app/signup/page.tsx) — put it back in the editor, not lost.
@@ -98,10 +100,10 @@ export default function WritePage() {
   // empty-text write scheduled on mount never lands if a draft restores
   // first — otherwise restoring would immediately erase what it restored.
   useEffect(() => {
-    if (!user || !draftAutosave) return;
-    const timer = setTimeout(() => saveDraft(user.uid, text), 800);
+    if (!draftOwner || !draftAutosave) return;
+    const timer = setTimeout(() => saveDraft(draftOwner, text), 800);
     return () => clearTimeout(timer);
-  }, [user, draftAutosave, text]);
+  }, [draftOwner, draftAutosave, text]);
 
   // Warns before closing/refreshing the tab with unsaved text — losing a
   // half-written diary entry to an accidental tab close is a real, common
@@ -125,16 +127,16 @@ export default function WritePage() {
   }, [text]);
 
   async function submit() {
-    if (!user || !publicKeys || !text.trim()) return;
+    if (!store || !draftOwner || !publicKeys || !text.trim()) return;
     setSubmitting(true);
     setError(null);
     setSavedAt(null);
     try {
-      await writeEntry(user.uid, publicKeys, text);
+      await store.writeEntry(publicKeys, text);
       setText("");
       // The entry is encrypted and stored; the plaintext copy on this
       // device has no reason to outlive that by even a moment.
-      clearDraft(user.uid);
+      clearDraft(draftOwner);
       setRestoredDraftAt(null);
       setSavedAt(new Date());
       haptic("confirm");
@@ -142,7 +144,11 @@ export default function WritePage() {
     } catch (err) {
       console.error("writeEntry failed", err);
       haptic("reject");
-      setError("저장하지 못했어요. 쓴 글은 그대로 있어요. 인터넷 연결을 확인하고 다시 저장해 주세요.");
+      setError(
+        store.kind === "local"
+          ? "저장하지 못했어요. 쓴 글은 그대로 있어요. 다시 저장해 주세요."
+          : "저장하지 못했어요. 쓴 글은 그대로 있어요. 인터넷 연결을 확인하고 다시 저장해 주세요."
+      );
     } finally {
       setSubmitting(false);
     }
@@ -154,8 +160,8 @@ export default function WritePage() {
   }
 
   function discardDraft() {
-    if (!user) return;
-    clearDraft(user.uid);
+    if (!draftOwner) return;
+    clearDraft(draftOwner);
     setText("");
     setRestoredDraftAt(null);
     textareaRef.current?.focus();
@@ -171,7 +177,34 @@ export default function WritePage() {
     }
   }
 
-  if (!ready || !publicKeys || preferencesLoading) {
+  if (!ready) return <AccountGateFallback />;
+
+  if (account?.kind === "backup") {
+    // The phone's backup of an account only reads (lib/store/backup.ts).
+    return (
+      <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-6 sm:px-6 sm:py-16">
+        <div className="card w-full max-w-md space-y-4">
+          <div className="flex gap-3">
+            <Icon name="phone" size={22} className="mt-0.5 shrink-0" />
+            <div className="space-y-1">
+              <p className="text-[1.0625rem] font-bold">휴대폰 백업은 읽기만 할 수 있어요</p>
+              <p className="muted text-sm">새 일기는 서버에 다시 연결해 로그인한 뒤에 쓸 수 있어요.</p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Link href="/entries" className="btn-primary w-full">
+              백업 읽기
+            </Link>
+            <button type="button" onClick={closeBackup} className="btn-secondary w-full">
+              백업 닫기
+            </button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
+  if (!publicKeys || preferencesLoading) {
     // Also waits on preferencesLoading — rendering before the account's
     // privateWritingMode preference has loaded would default to "off" and
     // briefly show the textarea unblurred, defeating the point of the
@@ -280,7 +313,7 @@ export default function WritePage() {
 
           <p className="flex items-center gap-1.5 border-t border-line pt-3 text-[0.8125rem] font-medium text-ink-3">
             <Icon name="lock" size={16} strokeWidth={2} />
-            저장하면 나만 읽을 수 있어요
+            {account?.kind === "local" ? "저장하면 이 휴대폰에만 잠가 둬요" : "저장하면 나만 읽을 수 있어요"}
           </p>
         </div>
       </form>

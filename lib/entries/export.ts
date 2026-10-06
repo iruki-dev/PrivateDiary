@@ -27,6 +27,11 @@ export interface ExportableEntry {
 
 export type ExportFormat = "markdown" | "json";
 
+/** The locked file (lib/crypto/archive.ts) wraps this JSON export; same name, so it reads as the same diary. */
+export function lockedExportFilename(exportedAt: Date = new Date()): string {
+  return `privatediary-locked-${isoDay(exportedAt)}.json`;
+}
+
 export interface ExportFile {
   filename: string;
   mimeType: string;
@@ -49,12 +54,16 @@ function localTimestamp(date: Date): string {
 
 /**
  * Oldest-first, which is the reading order for an archive even though the
- * app's own list is newest-first. Sorted by entrySeq rather than createdAt
- * because entrySeq is the authoritative monotonic order (§3.4) and is
- * present even on an entry whose timestamp hasn't resolved.
+ * app's own list is newest-first. By when each entry was written, then by
+ * entrySeq (§3.4's monotonic order) for entries from the same moment — and
+ * an entry whose timestamp hasn't resolved yet is the newest by
+ * definition, so it goes last. Not entrySeq alone: an entry brought in
+ * from an export file (lib/entries/import.ts) keeps its original date but
+ * gets the next entrySeq.
  */
 function chronological(entries: readonly ExportableEntry[]): ExportableEntry[] {
-  return [...entries].sort((a, b) => a.entrySeq - b.entrySeq);
+  const time = (entry: ExportableEntry) => entry.createdAt?.getTime() ?? Infinity;
+  return [...entries].sort((a, b) => time(a) - time(b) || a.entrySeq - b.entrySeq);
 }
 
 function buildMarkdown(entries: readonly ExportableEntry[], exportedAt: Date): string {

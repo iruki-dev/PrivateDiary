@@ -2,12 +2,12 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { useSeed } from "@/contexts/SeedContext";
 import { loginPathFor } from "@/lib/navigation";
 
 /**
- * Shared entry guard for every page that needs a finished account.
+ * Shared entry guard for every page that needs a finished diary.
  *
  * Signed out → /login, carrying this page as `?next=` so the visitor lands
  * back where they were headed. Before this, each page only rendered its
@@ -15,24 +15,26 @@ import { loginPathFor } from "@/lib/navigation";
  * opening a bookmarked /write or a home-screen shortcut after signing out
  * spun "확인 중..." forever.
  *
- * Signed in without issued keys → /signup, to finish onboarding (this was
- * already duplicated as an effect in each page; it lives here now).
+ * Signed in without issued keys → /signup to finish onboarding, or /local
+ * for the Android app's fully local diary, which is set up there.
  *
- * Returns true once the page may render its real content.
+ * Returns true once the page may render its real content. While it is
+ * false, pages render <AccountGateFallback />, which also covers a key
+ * record that couldn't be read (the server unreachable).
  */
 export function useAccountGate(): boolean {
-  const { status: authStatus } = useAuth();
+  const { status: accountStatus, account } = useAccount();
   const { status: seedStatus } = useSeed();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
-    if (authStatus === "signed-out") {
+    if (accountStatus === "signed-out") {
       router.replace(loginPathFor(pathname));
-    } else if (authStatus === "signed-in" && seedStatus === "not-issued") {
-      router.replace("/signup");
+    } else if (accountStatus === "signed-in" && seedStatus === "not-issued") {
+      router.replace(account?.kind === "local" ? "/local" : "/signup");
     }
-  }, [authStatus, seedStatus, router, pathname]);
+  }, [accountStatus, seedStatus, account?.kind, router, pathname]);
 
-  return authStatus === "signed-in" && seedStatus !== "unknown" && seedStatus !== "not-issued";
+  return accountStatus === "signed-in" && seedStatus !== "unknown" && seedStatus !== "not-issued";
 }

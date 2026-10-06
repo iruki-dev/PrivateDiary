@@ -9,6 +9,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
+import android.provider.OpenableColumns
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -35,6 +36,7 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.edit
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -79,6 +81,22 @@ class MainActivity : FragmentActivity() {
     var keyboardOpen = false
         private set
 
+    /**
+     * Fully local mode (lib/deviceMode.ts): every request that would leave
+     * the phone is refused here, whatever the page asks for. Kept in the
+     * app's private preferences so it is in force from the very first
+     * request after a restart — before the page has even loaded.
+     */
+    // Read from WebView's request thread (shouldInterceptRequest), written on the main thread.
+    @Volatile
+    var networkBlocked = false
+        private set
+
+    fun setNetworkBlocked(blocked: Boolean) {
+        networkBlocked = blocked
+        getSharedPreferences(APP_PREFS, MODE_PRIVATE).edit { putBoolean(NETWORK_BLOCKED, blocked) }
+    }
+
     private var pendingSave: Pair<String, (Boolean) -> Unit>? = null
     private val createDocument = registerForActivityResult(MimeCreateDocument()) { uri ->
         val (content, done) = pendingSave ?: return@registerForActivityResult
@@ -92,6 +110,38 @@ class MainActivity : FragmentActivity() {
         }
         done(saved)
     }
+
+    /**
+     * "불러오기" (import): the person picks one file in Android's own
+     * document picker; the app reads it and hands the page its text. The
+     * page never gets a file path or access to anything else — the same
+     * shape as saveDocument, in the other direction.
+     */
+    private var pendingOpen: ((OpenedFile) -> Unit)? = null
+    private val openDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val done = pendingOpen ?: return@registerForActivityResult
+        pendingOpen = null
+        ownUiDone()
+        if (uri == null) return@registerForActivityResult done(OpenedFile(error = "cancelled"))
+        val name = displayNameOf(uri)
+        Thread {
+            val opened = try {
+                contentResolver.openInputStream(uri)?.use { input ->
+                    val bytes = readAtMost(input, OPEN_MAX_BYTES)
+                    if (bytes == null) {
+                        OpenedFile(error = "too-large")
+                    } else {
+                        OpenedFile(name = name, content = bytes.toString(Charsets.UTF_8))
+                    }
+                } ?: OpenedFile(error = "failed")
+            } catch (_: Exception) {
+                OpenedFile(error = "failed")
+            }
+            runOnUiThread { done(opened) }
+        }.start()
+    }
+
+    class OpenedFile(val name: String? = null, val content: String? = null, val error: String? = null)
 
     private val backCallback = object : OnBackPressedCallback(false) {
         override fun handleOnBackPressed() {
@@ -126,8 +176,13 @@ class MainActivity : FragmentActivity() {
         // Remote inspection of the page (chrome://inspect) only in debug builds.
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
+        networkBlocked = getSharedPreferences(APP_PREFS, MODE_PRIVATE).getBoolean(NETWORK_BLOCKED, false)
         BiometricGate.removeLegacySeedVault(this)
         gate = BiometricGate(this)
+        gate.promptListener = object : BiometricGate.PromptListener {
+            override fun shown() = whileOwnUiShown()
+            override fun dismissed() = ownUiDone()
+        }
         clipboard = SecureClipboard(this)
         assetLoader = WebViewAssetLoader.Builder()
             .setDomain(AppOrigin.HOST)
@@ -279,6 +334,14 @@ class MainActivity : FragmentActivity() {
 
     fun ownUiDone() {
         ownUiShown = max(0, ownUiShown - 1)
+        // Left the app while our own sheet was up (home pressed over the
+        // biometric prompt): onStop said nothing then, so say it now.
+        if (ownUiShown == 0 && stoppedAt == 0L && ::bridge.isInitialized &&
+            !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+        ) {
+            stoppedAt = SystemClock.elapsedRealtime()
+            bridge.emit("lifecycle", JSONObject().put("state", "background"))
+        }
     }
 
     fun saveDocument(filename: String, mimeType: String, content: String, done: (Boolean) -> Unit) {
@@ -292,6 +355,40 @@ class MainActivity : FragmentActivity() {
             ownUiDone()
             done(false)
         }
+    }
+
+    fun openTextDocument(done: (OpenedFile) -> Unit) {
+        if (pendingOpen != null) return done(OpenedFile(error = "busy"))
+        pendingOpen = done
+        whileOwnUiShown()
+        try {
+            // Every type: a .json export isn't labelled the same way by every file manager.
+            openDocument.launch(arrayOf("*/*"))
+        } catch (_: ActivityNotFoundException) {
+            pendingOpen = null
+            ownUiDone()
+            done(OpenedFile(error = "failed"))
+        }
+    }
+
+    /** The whole stream, or null if it is longer than [limit] bytes. */
+    private fun readAtMost(input: java.io.InputStream, limit: Int): ByteArray? {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(64 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) return out.toByteArray()
+            if (out.size() + read > limit) return null
+            out.write(buffer, 0, read)
+        }
+    }
+
+    private fun displayNameOf(uri: Uri): String? = try {
+        contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        }
+    } catch (_: Exception) {
+        null
     }
 
     fun openExternal(uri: Uri) {
@@ -322,7 +419,7 @@ class MainActivity : FragmentActivity() {
         override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
             val url = request.url
             if (AppOrigin.isAppUrl(url.scheme, url.host, url.port)) return assetLoader.shouldInterceptRequest(url)
-            if (AppOrigin.isAllowedNetworkRequest(url.scheme, url.host)) return null
+            if (!networkBlocked && AppOrigin.isAllowedNetworkRequest(url.scheme, url.host)) return null
             // Second wall behind the page's CSP: nothing else leaves the phone.
             return WebResourceResponse("text/plain", "utf-8", 403, "Forbidden", emptyMap(), ByteArrayInputStream(ByteArray(0)))
         }
@@ -401,6 +498,10 @@ class MainActivity : FragmentActivity() {
 
     private companion object {
         const val SPLASH_MAX_MS = 2_500L
+        // Far past any diary export; refuses to pull something enormous into the page.
+        const val OPEN_MAX_BYTES = 32 * 1024 * 1024
+        const val APP_PREFS = "app"
+        const val NETWORK_BLOCKED = "network_blocked"
     }
 }
 

@@ -15,7 +15,16 @@ import { PasswordField, TextField } from "@/components/PasswordField";
 import { SecretReveal } from "@/components/SecretReveal";
 import { SecretCard } from "@/components/SecretCard";
 import { OtpQrCard } from "@/components/OtpQrCard";
-import { LoadingScreen } from "@/components/LoadingState";
+import { AccountGateFallback } from "@/components/AccountGateFallback";
+import { useAccount } from "@/contexts/AccountContext";
+import {
+  EraseLocalDiaryRow,
+  LeaveLocalModeRow,
+  LocalModeRow,
+  NetworkBlockRow,
+  PhoneBackupRow,
+} from "@/components/settings/DeviceRows";
+import { deleteBackup } from "@/lib/store/backup";
 import { usePageTitle } from "@/hooks/usePageTitle";
 import { useAccountGate } from "@/hooks/useAccountGate";
 import { AccountGroup } from "@/components/settings/AccountGroup";
@@ -125,12 +134,28 @@ export default function SettingsPage() {
   } = useSeed();
   usePageTitle("설정");
   const ready = useAccountGate();
+  const { account } = useAccount();
 
   if (!ready) {
-    return <LoadingScreen />;
+    return <AccountGateFallback />;
   }
 
   const shamirConfig = decryptionMethods?.shamir ?? null;
+  const kind = account?.kind ?? "cloud";
+
+  // The phone's read-only copy of an account: nothing here can change it.
+  if (kind === "backup") {
+    return (
+      <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-4 sm:px-6 sm:py-12">
+        <div className="w-full max-w-xl space-y-7">
+          <h1 className="title-display pt-11 sm:pt-0">설정</h1>
+          <AccountGroup />
+        </div>
+      </main>
+    );
+  }
+
+  const local = kind === "local";
 
   return (
     <main className="flex flex-1 flex-col items-center px-5 pb-10 pt-4 sm:px-6 sm:py-12">
@@ -176,10 +201,13 @@ export default function SettingsPage() {
                   />
                 )}
                 <AutoLockRow />
-                <OtpRow
-                  stageSeedFromPassphrase={stageSeedFromPassphrase}
-                  discardStagedSeed={discardStagedSeed}
-                />
+                {/* 2-step verification is the server's gate; a local diary has no server. */}
+                {!local && (
+                  <OtpRow
+                    stageSeedFromPassphrase={stageSeedFromPassphrase}
+                    discardStagedSeed={discardStagedSeed}
+                  />
+                )}
                 {/* Same footing as OTP: an extra check, never a replacement for the passphrase. */}
                 {IS_ANDROID_APP && <BiometricGateRow />}
               </SettingsGroup>
@@ -187,26 +215,39 @@ export default function SettingsPage() {
               <SettingsGroup id="writing" title="쓰기">
                 <PrivateWritingRows />
                 <DraftAutosaveRow />
-                <DailyEntryLimitRow
-                  shamirConfig={shamirConfig}
-                  stageSeedFromPassphrase={stageSeedFromPassphrase}
-                  stageSeedFromShamirShares={stageSeedFromShamirShares}
-                  discardStagedSeed={discardStagedSeed}
-                />
+                {/* The daily limit bounds what a stolen session can pile onto
+                    the server (functions/src/entryRateLimit.ts); nothing to
+                    bound on a diary that never leaves the phone. */}
+                {!local && (
+                  <DailyEntryLimitRow
+                    shamirConfig={shamirConfig}
+                    stageSeedFromPassphrase={stageSeedFromPassphrase}
+                    stageSeedFromShamirShares={stageSeedFromShamirShares}
+                    discardStagedSeed={discardStagedSeed}
+                  />
+                )}
               </SettingsGroup>
 
               <SettingsGroup id="data" title="데이터">
                 <SettingsLinkRow
                   href="/entries"
-                  label="일기 내보내기"
-                  description="일기장 맨 아래에서 Markdown이나 JSON 파일로 받을 수 있어요"
+                  label="일기 내보내기 · 불러오기"
+                  description="일기장 맨 아래에서 파일로 받거나, 받은 파일에서 다시 가져올 수 있어요"
                 />
-                <DeleteAccountRow
-                  stageSeedFromPassphrase={stageSeedFromPassphrase}
-                  stageSeedFromShamirShares={stageSeedFromShamirShares}
-                  discardStagedSeed={discardStagedSeed}
-                  decryptionMethods={decryptionMethods}
-                />
+                {IS_ANDROID_APP && !local && <PhoneBackupRow />}
+                {IS_ANDROID_APP && !local && <LocalModeRow />}
+                {local && <NetworkBlockRow />}
+                {local && <LeaveLocalModeRow />}
+                {local ? (
+                  <EraseLocalDiaryRow />
+                ) : (
+                  <DeleteAccountRow
+                    stageSeedFromPassphrase={stageSeedFromPassphrase}
+                    stageSeedFromShamirShares={stageSeedFromShamirShares}
+                    discardStagedSeed={discardStagedSeed}
+                    decryptionMethods={decryptionMethods}
+                  />
+                )}
               </SettingsGroup>
             </div>
           </BiometricGate>
@@ -232,6 +273,7 @@ function PrivateWritingRows() {
     setPrivateWritingMode,
     setPrivateWritingPeekAllowed,
   } = usePreferences();
+  const local = useAccount().account?.kind === "local";
 
   if (loading) return null;
 
@@ -239,7 +281,11 @@ function PrivateWritingRows() {
     <>
       <SettingsRow
         label="쓰는 글 가리기"
-        description="옆 사람이 보지 못하게 쓰는 동안 글자를 흐리게 보여줘요. 모든 기기에 적용돼요."
+        description={
+          local
+            ? "옆 사람이 보지 못하게 쓰는 동안 글자를 흐리게 보여줘요."
+            : "옆 사람이 보지 못하게 쓰는 동안 글자를 흐리게 보여줘요. 모든 기기에 적용돼요."
+        }
         control={
           <Switch
             label="쓰는 글 가리기"
@@ -1293,6 +1339,8 @@ function DeleteAccountRow({
   async function attemptDelete() {
     try {
       await deleteAccount(otpEnabled ? code : undefined);
+      // The phone's copy of the account goes with it (Android app).
+      if (user) await deleteBackup(user.uid).catch(() => {});
       // The auth user no longer exists server-side; signing out clears the
       // local session (and, via SeedContext, staged seed, keys and drafts).
       await signOut();

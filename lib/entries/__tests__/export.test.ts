@@ -52,6 +52,19 @@ describe("buildExportFile", () => {
     expect(parsed.entries[1].createdAt).toBeNull();
   });
 
+  it("puts an imported entry at its own date, though its entrySeq is newer", () => {
+    const { content } = buildExportFile(
+      [
+        entry({ entrySeq: 1, createdAt: new Date(2026, 8, 1), text: "구월" }),
+        entry({ entrySeq: 2, createdAt: new Date(2024, 0, 1), text: "불러온 옛 일기" }),
+      ],
+      "json",
+      AT
+    );
+    const parsed = JSON.parse(content) as { entries: { text: string }[] };
+    expect(parsed.entries.map((e) => e.text)).toEqual(["불러온 옛 일기", "구월"]);
+  });
+
   it("states in both formats that the archive is not encrypted", () => {
     expect(buildExportFile([entry()], "markdown", AT).content).toContain("암호화되어 있지 않습니다");
     expect(JSON.parse(buildExportFile([entry()], "json", AT).content).warning).toContain(

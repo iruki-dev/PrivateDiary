@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "re
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { usePendingEntry } from "@/contexts/PendingEntryContext";
-import { useAuth } from "@/contexts/AuthContext";
+import { useAccount } from "@/contexts/AccountContext";
 import { LoadingState } from "@/components/LoadingState";
 import { TodayLabel } from "@/components/TodayLabel";
 
@@ -16,7 +16,7 @@ import { TodayLabel } from "@/components/TodayLabel";
  */
 export function VisitorComposer() {
   const router = useRouter();
-  const { status: authStatus } = useAuth();
+  const { status: authStatus } = useAccount();
   const { setPendingEntry } = usePendingEntry();
   const [text, setText] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);

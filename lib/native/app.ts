@@ -85,3 +85,22 @@ export function reportAutofillAllowed(allowed: boolean): void {
 export function reportReady(): void {
   void callNative("app.ready").catch(() => {});
 }
+
+/**
+ * Fully local mode (lib/deviceMode.ts): the app refuses every request that
+ * would leave the phone — the page's own CSP aside, as a second wall in
+ * the app itself — and keeps refusing across restarts until this is
+ * called with false.
+ */
+export async function setNetworkBlocked(blocked: boolean): Promise<void> {
+  await callNative("app.network", { blocked });
+}
+
+/**
+ * Opens Android's document picker and returns the chosen file's text.
+ * Rejects with NativeError("cancelled") if the person backed out, and
+ * "too-large" for anything over the app's limit.
+ */
+export async function openTextFile(): Promise<{ name: string | null; content: string }> {
+  return callNative<{ name: string | null; content: string }>("file.open", {}, { timeoutMs: null });
+}

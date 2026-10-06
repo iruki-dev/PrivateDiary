@@ -33,7 +33,7 @@ export default function PassphrasePage() {
           </tr>
           <tr>
             <th scope="row" className="font-medium">잊었을 때</th>
-            <td>이메일로 재설정</td>
+            <td>재설정용 이메일로 재설정</td>
             <td>백업 코드로만 새로 설정</td>
           </tr>
         </tbody>
