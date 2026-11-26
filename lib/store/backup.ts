@@ -14,6 +14,15 @@
  * disappears from the server stays in the copy, since "the server lost
  * it" is exactly what this is for.
  *
+ * For the same reason the server is not trusted to change what the copy
+ * already holds: an entry already in the copy is never replaced (entries
+ * can't be edited on the server, so a different ciphertext under the same
+ * id can only be a broken or tampered server), and a key record whose
+ * public keys differ from the copy's is refused. The passphrase and
+ * backup-code wrappings do follow the server, so changing a credential
+ * reaches the copy — but only when this phone next reads the account
+ * online (see README, "이 휴대폰에 백업하기").
+ *
  * The one thing it changes about the account's protection, stated in the
  * UI where it is switched on: 2-step verification is enforced by the
  * server when entries are fetched, so it can't guard a copy that is
@@ -91,18 +100,44 @@ export async function startBackup(uid: string, label: string, keys: KeyRecordSto
   });
 }
 
-/** Refreshes the copied key record — only if the backup is on for `uid`. */
+/** The server sent public keys that don't match the copy's: refused, the copy is left as it was. */
+export class BackupKeyMismatchError extends Error {
+  constructor() {
+    super("The server's public keys differ from the phone backup's; the backup was left unchanged");
+    this.name = "BackupKeyMismatchError";
+  }
+}
+
+function samePublicKeys(a: KeyRecordStorage["publicKeys"], b: KeyRecordStorage["publicKeys"]): boolean {
+  return (
+    a.mlkem768 === b.mlkem768 &&
+    a.x25519.kty === b.x25519.kty &&
+    a.x25519.crv === b.x25519.crv &&
+    a.x25519.x === b.x25519.x
+  );
+}
+
+/**
+ * Refreshes the copied key record — only if the backup is on for `uid`.
+ * The public keys never change for an account, so a record with other
+ * public keys is refused (BackupKeyMismatchError) rather than letting the
+ * server swap the copy's keys.
+ */
 export async function saveBackupKeyRecord(uid: string, keys: KeyRecordStorage): Promise<void> {
   await writeTransaction([STORES.backups], async (tx) => {
     const existing = await txGet<BackupRecord>(tx, STORES.backups, uid);
     if (!existing) return;
+    if (!samePublicKeys(existing.publicKeys, keys.publicKeys)) throw new BackupKeyMismatchError();
     await txPut(tx, STORES.backups, { ...existing, ...keys, updatedAt: Date.now() });
   });
 }
 
 /**
- * Adds (or refreshes) entries in the copy — only if the backup is on for
- * `uid`. Never removes one. `lastEntrySeq` only moves forward.
+ * Adds new entries to the copy — only if the backup is on for `uid`. Never
+ * removes one, and never replaces one already there: the only thing taken
+ * for an entry already in the copy is its date, when the copy had none yet
+ * (an entry copied before its server time resolved). `lastEntrySeq` only
+ * moves forward.
  */
 export async function mergeBackupEntries(
   uid: string,
@@ -113,6 +148,13 @@ export async function mergeBackupEntries(
     const existing = await txGet<BackupRecord>(tx, STORES.backups, uid);
     if (!existing) return;
     for (const entry of entries) {
+      const already = await txGet<BackupEntryRecord>(tx, STORES.backupEntries, [uid, entry.id]);
+      if (already) {
+        if (already.createdAt === null && entry.createdAt !== null && already.entrySeq === entry.entrySeq) {
+          await txPut(tx, STORES.backupEntries, { ...already, createdAt: entry.createdAt });
+        }
+        continue;
+      }
       const record: BackupEntryRecord = { ...entry, uid };
       await txPut(tx, STORES.backupEntries, record);
     }

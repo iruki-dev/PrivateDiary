@@ -20,6 +20,7 @@ import {
   parseRecoveryEmail,
   resetMailMessage,
 } from "./loginId";
+import { RESET_REQUEST_FLOOR_MS, withResponseFloor } from "./responseFloor";
 import {
   decideRateLimit,
   resolveDailyEntryLimit,
@@ -684,16 +685,30 @@ export const requestLoginPasswordReset = onCall({ invoker: "public" }, async (re
   if (!loginId) throw new HttpsError("invalid-argument", "A valid id is required.");
   const email = loginIdToEmail(loginId);
 
+  // Every valid request answers the same way and after the same time
+  // (functions/src/responseFloor.ts), so neither the answer nor its timing
+  // tells whether the id exists or has a reset email.
+  await withResponseFloor(RESET_REQUEST_FLOOR_MS, async () => {
+    try {
+      await sendLoginPasswordResetMail(loginId, email);
+    } catch (err) {
+      console.error("requestLoginPasswordReset failed", err);
+    }
+  });
+  return { ok: true };
+});
+
+async function sendLoginPasswordResetMail(loginId: string, email: string): Promise<void> {
   let uid: string;
   try {
     uid = (await getAuth().getUserByEmail(email)).uid;
   } catch {
-    return { ok: true };
+    return;
   }
   const db = getFirestore();
   const recovery = await db.collection(ACCOUNT_RECOVERY_COLLECTION).doc(uid).get();
   const to = recovery.data()?.email;
-  if (typeof to !== "string" || to.length === 0) return { ok: true };
+  if (typeof to !== "string" || to.length === 0) return;
 
   const throttleRef = db.collection(RESET_MAIL_THROTTLE_COLLECTION).doc(uid);
   const now = Date.now();
@@ -704,9 +719,8 @@ export const requestLoginPasswordReset = onCall({ invoker: "public" }, async (re
     tx.set(throttleRef, { lastSentAt: Timestamp.fromMillis(now) });
     return true;
   });
-  if (!allowed) return { ok: true };
+  if (!allowed) return;
 
   const link = await getAuth().generatePasswordResetLink(email);
   await db.collection(MAIL_COLLECTION).add({ to, message: resetMailMessage(loginId, link) });
-  return { ok: true };
-});
+}

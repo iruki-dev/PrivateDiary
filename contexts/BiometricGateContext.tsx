@@ -38,9 +38,23 @@ import {
  * A new fingerprint or face invalidates the check (BiometricGate.kt). For
  * an account the way back is re-proving the login. A local diary has no
  * login, and the phone's copy is opened precisely when the server can't
- * be reached — so for those the check steps aside ("degraded") and the
- * diary passphrase alone opens it, saying so on screen; a local diary
- * then switches the stale check off once the passphrase has proven itself.
+ * be reached — so for those ("degraded") the backup codes are the way in,
+ * exactly as they are around a check that is still working. The diary
+ * passphrase alone is NOT enough: someone who knows the phone's PIN and
+ * the passphrase could otherwise skip the check just by enrolling their
+ * own fingerprint, which is the very thing the check is there to stop.
+ *
+ * The one exception is a local diary that has no backup codes: nothing
+ * else could ever open it again, so the person may choose to open it with
+ * the passphrase alone (`stepAside`), with the screen saying what that
+ * gives up. Turning the check on for a local diary asks for backup codes
+ * first (components/settings/BiometricGateRow), so this is only reached by
+ * a diary set up before that, or whose codes were later removed.
+ *
+ * Once a local diary is open again, the stale check is switched off
+ * (`settleDegraded`) and can be turned on again in settings. The phone's
+ * copy keeps asking for the backup codes until the account's login is
+ * re-proved online.
  */
 interface BiometricGateContextValue {
   /** Still asking the app whether the check is on. Treated as "not passed". */
@@ -62,10 +76,18 @@ interface BiometricGateContextValue {
   refresh: () => Promise<void>;
   /**
    * The check was invalidated on a diary that has no login to re-prove
-   * (local, or the phone's copy): the passphrase is allowed without it.
+   * (local, or the phone's copy): only the backup codes open it.
    */
   degraded: boolean;
-  /** After a degraded local diary was opened with its passphrase: switches the stale check off. */
+  /**
+   * A degraded local diary with no backup codes: lets the passphrase open
+   * it without the check, since nothing else could. Ignored for any other
+   * diary. The caller makes sure there really are no backup codes.
+   */
+  stepAside: () => void;
+  /** Whether `stepAside` was used for the diary that is open now. */
+  steppedAside: boolean;
+  /** After a degraded local diary was opened: switches the stale check off. */
   settleDegraded: () => Promise<void>;
 }
 
@@ -78,6 +100,7 @@ export function BiometricGateProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<BiometricGateStatus | null>(null);
   const [loading, setLoading] = useState(IS_ANDROID_APP);
   const [passed, setPassed] = useState(false);
+  const [steppedAside, setSteppedAside] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!IS_ANDROID_APP) return;
@@ -101,6 +124,7 @@ export function BiometricGateProvider({ children }: { children: ReactNode }) {
     // Asks the app (an async bridge call) — can't be derived during render.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPassed(false);
+    setSteppedAside(false);
     void refresh();
   }, [refresh]);
 
@@ -123,15 +147,23 @@ export function BiometricGateProvider({ children }: { children: ReactNode }) {
   }, [gateId]);
 
   const markPassed = useCallback(() => setPassed(true), []);
-  const clearPass = useCallback(() => setPassed(false), []);
+  const clearPass = useCallback(() => {
+    setPassed(false);
+    setSteppedAside(false);
+  }, []);
 
   const degraded = status?.invalidated === true && (accountKind === "local" || accountKind === "backup");
+
+  const stepAside = useCallback(() => {
+    if (degraded && accountKind === "local") setSteppedAside(true);
+  }, [degraded, accountKind]);
 
   const settleDegraded = useCallback(async () => {
     if (!degraded || accountKind !== "local" || !gateId) return;
     try {
       await resetBiometricGate(gateId);
     } finally {
+      setSteppedAside(false);
       await refresh();
     }
   }, [degraded, accountKind, gateId, refresh]);
@@ -139,11 +171,23 @@ export function BiometricGateProvider({ children }: { children: ReactNode }) {
   // Fail closed in the app: until the app has said the check is off, it is
   // treated as on — except when signed out, where there's nothing to guard.
   const enabledOrUnknown = IS_ANDROID_APP && !!gateId && (status === null || status.enabled);
-  const required = enabledOrUnknown && !passed && !degraded;
+  const required = enabledOrUnknown && !passed && !(steppedAside && degraded && accountKind === "local");
 
   return (
     <BiometricGateContext.Provider
-      value={{ loading, status, required, verify, markPassed, clearPass, refresh, degraded, settleDegraded }}
+      value={{
+        loading,
+        status,
+        required,
+        verify,
+        markPassed,
+        clearPass,
+        refresh,
+        degraded,
+        stepAside,
+        steppedAside,
+        settleDegraded,
+      }}
     >
       {children}
     </BiometricGateContext.Provider>

@@ -174,6 +174,7 @@ export default function SettingsPage() {
           {/* Same as OTP: the biometric check (Android app) comes before
               anything here that takes the diary passphrase. */}
           <BiometricGate
+            hasBackupCodes={!!shamirConfig}
             footer={
               shamirConfig && (
                 <Link href="/entries" className="btn-text w-full text-center text-sm">
@@ -193,7 +194,7 @@ export default function SettingsPage() {
                   confirmPendingShamir={confirmPendingShamir}
                   disableShamir={disableShamir}
                 />
-                <ChangePassphraseRow changePassphrase={changePassphrase} />
+                <ChangePassphraseRow changePassphrase={changePassphrase} account={!local} />
                 {shamirConfig && (
                   <ResetPassphraseRow
                     config={shamirConfig}
@@ -209,7 +210,7 @@ export default function SettingsPage() {
                   />
                 )}
                 {/* Same footing as OTP: an extra check, never a replacement for the passphrase. */}
-                {IS_ANDROID_APP && <BiometricGateRow />}
+                {IS_ANDROID_APP && <BiometricGateRow hasBackupCodes={!!shamirConfig} />}
               </SettingsGroup>
 
               <SettingsGroup id="writing" title="쓰기">
@@ -540,8 +541,11 @@ function DailyEntryLimitRow({
 
 function ChangePassphraseRow({
   changePassphrase,
+  account,
 }: {
   changePassphrase: (oldPassphrase: string, newPassphrase: string) => Promise<void>;
+  /** A cloud account: other phones may keep a backup of it (lib/store/backup.ts). */
+  account: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [oldPassphrase, setOldPassphrase] = useState("");
@@ -630,6 +634,13 @@ function ChangePassphraseRow({
             value={confirmPassphrase}
             onChange={setConfirmPassphrase}
           />
+          {/* A phone's backup takes the new wrapping only when that phone next reads the account online. */}
+          {account && (
+            <p className="muted text-sm">
+              다른 휴대폰에 켜 둔 휴대폰 백업은, 그 휴대폰이 인터넷에 연결된 채로 앱을 열 때 새 일기 암호로 바뀌어요. 그
+              전까지는 그 휴대폰의 백업이 지금 일기 암호로 열려요.
+            </p>
+          )}
           <FormError>{error}</FormError>
           <PanelActions submitLabel="바꾸기" busyLabel="바꾸는 중…" busy={submitting} onCancel={cancel} />
         </form>

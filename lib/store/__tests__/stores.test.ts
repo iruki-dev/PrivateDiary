@@ -10,6 +10,7 @@ import {
 } from "@/lib/crypto";
 import { deleteLocalDiary, LocalStore, localDiaryExists } from "../local";
 import {
+  BackupKeyMismatchError,
   BackupStore,
   deleteBackup,
   getBackupSummary,
@@ -164,6 +165,44 @@ describe("phone backup of an account", () => {
     expect(entries.map((e) => e.id)).toEqual(["e3", "e2", "e1"]);
     expect(integrity.ok).toBe(true);
     expect((await copy.getKeyRecord())?.publicKeys).toEqual(publicKeys);
+  });
+
+  it("never lets the server replace an entry already in the copy, but fills in a missing date", async () => {
+    const { publicKeys, wrappedSeed } = await freshKeys();
+    const keys = keyRecordToStorage({ publicKeys, wrappedSeed, decryptionMethods: { shamir: null }, shamirWrappedSeed: null });
+    await startBackup(uid, "diary_kim", keys);
+    const pending = { ...record("e1", 1), createdAt: null };
+    await mergeBackupEntries(uid, [pending], 1);
+    // A later listing: same id, its date resolved — but a different ciphertext.
+    await mergeBackupEntries(uid, [record("e1", 1, "dGFtcGVyZWQ=")], 1);
+
+    const { entries } = await new BackupStore(uid).listEntries();
+    expect(entries).toHaveLength(1);
+    // "Y3Q=" is "ct": the copy kept the ciphertext it had first.
+    expect(Buffer.from(entries[0].payload!.ciphertext).toString()).toBe("ct");
+    expect(entries[0].createdAt?.toDate().getTime()).toBe(Date.UTC(2026, 0, 1));
+  });
+
+  it("refuses a key record with other public keys, and takes a new wrapping for the same keys", async () => {
+    const seed = generateMasterSeed();
+    const { publicKeys } = deriveHybridKeyPair(seed);
+    const oldWrap = await wrapSeed(seed, "old passphrase 1234");
+    await startBackup(uid, "diary_kim", keyRecordToStorage({ publicKeys, wrappedSeed: oldWrap, decryptionMethods: { shamir: null }, shamirWrappedSeed: null }));
+
+    const other = await freshKeys();
+    await expect(
+      saveBackupKeyRecord(uid, keyRecordToStorage({ publicKeys: other.publicKeys, wrappedSeed: other.wrappedSeed, decryptionMethods: { shamir: null }, shamirWrappedSeed: null }))
+    ).rejects.toBeInstanceOf(BackupKeyMismatchError);
+    const kept = await new BackupStore(uid).getKeyRecord();
+    expect(kept?.publicKeys).toEqual(publicKeys);
+    expect(await unwrapSeed(kept!.wrappedSeed, "old passphrase 1234")).toEqual(seed);
+
+    // A passphrase change on the server reaches the copy: the old one no longer opens it.
+    const newWrap = await wrapSeed(seed, "new passphrase 5678");
+    await saveBackupKeyRecord(uid, keyRecordToStorage({ publicKeys, wrappedSeed: newWrap, decryptionMethods: { shamir: null }, shamirWrappedSeed: null }));
+    const updated = await new BackupStore(uid).getKeyRecord();
+    await expect(unwrapSeed(updated!.wrappedSeed, "old passphrase 1234")).rejects.toThrow();
+    expect(await unwrapSeed(updated!.wrappedSeed, "new passphrase 5678")).toEqual(seed);
   });
 
   it("opens read-only", async () => {

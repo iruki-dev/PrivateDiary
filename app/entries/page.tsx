@@ -551,6 +551,7 @@ export default function EntriesPage() {
                 // Like OTP: the biometric check comes before the passphrase
                 // can even be tried; the backup codes are the way around it.
                 <BiometricGate
+                  hasBackupCodes={!!decryptionMethods?.shamir}
                   footer={
                     decryptionMethods?.shamir && (
                       <button type="button" onClick={() => switchMode("shamir")} className="btn-text w-full">

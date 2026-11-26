@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useAccount } from "@/contexts/AccountContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useBiometricGate } from "@/contexts/BiometricGateContext";
 import { BiometricGateError, haptic, resetBiometricGate } from "@/lib/native/app";
@@ -33,14 +34,29 @@ function gateMessage(code: string): string | null {
  * `footer` shows only while the gate is up: the caller's way around it
  * with the backup codes, exactly as OtpGate's footer.
  *
+ * `hasBackupCodes` says whether this diary has backup codes. It only
+ * matters for a local diary whose check was invalidated by a new
+ * fingerprint or face: with codes, the codes are the only way in; without
+ * any, the person may open it with the passphrase alone, since nothing
+ * else could (contexts/BiometricGateContext).
+ *
  * Once `children` have been shown, they stay mounted (hidden and inert)
  * while the gate is up again, so leaving the app mid-way through a
  * settings step — copying a new backup code into a password manager —
  * doesn't throw that step away; it's simply behind the check again.
  */
-export function BiometricGate({ children, footer }: { children: ReactNode; footer?: ReactNode }) {
+export function BiometricGate({
+  children,
+  footer,
+  hasBackupCodes = false,
+}: {
+  children: ReactNode;
+  footer?: ReactNode;
+  hasBackupCodes?: boolean;
+}) {
   const { user } = useAuth();
-  const { loading, status, required, verify, refresh, degraded } = useBiometricGate();
+  const { account } = useAccount();
+  const { loading, status, required, verify, refresh, degraded, stepAside, steppedAside } = useBiometricGate();
   const [error, setError] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
   const [revealed, setRevealed] = useState(!required);
@@ -154,14 +170,13 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
     </div>
   ) : null;
 
-  if (degraded && !required) {
+  if (steppedAside && !required) {
     return (
       <>
         <p className="note-warn w-full">
           <Icon name="fingerprint" size={18} className="mt-0.5 shrink-0" />
           <span>
-            휴대폰에 새 지문이나 얼굴이 등록돼서 생체 인증을 확인할 수 없어요. 일기 암호로 열 수 있고, 생체 인증은 설정에서
-            다시 켤 수 있어요.
+            생체 인증 없이 일기 암호만으로 열어요. 열고 나면 생체 인증이 꺼지니, 백업 코드를 만든 뒤 설정에서 다시 켜 주세요.
           </span>
         </p>
         {content}
@@ -172,6 +187,42 @@ export function BiometricGate({ children, footer }: { children: ReactNode; foote
   if (loading) return <LoadingState />;
 
   const isGoogleAccount = user?.providerData.some((p) => p.providerId === "google.com") ?? false;
+  const localWithoutCodes = degraded && account?.kind === "local" && !hasBackupCodes;
+
+  if (degraded) {
+    // No login to re-prove (a local diary, or the phone's copy): the backup
+    // codes — the caller's footer — are the way in, never the passphrase alone.
+    return (
+      <>
+        {content}
+        <div className="w-full space-y-2">
+          <div className="card space-y-5">
+            <div className="flex gap-3">
+              <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-on-primary">
+                <Icon name="fingerprint" size={22} />
+              </span>
+              <div className="space-y-0.5">
+                <h2 className="text-[1.0625rem] font-bold">생체 정보가 바뀌었어요</h2>
+                <p className="muted text-sm">
+                  {account?.kind === "backup"
+                    ? "휴대폰에 새 지문이나 얼굴이 등록됐어요. 이 백업은 이제 백업 코드로만 열 수 있어요. 인터넷이 될 때 계정에 로그인하면 생체 인증을 다시 설정할 수 있어요."
+                    : localWithoutCodes
+                      ? "휴대폰에 새 지문이나 얼굴이 등록됐어요. 이 일기장은 백업 코드가 없어서 일기 암호만으로 열 수 있어요. 휴대폰 잠금과 일기 암호를 아는 사람도 열 수 있게 되니, 연 뒤에 백업 코드를 만들어 주세요."
+                      : "휴대폰에 새 지문이나 얼굴이 등록됐어요. 이 일기장은 이제 백업 코드로만 열 수 있어요. 열고 나면 설정에서 생체 인증을 다시 켤 수 있어요."}
+                </p>
+              </div>
+            </div>
+            {localWithoutCodes && (
+              <button type="button" onClick={stepAside} className="btn-primary min-h-14 w-full rounded-2xl text-[1.0625rem]">
+                일기 암호로 열기
+              </button>
+            )}
+          </div>
+          {footer}
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
